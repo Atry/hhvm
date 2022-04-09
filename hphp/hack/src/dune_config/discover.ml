@@ -12,6 +12,20 @@ let () =
           String.split_on_char ' ' s
       in
       let flags = ["-ccopt"; "-lpthread"] in
+      let cc = Sys.getenv "CC" in
+      let flags =
+        if cc = "" then
+          flags @ ["-cc"; cc]
+        else
+          flags
+      in
+      let osx_sysroot = Sys.getenv "CMAKE_OSX_SYSROOT" in
+      let flags =
+        if cc = "" then
+          flags @ ["-ccopt"; "-isysroot"^osx_sysroot]
+        else
+          flags
+      in
       let flags =
         match C.ocaml_config_var_exn c "system" with
         (* ocaml builds with `-no_compact_unwind`, which breaks libunwind on

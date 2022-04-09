@@ -8,6 +8,12 @@
   (flags
    (:standard
     (:include config/c_flags.sexp))))
+ (library_flags
+  (:standard
+   (:include config/library_flags.sexp)))
+ (flags
+  (:standard
+   (:include config/flags.sexp)))
  (c_library_flags
   (:standard
    (:include config/c_library_flags.sexp)))

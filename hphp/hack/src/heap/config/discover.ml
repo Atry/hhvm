@@ -41,5 +41,22 @@ let process_env () =
 let () =
   C.main ~name:"heap" (fun (_ : C.t) ->
       let (cflags, cldflags) = process_env () in
+      let flags = [] in
+      let cc = Sys.getenv "CC" in
+      let flags =
+        if cc = "" then
+          flags @ ["-cc"; cc]
+        else
+          flags
+      in
+      let osx_sysroot = Sys.getenv "CMAKE_OSX_SYSROOT" in
+      let flags =
+        if cc = "" then
+          flags @ ["-ccopt"; "-isysroot"^osx_sysroot]
+        else
+          flags
+      in
+      C.Flags.write_sexp "flags.sexp" flags;
+      C.Flags.write_sexp "library_flags.sexp" flags;
       C.Flags.write_sexp "c_flags.sexp" cflags;
       C.Flags.write_sexp "c_library_flags.sexp" cldflags)

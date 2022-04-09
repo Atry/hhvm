@@ -52,6 +52,10 @@ add_custom_command(
   OUTPUT "${OPAM_STAMP_FILE}"
   DEPENDS opam opam_setup.sh
   COMMAND
+    CC=${CMAKE_C_COMPILER}
+    CXX=${CMAKE_CXX_COMPILER}
+    CFLAGS=${ISYSROOT_FLAG}
+    CXXFLAGS=${ISYSROOT_FLAG}
     ${CMAKE_CURRENT_SOURCE_DIR}/opam_setup.sh
     "${OPAM_EXECUTABLE}"
     "${DUNE_BUILD_DIR}"
