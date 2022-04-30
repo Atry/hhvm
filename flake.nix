@@ -239,13 +239,16 @@ rec {
                 "-DFOLLY_MOBILE=0"
               ];
 
-              cmakeFlags = [
-                "-DHAVE_SYSTEM_TZDATA:BOOL=ON"
-                "-DHAVE_SYSTEM_TZDATA_PREFIX=${tzdata}/share/zoneinfo"
-                "-DMYSQL_UNIX_SOCK_ADDR=/run/mysqld/mysqld.sock"
-                "-DCAN_USE_SYSTEM_ZSTD:BOOL=ON"
-                "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15"
-              ];
+              cmakeFlags =
+                [
+                  "-DHAVE_SYSTEM_TZDATA:BOOL=ON"
+                  "-DHAVE_SYSTEM_TZDATA_PREFIX=${tzdata}/share/zoneinfo"
+                  "-DMYSQL_UNIX_SOCK_ADDR=/run/mysqld/mysqld.sock"
+                  "-DCAN_USE_SYSTEM_ZSTD:BOOL=ON"
+                ]
+                ++ lib.optionals hostPlatform.isMacOS [
+                  "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15"
+                ];
 
               prePatch = ''
                 patchShebangs .
