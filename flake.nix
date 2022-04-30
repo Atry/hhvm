@@ -62,17 +62,21 @@ rec {
               version = builtins.substring 0 8 self.lastModifiedDate;
 
               src = ./.;
-              nativeBuildInputs = [
-                cmake
-                pkg-config
-                flex
-                bison
-                cacert
-                python3
-                patchelf
-                which
-                unixtools.getconf
-              ];
+              nativeBuildInputs =
+                [
+                  cmake
+                  pkg-config
+                  flex
+                  bison
+                  cacert
+                  python3
+                  patchelf
+                  which
+                  unixtools.getconf
+                ]
+                ++ lib.optionals hostPlatform.isLinux [
+                  apt # opam will try to execute apt-cache on Ubuntu
+                ];
               buildInputs =
                 [
                   boost
