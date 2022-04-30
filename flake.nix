@@ -229,8 +229,11 @@ rec {
                   linux-pam
                 ];
 
-              # Workaround for https://github.com/facebook/folly/issues/1673
-              NIX_CFLAGS_COMPILE = ["-DFOLLY_MOBILE=0"];
+              NIX_CFLAGS_COMPILE = [
+                # Workaround for dtoa.0.3.2
+                "-Wno-error=unused-command-line-argument"
+                "-DFOLLY_MOBILE=0"
+              ];
 
               cmakeFlags = [
                 "-DHAVE_SYSTEM_TZDATA:BOOL=ON"
