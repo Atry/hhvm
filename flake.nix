@@ -137,11 +137,14 @@ rec {
                   darwin.apple_sdk.frameworks.CoreServices
                 ];
 
-              NIX_CFLAGS_COMPILE = [
-                # Workaround for dtoa.0.3.2
-                "-Wno-error=unused-command-line-argument"
-                "-DFOLLY_MOBILE=0"
-              ];
+              NIX_CFLAGS_COMPILE =
+                [
+                  "-DFOLLY_MOBILE=0"
+                ]
+                ++ lib.optionals hostPlatform.isMacOS [
+                  # Workaround for dtoa.0.3.2
+                  "-Wno-error=unused-command-line-argument"
+                ];
 
               cmakeFlags =
                 [

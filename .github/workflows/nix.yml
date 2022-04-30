@@ -1,0 +1,18 @@
+name: Nix CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      # Run tests on all OS's and HHVM versions, even if one fails
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest , macos-latest ]
+    runs-on: ${{matrix.os}}
+    steps:
+    - uses: actions/checkout@v2.4.0
+    - uses: cachix/install-nix-action@v15
+    - run: nix build --print-build-logs --experimental-features 'nix-command flakes' --option sandbox false "git+file://$(pwd)?submodules=1&shallow=1"
