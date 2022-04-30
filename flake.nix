@@ -14,11 +14,12 @@ rec {
           with import nixpkgs {
             inherit system;
             overlays = [
-              ({zlib, ...}: {
+              (self: {
                 lib,
                 stdenv,
                 fetchurl,
                 libelf,
+                zlib,
                 ...
               }: {
                 # This overlay is a polyfill of the following PR and can be removed
