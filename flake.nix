@@ -76,6 +76,7 @@ rec {
                 ]
                 ++ lib.optionals hostPlatform.isLinux [
                   apt # opam will try to execute apt-cache on Ubuntu
+                  dpkg # opam will try to execute dpkg-query on Ubuntu
                 ];
               buildInputs =
                 [
