@@ -55,7 +55,7 @@ rec {
             hhvmStdenv =
               if hostPlatform.isLinux
               then gcc10Stdenv
-              else llvmPackages_11.stdenv;
+              else stdenv;
           in {
             default = hhvmStdenv.mkDerivation rec {
               pname = "hhvm";
