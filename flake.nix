@@ -148,7 +148,10 @@ rec {
               })
             ];
           }; let
-            stdenv = gcc10Stdenv;
+            stdenv =
+              if hostPlatform.isLinux
+              then gcc10Stdenv
+              else llvmPackages_11.stdenv;
           in {
             default = stdenv.mkDerivation rec {
               pname = "hhvm";
