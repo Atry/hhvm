@@ -73,6 +73,54 @@ rec {
                     license = lib.licenses.lgpl21Plus;
                   };
                 };
+                libdwarf_0_1_1 = stdenv.mkDerivation rec {
+                  pname = "libdwarf";
+                  version = "0.1.1";
+
+                  src = fetchurl {
+                    url = "https://www.prevanders.net/libdwarf-${version}.tar.xz";
+                    # Upstream displays this hash broken into four parts:
+                    sha512 =
+                      "eb2502d847fd5ee15928651dcc1ef30d"
+                      + "ab04b7e65d7e772dd245da74bb071ce5"
+                      + "25cfdf97d1af5dbceb50c1a12cccda5c"
+                      + "762f461d03a16c55557ab5e94e79e8ab";
+                  };
+
+                  configureFlags = ["--enable-shared" "--disable-nonshared"];
+
+                  buildInputs = [libelf zlib];
+
+                  meta = {
+                    homepage = "https://www.prevanders.net/dwarf.html";
+                    platforms = lib.platforms.unix;
+                    license = lib.licenses.lgpl21Plus;
+                  };
+                };
+                libdwarf_0_1_0 = stdenv.mkDerivation rec {
+                  pname = "libdwarf";
+                  version = "0.1.0";
+
+                  src = fetchurl {
+                    url = "https://www.prevanders.net/libdwarf-${version}.tar.xz";
+                    # Upstream displays this hash broken into four parts:
+                    sha512 =
+                      "9e8149a8548e31a08acade31be796899"
+                      + "94fd7e635c9be8ace7a6c47b1f8e7b77"
+                      + "b2e3c9cf452a39a013442562b49fc1fc"
+                      + "04b9535fec5f9fa90df3e7fcb43fe27f";
+                  };
+
+                  configureFlags = ["--enable-shared" "--disable-nonshared"];
+
+                  buildInputs = [libelf zlib];
+
+                  meta = {
+                    homepage = "https://www.prevanders.net/dwarf.html";
+                    platforms = lib.platforms.unix;
+                    license = lib.licenses.lgpl21Plus;
+                  };
+                };
               })
             ];
           }; let
@@ -145,7 +193,7 @@ rec {
                   unzip
                   freetype
                   gettext
-                  libdwarf_0_3
+                  libdwarf_0_1_0
                 ]
                 ++ lib.optionals hostPlatform.isLinux [
                   libcap
