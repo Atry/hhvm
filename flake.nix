@@ -14,14 +14,14 @@ rec {
           with import nixpkgs {
             inherit system;
             overlays = [
-              ({
+              (self: {
                 lib,
                 stdenv,
                 fetchurl,
                 libelf,
                 zlib,
                 ...
-              }: prev: {
+              }: {
                 # This overlay is a polyfill of the following PR and can be removed
                 # once the PR get merged:
                 #   https://github.com/NixOS/nixpkgs/pull/170927
