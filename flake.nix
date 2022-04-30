@@ -227,6 +227,10 @@ rec {
                   uwimap
                   numactl
                   linux-pam
+                ]
+                ++ lib.optionals hostPlatform.isMacOS [
+                  darwin.apple_sdk.frameworks.CoreFoundation
+                  darwin.apple_sdk.frameworks.CoreServices
                 ];
 
               NIX_CFLAGS_COMPILE = [
