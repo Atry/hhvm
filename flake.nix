@@ -117,7 +117,7 @@ rec {
                   double-conversion
                   brotli
                   libzip
-                  zstd.dev
+                  zstd
                   jemalloc
                   fmt
                   libsodium
