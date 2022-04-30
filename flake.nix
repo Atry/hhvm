@@ -148,12 +148,12 @@ rec {
               })
             ];
           }; let
-            stdenv =
+            hhvmStdenv =
               if hostPlatform.isLinux
               then gcc10Stdenv
               else llvmPackages_11.stdenv;
           in {
-            default = stdenv.mkDerivation rec {
+            default = hhvmStdenv.mkDerivation rec {
               pname = "hhvm";
               version = builtins.substring 0 8 self.lastModifiedDate;
 
@@ -270,14 +270,14 @@ rec {
                     -f third-party/rustc/CMakeFiles/bundled_rust.dir/build.make \
                     third-party/rustc/bundled_rust-prefix/src/bundled_rust-stamp/bundled_rust-install
                   patchelf \
-                    --set-interpreter ${stdenv.cc.bintools.dynamicLinker} \
+                    --set-interpreter ${hhvmStdenv.cc.bintools.dynamicLinker} \
                     --add-needed ${zlib}/lib/libz.so.1 \
-                    --add-rpath "${lib.makeLibraryPath [zlib stdenv.cc.cc.lib]}" \
+                    --add-rpath "${lib.makeLibraryPath [zlib hhvmStdenv.cc.cc.lib]}" \
                     third-party/rustc/bundled_rust-prefix/bin/rustc
                   patchelf \
-                    --set-interpreter ${stdenv.cc.bintools.dynamicLinker} \
+                    --set-interpreter ${hhvmStdenv.cc.bintools.dynamicLinker} \
                     --add-needed ${zlib}/lib/libz.so.1 \
-                    --add-rpath "${lib.makeLibraryPath [zlib stdenv.cc.cc.lib]}" \
+                    --add-rpath "${lib.makeLibraryPath [zlib hhvmStdenv.cc.cc.lib]}" \
                     third-party/rustc/bundled_rust-prefix/bin/cargo
                 '';
 
