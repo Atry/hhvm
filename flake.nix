@@ -229,6 +229,9 @@ rec {
                   linux-pam
                 ];
 
+              # Workaround for https://github.com/facebook/folly/issues/1673
+              NIX_CFLAGS_COMPILE = ["-DFOLLY_MOBILE=0"];
+
               cmakeFlags = [
                 "-DHAVE_SYSTEM_TZDATA:BOOL=ON"
                 "-DHAVE_SYSTEM_TZDATA_PREFIX=${tzdata}/share/zoneinfo"
