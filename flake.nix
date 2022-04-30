@@ -240,6 +240,7 @@ rec {
                 "-DHAVE_SYSTEM_TZDATA_PREFIX=${tzdata}/share/zoneinfo"
                 "-DMYSQL_UNIX_SOCK_ADDR=/run/mysqld/mysqld.sock"
                 "-DCAN_USE_SYSTEM_ZSTD:BOOL=ON"
+                "-DCMAKE_OSX_DEPLOYMENT_TARGET=10.15"
               ];
 
               prePatch = ''
