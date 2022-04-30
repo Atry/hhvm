@@ -206,6 +206,7 @@ rec {
                 "-DHAVE_SYSTEM_TZDATA:BOOL=ON"
                 "-DHAVE_SYSTEM_TZDATA_PREFIX=${tzdata}/share/zoneinfo"
                 "-DMYSQL_UNIX_SOCK_ADDR=/run/mysqld/mysqld.sock"
+                "-DCAN_USE_SYSTEM_ZSTD:BOOL=ON"
               ];
 
               prePatch = ''
