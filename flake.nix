@@ -167,8 +167,8 @@ rec {
                   patchShebangs \
                     third-party/rustc/bundled_rust-prefix/src/bundled_rust
                 ''
-                # Prebuilt rustc and cargo needs patch if HHVM is built on
-                # either NixOS or a Nix sandbox
+                # Prebuilt rustc and cargo needs patch if HHVM is built either
+                # on NixOS or in a Nix sandbox
                 + lib.optionalString hostPlatform.isLinux ''
                   make \
                     -f third-party/rustc/CMakeFiles/bundled_rust.dir/build.make \
