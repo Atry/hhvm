@@ -49,13 +49,34 @@ rec {
                     license = lib.licenses.lgpl21Plus;
                   };
                 };
+                libdwarf_0_3 = stdenv.mkDerivation rec {
+                  pname = "libdwarf";
+                  version = "0.3.4";
+
+                  src = fetchurl {
+                    url = "https://www.prevanders.net/libdwarf-${version}.tar.xz";
+                    # Upstream displays this hash broken into four parts:
+                    sha512 =
+                      "6957e6c696428b7e59c57e48279528ff"
+                      + "602c49ab9833e56a4722f173240eb137"
+                      + "3ddd20f5c9dae7c25cc64e6c2131d3b7"
+                      + "b5abcf3c12614b88858bdc353a441359";
+                  };
+
+                  configureFlags = ["--enable-shared" "--disable-nonshared"];
+
+                  buildInputs = [libelf zlib];
+
+                  meta = {
+                    homepage = "https://www.prevanders.net/dwarf.html";
+                    platforms = lib.platforms.unix;
+                    license = lib.licenses.lgpl21Plus;
+                  };
+                };
               })
             ];
           }; let
-            stdenv =
-              if hostPlatform.isLinux
-              then gcc10Stdenv
-              else llvmPackages_13.stdenv;
+            stdenv = gcc10Stdenv;
           in {
             default = stdenv.mkDerivation rec {
               pname = "hhvm";
@@ -124,16 +145,13 @@ rec {
                   unzip
                   freetype
                   gettext
+                  libdwarf_0_3
                 ]
                 ++ lib.optionals hostPlatform.isLinux [
                   libcap
                   uwimap
                   numactl
                   linux-pam
-                  libdwarf
-                ]
-                ++ lib.optionals hostPlatform.isMacOS [
-                  libdwarf_0_4
                 ];
 
               cmakeFlags = [
