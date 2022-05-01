@@ -29,7 +29,7 @@ if(HAVE_SYSTEM_TZDATA)
 endif()
 
 if(HAVE_SYSTEM_TZDATA_PREFIX)
-  target_compile_definitions(timelib PUBLIC -DHAVE_SYSTEM_TZDATA_PREFIX=${HAVE_SYSTEM_TZDATA_PREFIX})
+  target_compile_definitions(timelib PUBLIC "-DHAVE_SYSTEM_TZDATA_PREFIX=\"${HAVE_SYSTEM_TZDATA_PREFIX}\"")
 endif()
 
 install(FILES ${hfiles} DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}")
