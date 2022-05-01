@@ -15,4 +15,4 @@ jobs:
     steps:
     - uses: actions/checkout@v2.4.0
     - uses: cachix/install-nix-action@v15
-    - run: nix build --print-build-logs --experimental-features 'nix-command flakes' --option sandbox false "git+file://$(pwd)?submodules=1&shallow=1"
+    - run: nix build --print-build-logs --experimental-features 'nix-command flakes' --no-sandbox "git+file://$(pwd)?submodules=1&shallow=1"
