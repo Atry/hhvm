@@ -1,0 +1,23 @@
+name: Nix CI in a Docker Container
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    strategy:
+      # Run tests on all OS's and HHVM versions, even if one fails
+      fail-fast: false
+      matrix:
+        image:
+        - nixpkgs/nix-unstable
+        - centos
+    runs-on: ubuntu-latest
+    container:
+      options: --interactive --init	
+      image: ${{matrix.image}}
+    steps:
+    - uses: actions/checkout@v2.4.0
+    - uses: cachix/install-nix-action@v15
+    - run: nix build --print-build-logs --experimental-features 'nix-command flakes' --no-sandbox .?submodules=1
