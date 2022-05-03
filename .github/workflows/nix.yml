@@ -17,5 +17,5 @@ jobs:
     steps:
     - uses: actions/checkout@v2.4.0
     - uses: cachix/install-nix-action@v15
-    - run: nix profile install --print-build-logs --experimental-features 'nix-command flakes' --no-sandbox .?submodules=1
+    - run: nix --extra-experimental-features nix-command --extra-experimental-features flakes --extra-experimental-features impure-derivations profile install --print-build-logs '.?submodules=1&shallow=1'
     - run: hhvm --version

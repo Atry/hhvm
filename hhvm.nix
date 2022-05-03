@@ -76,6 +76,8 @@
     else stdenv;
 in
   hhvmStdenv.mkDerivation {
+    __impure = true;
+
     name = "hhvm";
     src = ./.;
     nativeBuildInputs =
