@@ -29,4 +29,4 @@ jobs:
         extra_nix_config: |
           access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
           experimental-features = nix-command flakes
-    - run: nix copy nixpkgs#hello --to s3://hhvm-nix-cache?region=eu-west-2
+    - run: nix copy nixpkgs#hello --to s3://hhvm-nix-cache?region=eu-west-2&endpoint=hhvm-nix-cache.s3-accelerate.amazonaws.com
