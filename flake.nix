@@ -57,42 +57,37 @@
             CMAKE_INIT_CACHE = packages.hhvm.cmakeInitCache;
           });
 
-          bundlers.buildFakeSingleDeb = pkg: pkgs.stdenv.mkDerivation {
-            name = "deb-single-${pkg.name}";
-            buildInputs = [
-              pkgs.fpm
-            ];
+          bundlers.buildFakeSingleDeb = pkg:
+            pkgs.runCommand
+              "bundle.deb"
+              {
+                nativeBuildInputs = pkg.stdenv.defaultNativeBuildInputs ++ [
+                  pkgs.fpm
+                ];
+              }
+              ''
+                # Copy to a temporority directory as a workaround to https://github.com/jordansissel/fpm/issues/807
+                while read LINE
+                do
+                  mkdir -p "$(dirname "./$LINE")"
+                  cp -r "/$LINE" "./$LINE"
+                  chmod --recursive u+w "./$LINE"
+                  FPM_INPUTS+=("./$LINE")
+                done < ${pkgs.lib.strings.escapeShellArg(pkgs.referencesByPopularity pkg)}
 
-            unpackPhase = "true";
-
-            buildPhase = ''
-              # Copy to a temporority directory as a workaround to https://github.com/jordansissel/fpm/issues/807
-              while read LINE
-              do
-                mkdir -p "$(dirname "./$LINE")"
-                cp -r "/$LINE" "./$LINE"
-                chmod --recursive u+w "./$LINE"
-                FPM_INPUTS+=("./$LINE")
-              done < ${pkgs.lib.strings.escapeShellArg(pkgs.referencesByPopularity pkg)}
-
-              fpm \
-                --input-type dir \
-                --output-type deb \
-                --name ${pkgs.lib.strings.escapeShellArg pkg.pname} \
-                --version ${pkgs.lib.strings.escapeShellArg pkg.version} \
-                --description ${pkgs.lib.strings.escapeShellArg pkg.meta.description} \
-                --url ${pkgs.lib.strings.escapeShellArg pkg.meta.homepage} \
-                --maintainer ${pkgs.lib.strings.escapeShellArg (pkgs.lib.strings.intersperse ", " (map ({name, email, ...}: "\"${name}\" <${email}>")pkg.meta.maintainers))} \
-                --license ${pkgs.lib.strings.escapeShellArg pkg.meta.license.spdxId} \
-                -- \
-                "''${FPM_INPUTS[@]}"
-            '';
-
-            installPhase = ''
-              mkdir -p $out
-              cp -r *.deb $out
-            '';
-          };
+                fpm \
+                  --package $out \
+                  --input-type dir \
+                  --output-type deb \
+                  --name ${pkgs.lib.strings.escapeShellArg pkg.pname} \
+                  --version ${pkgs.lib.strings.escapeShellArg pkg.version} \
+                  --description ${pkgs.lib.strings.escapeShellArg pkg.meta.description} \
+                  --url ${pkgs.lib.strings.escapeShellArg pkg.meta.homepage} \
+                  --maintainer ${pkgs.lib.strings.escapeShellArg (pkgs.lib.strings.intersperse ", " (map ({name, email, ...}: "\"${name}\" <${email}>")pkg.meta.maintainers))} \
+                  --license ${pkgs.lib.strings.escapeShellArg pkg.meta.license.spdxId} \
+                  -- \
+                  "''${FPM_INPUTS[@]}"
+              '';
         }
       );
 }
