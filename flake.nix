@@ -51,12 +51,44 @@
           devShells.default = pkgs.mkShell ({
             buildInputs = packages.hhvm.nativeBuildInputs ++ packages.hhvm.buildInputs ++ [
               pkgs.rnix-lsp
+              pkgs.fpm
             ];
             NIX_CFLAGS_COMPILE = packages.hhvm.NIX_CFLAGS_COMPILE;
             CMAKE_INIT_CACHE = packages.hhvm.cmakeInitCache;
           });
 
-          bundlers.default = nix-utils.rpmDebUtils.${system}.buildFakeSingleDeb;
+          bundlers.buildFakeSingleDeb = pkg: pkgs.stdenv.mkDerivation {
+            name = "deb-single-${pkg.name}";
+            buildInputs = [
+              pkgs.fpm
+            ];
+
+            unpackPhase = "true";
+
+            buildPhase = ''
+              # Copy to a temporority directory as a workaround to https://github.com/jordansissel/fpm/issues/807
+              while read LINE
+              do
+                mkdir -p "$(dirname "./$LINE")"
+                cp -r "/$LINE" "./$LINE"
+                chmod --recursive u+w "./$LINE"
+                FPM_INPUTS+=("./$LINE")
+              done < ${pkgs.lib.strings.escapeShellArg(pkgs.referencesByPopularity pkg)}
+
+              fpm \
+                --input-type dir \
+                --output-type deb \
+                --name ${pkgs.lib.strings.escapeShellArg(pkg.pname)} \
+                --version ${pkgs.lib.strings.escapeShellArg(pkg.version)} \
+                -- \
+                "''${FPM_INPUTS[@]}"
+            '';
+
+            installPhase = ''
+              mkdir -p $out
+              cp -r *.deb $out
+            '';
+          };
         }
       );
 }
