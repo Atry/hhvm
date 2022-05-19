@@ -44,3 +44,6 @@ jobs:
     - run: nix bundle --print-build-logs --bundler "git+file://$(pwd)?submodules=1&shallow=1#deb" "git+file://$(pwd)?submodules=1&shallow=1"
     - run: dpkg-deb --info bundle.deb
     - run: dpkg-deb --contents bundle.deb
+    - run: nix bundle --print-build-logs --bundler "git+file://$(pwd)?submodules=1&shallow=1#rpm" "git+file://$(pwd)?submodules=1&shallow=1"
+    - run: rpm --query --info --package bundle.rpm
+    - run: rpm --query --list --package bundle.rpm
