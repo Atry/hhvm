@@ -78,8 +78,12 @@
               fpm \
                 --input-type dir \
                 --output-type deb \
-                --name ${pkgs.lib.strings.escapeShellArg(pkg.pname)} \
-                --version ${pkgs.lib.strings.escapeShellArg(pkg.version)} \
+                --name ${pkgs.lib.strings.escapeShellArg pkg.pname} \
+                --version ${pkgs.lib.strings.escapeShellArg pkg.version} \
+                --description ${pkgs.lib.strings.escapeShellArg pkg.meta.description} \
+                --url ${pkgs.lib.strings.escapeShellArg pkg.meta.homepage} \
+                --maintainer ${pkgs.lib.strings.escapeShellArg (pkgs.lib.strings.intersperse ", " (map ({name, email, ...}: "\"${name}\" <${email}>")pkg.meta.maintainers))} \
+                --license ${pkgs.lib.strings.escapeShellArg pkg.meta.license.spdxId} \
                 -- \
                 "''${FPM_INPUTS[@]}"
             '';
