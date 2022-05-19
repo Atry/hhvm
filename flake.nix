@@ -85,6 +85,24 @@
                   --url ${pkgs.lib.strings.escapeShellArg pkg.meta.homepage} \
                   --maintainer ${pkgs.lib.strings.escapeShellArg (pkgs.lib.strings.intersperse ", " (map ({name, email, ...}: "\"${name}\" <${email}>")pkg.meta.maintainers))} \
                   --license ${pkgs.lib.strings.escapeShellArg pkg.meta.license.spdxId} \
+                  --after-install ${
+                    pkgs.writeScript "after-install.sh" ''
+                      for EXECUTABLE in ${pkgs.lib.strings.escapeShellArg pkg}/bin/*
+                      do
+                        NAME=$(basename "$EXECUTABLE")
+                        update-alternatives --install "/usr/bin/$NAME" "$NAME" "$EXECUTABLE" 1
+                      done
+                    ''
+                  } \
+                  --before-remove ${
+                    pkgs.writeScript "before-remove.sh" ''
+                      for EXECUTABLE in ${pkgs.lib.strings.escapeShellArg pkg}/bin/*
+                      do
+                        NAME=$(basename "$EXECUTABLE")
+                        update-alternatives --remove "$NAME" "$EXECUTABLE"
+                      done
+                    ''
+                  } \
                   -- \
                   "''${FPM_INPUTS[@]}"
               '';
