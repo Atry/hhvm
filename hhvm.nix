@@ -255,6 +255,7 @@ hhvmStdenv.mkDerivation rec {
       {
         spdxId = "Zend-2.0";
         fullName = "Zend License v2.0";
+        url = "https://www.zend.com/sites/zend/files/pdfs/2_00.txt";
       }
     ];
     maintainers = [{
