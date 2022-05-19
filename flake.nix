@@ -84,7 +84,7 @@
                   --description ${pkgs.lib.strings.escapeShellArg pkg.meta.description} \
                   --url ${pkgs.lib.strings.escapeShellArg pkg.meta.homepage} \
                   --maintainer ${pkgs.lib.strings.escapeShellArg (pkgs.lib.strings.intersperse ", " (map ({name, email, ...}: "\"${name}\" <${email}>") pkg.meta.maintainers))} \
-                  --license ${pkgs.lib.strings.escapeShellArg (pkgs.lib.strings.intersperse " AND " (map ({spdxId, fullName}: spdxId) (pkgs.lib.lists.toList pkg.meta.license)))} \
+                  --license ${pkgs.lib.strings.escapeShellArg (pkgs.lib.strings.intersperse " AND " (map ({spdxId, ...}: spdxId) (pkgs.lib.lists.toList pkg.meta.license)))} \
                   --after-install ${
                     pkgs.writeScript "after-install.sh" ''
                       for EXECUTABLE in ${pkgs.lib.strings.escapeShellArg pkg}/bin/*
