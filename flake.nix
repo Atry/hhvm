@@ -57,7 +57,7 @@
             CMAKE_INIT_CACHE = packages.hhvm.cmakeInitCache;
           });
 
-          bundlers.buildFakeSingleDeb = pkg:
+          bundlers.deb = pkg:
             pkgs.runCommand
               "bundle.deb"
               {
