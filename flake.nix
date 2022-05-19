@@ -76,7 +76,7 @@
                 done < ${pkgs.lib.strings.escapeShellArg(pkgs.referencesByPopularity pkg)}
 
                 fpm \
-                  --package $out \
+                  --package "$out" \
                   --input-type dir \
                   --output-type deb \
                   --name ${pkgs.lib.strings.escapeShellArg pkg.pname} \
