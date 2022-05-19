@@ -30,6 +30,18 @@
           };
           packages.default = packages.hhvm;
 
+          checks.quick = pkgs.stdenv.mkDerivation {
+            name = "hhvm-quick-test";
+
+            buildInputs = [ packages.hhvm ];
+            unpackPhase = "true";
+
+            buildPhase = ''
+              HHVM_BIN="${packages.hhvm}" "${packages.hhvm}" hphp/test/run.php quick
+            '';
+            installPhase = "mkdir -p $out";
+          };
+
           devShells.default = pkgs.mkShell ({
             buildInputs = packages.hhvm.nativeBuildInputs ++ packages.hhvm.buildInputs ++ [
               pkgs.rnix-lsp
