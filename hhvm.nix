@@ -251,5 +251,11 @@ hhvmStdenv.mkDerivation rec {
     ];
     homepage = "https://hhvm.com";
     license = "PHP/Zend";
+    maintainers = [{
+      email = "hhvm-oss@fb.com";
+      github = "hhvm";
+      githubId = 4553654;
+      name = "HHVM/Hack Open Source";
+    }];
   };
 }
