@@ -3,9 +3,12 @@
     flake-utils.url = "github:numtide/flake-utils";
     flake-compat.url = "github:edolstra/flake-compat";
     flake-compat.flake = false;
+    nix-utils.url = "github:juliosueiras-nix/nix-utils";
+    nix-utils.inputs.nixpkgs.follows = "nixpkgs";
+    nix-utils.inputs.flake-utils.follows = "flake-utils";
   };
   outputs =
-    { self, nixpkgs, flake-utils, flake-compat }:
+    { self, nixpkgs, flake-utils, flake-compat, nix-utils }:
     flake-utils.lib.eachSystem [
       "x86_64-darwin"
       "x86_64-linux"
@@ -52,6 +55,8 @@
             NIX_CFLAGS_COMPILE = packages.hhvm.NIX_CFLAGS_COMPILE;
             CMAKE_INIT_CACHE = packages.hhvm.cmakeInitCache;
           });
+
+          bundlers.default = nix-utils.rpmDebUtils.${system}.buildFakeSingleDeb;
         }
       );
 }
