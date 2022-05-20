@@ -185,7 +185,7 @@ hhvmStdenv.mkDerivation rec {
       "-Wno-error=unused-command-line-argument"
     ];
 
-  cmakeInitCache = writeTextFile {
+  CMAKE_INIT_CACHE = writeTextFile {
     name = "init-cache.cmake";
     text =
       ''
@@ -199,7 +199,7 @@ hhvmStdenv.mkDerivation rec {
       '';
   };
 
-  cmakeFlags = [ "-C" cmakeInitCache ];
+  cmakeFlags = [ "-C" CMAKE_INIT_CACHE ];
 
   prePatch = ''
     patchShebangs .

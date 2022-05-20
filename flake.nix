@@ -91,16 +91,6 @@
               mkdir $out
             '';
 
-          devShells.default = pkgs.mkShell ({
-            buildInputs = packages.hhvm.nativeBuildInputs ++ packages.hhvm.buildInputs ++ [
-              pkgs.rnix-lsp
-              pkgs.fpm
-              pkgs.rpm
-            ];
-            NIX_CFLAGS_COMPILE = packages.hhvm.NIX_CFLAGS_COMPILE;
-            CMAKE_INIT_CACHE = packages.hhvm.cmakeInitCache;
-          });
-
           bundlers.rpm = pkg: pkgs.runCommand
             "bundle.rpm"
             { nativeBuildInputs = [ pkgs.rpm ]; }
