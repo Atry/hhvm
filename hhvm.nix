@@ -174,7 +174,7 @@ stdenv.mkDerivation rec {
       "-Wno-error=unused-command-line-argument"
     ];
 
-  cmakeInitCache =
+  CMAKE_INIT_CACHE =
     let
       # Use writeTextDir instead of writeTextFile as a workaround of https://github.com/xtruder/nix-devcontainer/issues/9
       dir = writeTextDir "init-cache.cmake"
@@ -192,7 +192,7 @@ stdenv.mkDerivation rec {
     in
     dir + "/init-cache.cmake";
 
-  cmakeFlags = [ "-C" cmakeInitCache ];
+  cmakeFlags = [ "-C" CMAKE_INIT_CACHE ];
 
   prePatch = ''
     patchShebangs .

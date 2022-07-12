@@ -36,21 +36,6 @@
               mkdir $out
             '';
 
-          devShells.default =
-            pkgs.mkShell
-              {
-                inputsFrom = [
-                  packages.hhvm
-                ];
-                packages = [
-                  pkgs.rnix-lsp
-                  pkgs.fpm
-                  pkgs.rpm
-                ];
-                NIX_CFLAGS_COMPILE = packages.hhvm.NIX_CFLAGS_COMPILE;
-                CMAKE_INIT_CACHE = packages.hhvm.cmakeInitCache;
-              };
-
           ${if pkgs.hostPlatform.isLinux then "bundlers" else null} =
             let
               fpmScript =
