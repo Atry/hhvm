@@ -1,11 +1,11 @@
 { callPackage
-, llvmPackages_14
+, llvmPackages_12
 }:
 lastModifiedDate:
 let
   common = callPackage ./common.nix { } lastModifiedDate;
 in
-llvmPackages_14.libcxxStdenv.mkDerivation (common // {
+llvmPackages_12.libcxxStdenv.mkDerivation (common // {
   # buildInputs = common.buildInputs ++ [
   #   llvmPackages_13.libcxx
   #   llvmPackages_13.libcxxabi
