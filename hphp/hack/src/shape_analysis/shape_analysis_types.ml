@@ -10,6 +10,7 @@ module A = Ast_defs
 module T = Typing_defs
 module LMap = Local_id.Map
 module KMap = Typing_continuations.Map
+module HT = Hips_types
 
 exception Shape_analysis_exn of string
 
@@ -33,6 +34,7 @@ type options = {
 type entity_ =
   | Literal of Pos.t
   | Variable of int
+  | Inter of HT.entity
 [@@deriving eq, ord]
 
 type entity = entity_ option
@@ -44,7 +46,7 @@ type marker_kind =
   | Parameter
   | Return
   | Debug
-[@@deriving show { with_path = false }]
+[@@deriving ord, show { with_path = false }]
 
 module Codemod = struct
   type kind =
@@ -55,8 +57,8 @@ end
 
 type constraint_ =
   | Marks of marker_kind * Pos.t
-  | Has_static_key of entity_ * T.TShapeMap.key * T.locl_ty
-  | Has_optional_key of entity_ * T.TShapeMap.key
+  | Has_static_key of entity_ * T.TShapeField.t * T.locl_ty
+  | Has_optional_key of entity_ * T.TShapeField.t
   | Has_dynamic_key of entity_
   | Subsets of entity_ * entity_
   | Joins of {
@@ -64,8 +66,9 @@ type constraint_ =
       right: entity_;
       join: entity_;
     }
+[@@deriving ord]
 
-type inter_constraint_ = Arg of A.id_ * int * entity_
+type inter_constraint_ = entity_ HT.inter_constraint_
 
 type shape_result =
   | Shape_like_dict of Pos.t * marker_kind * shape_keys
@@ -111,6 +114,12 @@ module EntitySet = Set.Make (struct
   let compare = compare_entity_
 end)
 
+module ConstraintSet = Set.Make (struct
+  type t = constraint_
+
+  let compare = compare_constraint_
+end)
+
 type log_event =
   | Result of {
       id: string;
@@ -120,3 +129,5 @@ type log_event =
       id: string;
       error_message: string;
     }
+
+type any_constraint = (constraint_, inter_constraint_) HT.any_constraint_

@@ -224,6 +224,7 @@ type deserialization_error =
           able to deserialize it again. *)
   | Deserialization_error of string
       (** The input JSON was invalid for some reason. *)
+[@@deriving show]
 
 module Type_expansions : sig
   (** A list of the type defs and type access we have expanded thus far. Used
@@ -344,6 +345,8 @@ let get_var_i t =
   | ConstraintType _ -> None
 
 let is_tyvar t = Option.is_some (get_var t)
+
+let is_tyvar_i t = Option.is_some (get_var_i t)
 
 let is_var_v t v =
   match get_node t with

@@ -1188,7 +1188,15 @@ static int start_server(const std::string &username, int xhprof) {
     RuntimeOption::EvalNum1GPagesForReqHeap,
     RuntimeOption::EvalNum2MPagesForReqHeap
   };
-  setup_local_arenas(reqHeapSpec, RuntimeOption::EvalNumReservedSlabs);
+  unsigned nSlabs = RO::EvalNumReservedMBForSlabs * (1ull << 20) / kSlabSize;
+  if (nSlabs == 0) {
+    // We are in the process of migrating from Eval.NumReservedSlabs to
+    // Eval.NumReservedMBForSlabs. Currently, when NumReservedMBForSlabs is set,
+    // we ignore NumReservedSlabs; otherwise, we adjust NumReservedSlabs, which
+    // is needed because the option assumes 2M slab size.
+    nSlabs = RO::EvalNumReservedSlabs * (2ull << 20) / kSlabSize;
+  }
+  setup_local_arenas(reqHeapSpec, nSlabs);
 #endif
 
   HttpServer::Server->runOrExitProcess();
@@ -1888,17 +1896,7 @@ static int execute_program_impl(int argc, char** argv) {
   }
 #endif
 #if USE_JEMALLOC_EXTENT_HOOKS
-  if (RuntimeOption::EvalEnableArenaMetadata1GPage) {
-    // Set up extent hook so that we can place jemalloc metadata on 1G pages.
-    // This needs to be done after initializing LightProcess (which forks),
-    // because the child process does malloc which won't work with jemalloc
-    // metadata on 1G huge pages.
-    setup_jemalloc_metadata_extent_hook(
-      RuntimeOption::EvalEnableArenaMetadata1GPage,
-      RuntimeOption::EvalEnableNumaArenaMetadata1GPage,
-      RuntimeOption::EvalArenaMetadataReservedSize
-    );
-  } else if (RuntimeOption::ServerExecutionMode()) {
+  if (RuntimeOption::ServerExecutionMode()) {
     purge_all();
     setup_arena0({RuntimeOption::EvalNum1GPagesForA0,
                   RuntimeOption::EvalNum2MPagesForA0});

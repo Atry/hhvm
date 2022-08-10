@@ -11,12 +11,33 @@ class Foo<TType> {
   const type FooMixed = ?mixed;
 }
 
+class ReifiedC<reify T> {}
+
+function f<reify T>(T $x): ReifiedC<T> {
+  return new ReifiedC<T>();
+}
+
 newtype FooInt = int;
 newtype FooString = string;
 newtype FooTypevar<F> = F;
 newtype FooTypevarTypes = FooTypevar<int>;
 newtype FooClass = Foo<bool>;
 newtype FooAny = AnyArray<string, bool>;
+
+newtype FooSoftInt = @~int;
+newtype FooLikeInt = ~@int;
+
+type ComplicatedType<T> = shape(
+  'operator' => int,
+  ?'values' => vec<T>,
+  ?'operands' => vec<shape(
+    'operator' => bool,
+    ?'values' => vec<T>,
+    ...
+  )>,
+  ...
+);
+type FooComplicatedType = ComplicatedType<int>;
 
 <<__EntryPoint>>
 function main(): void {
@@ -27,6 +48,7 @@ function main(): void {
   var_dump($ts['fields']);
 
   $ts = type_structure($foo, 'FooShape');
+  var_dump($ts);
   var_dump($ts['kind']);
   var_dump($ts['fields']);
   var_dump($ts['allows_unknown_fields'] ?? 'field exists but is false');
@@ -46,11 +68,13 @@ function main(): void {
   var_dump($ts['opaque']);
 
   $ts = type_structure(__hhvm_intrinsics\launder_value('FooTypevarTypes'), null);
+  var_dump($ts);
   var_dump($ts['alias']);
   var_dump($ts['typevar_types']);
   var_dump($ts['kind']);
 
   $ts = type_structure(__hhvm_intrinsics\launder_value('FooClass'), null);
+  var_dump($ts);
   var_dump($ts['kind']);
   var_dump($ts['classname']);
   var_dump($ts['generic_types']);
@@ -65,4 +89,14 @@ function main(): void {
   var_dump($ts['kind']);
   $ts = type_structure('FooString', null);
   var_dump($ts['opaque']);
+
+  $reified = HH\ReifiedGenerics\get_type_structure<ReifiedC<int>>();
+  var_dump($reified['kind']);
+
+  $ts = type_structure(__hhvm_intrinsics\launder_value('FooComplicatedType'));
+  var_dump($ts['kind']);
+  var_dump($ts['typevar_types']);
+
+  var_dump(type_structure(__hhvm_intrinsics\launder_value('FooSoftInt'), null));
+  var_dump(type_structure(__hhvm_intrinsics\launder_value('FooLikeInt'), null));
 }

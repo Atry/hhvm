@@ -665,7 +665,7 @@ To string conversions:
   Returns whether t instanceof S0 returns true when t is of the given type.
 
 | ResolveTypeStruct<class,suppress,offset,size,isOrAsOp>,
-|   D(Dict), S(StkPtr) S(Cls|Nullptr), NF
+|   D(Dict), S(StkPtr) S(Cls|Nullptr), LA
 
   Applies class/alias resolution on the type structure that is at the stack
   offset given by S0 and offset. If size > 1, combine the type structures on
@@ -760,7 +760,7 @@ To string conversions:
 
   Set D to true iff S0 has a reified parent.
 
-| CallViolatesModuleBoundary<caller>, D(Bool), S(Func), NF
+| CallViolatesModuleBoundary<caller>, D(Bool), S(Func,Cls), NF
 
   Set D to true iff function call from caller to S0 violates module boundary.
   Requires that S0 is an internal method.

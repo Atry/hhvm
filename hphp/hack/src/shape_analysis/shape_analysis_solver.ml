@@ -10,6 +10,7 @@ open Hh_prelude
 open Shape_analysis_types
 module T = Typing_defs
 module Logic = Shape_analysis_logic
+module HT = Hips_types
 
 type constraints = {
   markers: (marker_kind * Pos.t) list;
@@ -314,7 +315,9 @@ let produce_results
            match entity with
            | Literal pos ->
              Pos.Map.update pos (update_entity entity key ty) pos_map
-           | Variable _ -> pos_map)
+           | Variable _
+           | Inter _ ->
+             pos_map)
   in
 
   (* Convert to individual statically accessed dict results *)
@@ -335,3 +338,70 @@ let produce_results
   in
 
   static_shape_results @ dynamic_shape_results
+
+let is_same_entity (param_ent_1 : HT.entity) (ent : entity_) : bool =
+  match ent with
+  | Literal _
+  | Variable _ ->
+    false
+  | Inter param_ent_2 -> HT.equal_entity param_ent_1 param_ent_2
+
+let substitute_inter_intra
+    (inter_constr : inter_constraint_) (intra_constr : constraint_) :
+    constraint_ =
+  match inter_constr with
+  | HT.Arg (param_ent, intra_ent_1) ->
+    let replace intra_ent_2 =
+      if is_same_entity (HT.Param param_ent) intra_ent_2 then
+        intra_ent_1
+      else
+        intra_ent_2
+    in
+    begin
+      match intra_constr with
+      | Marks _ -> intra_constr
+      | Has_static_key (intra_ent_2, key, ty) ->
+        Has_static_key (replace intra_ent_2, key, ty)
+      | Has_optional_key (intra_ent_2, key) ->
+        Has_optional_key (replace intra_ent_2, key)
+      | Has_dynamic_key intra_ent_2 -> Has_dynamic_key (replace intra_ent_2)
+      | Subsets (intra_ent_2, intra_ent_3) ->
+        Subsets (replace intra_ent_2, replace intra_ent_3)
+      | Joins
+          {
+            left = intra_entity_left;
+            right = intra_entity_right;
+            join = intra_entity_join;
+          } ->
+        Joins
+          {
+            left = replace intra_entity_left;
+            right = replace intra_entity_right;
+            join = replace intra_entity_join;
+          }
+    end
+
+let equiv
+    (any_constr_list_1 : any_constraint list)
+    (any_constr_list_2 : any_constraint list) : bool =
+  let only_intra_constr any_constr =
+    let only_inter_ent (intra_constr : constraint_) :
+        entity_ -> constraint_ option = function
+      | Inter _ -> Some intra_constr
+      | _ -> None
+    in
+    match any_constr with
+    | HT.Intra intra_constr ->
+      (match intra_constr with
+      | Marks _ -> Some intra_constr
+      | Has_static_key (ent, _, _) -> only_inter_ent intra_constr ent
+      | Has_optional_key (ent, _) -> only_inter_ent intra_constr ent
+      | Has_dynamic_key ent -> only_inter_ent intra_constr ent
+      | _ -> None)
+    | HT.Inter _ -> None
+  in
+  ConstraintSet.equal
+    (ConstraintSet.of_list
+       (List.filter_map ~f:only_intra_constr any_constr_list_1))
+    (ConstraintSet.of_list
+       (List.filter_map ~f:only_intra_constr any_constr_list_2))

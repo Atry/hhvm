@@ -8,6 +8,7 @@
 
 open Hh_prelude
 open Shape_analysis_types
+module HT = Hips_types
 
 type 'constraint_ show_constraint_ =
   Typing_env_types.env -> 'constraint_ -> string
@@ -18,6 +19,7 @@ let mk_shape field_map =
 let show_entity = function
   | Literal pos -> Format.asprintf "%a" Pos.pp pos
   | Variable var -> Format.sprintf "?%d" var
+  | Inter ent -> HT.show_entity ent
 
 let show_ty env = Typing_print.full env
 
@@ -43,7 +45,7 @@ let show_constraint env =
     show_entity left ^ " ∪ " ^ show_entity right ^ " = " ^ show_entity join
 
 let show_inter_constraint _ = function
-  | Arg (f_id, arg_idx, ent) ->
+  | HT.Arg ((f_id, arg_idx), ent) ->
     Format.asprintf "Arg(%s, %i, %s)" f_id arg_idx (show_entity ent)
 
 let show_decorated_constraint_general

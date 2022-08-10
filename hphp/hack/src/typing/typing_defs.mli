@@ -143,6 +143,7 @@ type deserialization_error =
   | Wrong_phase of string
   | Not_supported of string
   | Deserialization_error of string
+[@@deriving show]
 
 module Type_expansions : sig
   (** A list of the type defs and type access we have expanded thus far. Used
@@ -193,6 +194,8 @@ val get_class_type : locl_phase ty -> (pos_id * exact * locl_ty list) option
 val get_var_i : internal_type -> Ident.t option
 
 val is_tyvar : 'a ty -> bool
+
+val is_tyvar_i : internal_type -> bool
 
 val is_var_v : 'a ty -> Ident.t -> bool
 

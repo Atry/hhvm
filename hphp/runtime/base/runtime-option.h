@@ -1052,6 +1052,7 @@ struct RuntimeOption {
   F(uint32_t, Num1GPagesForReqHeap,    0)                               \
   F(uint32_t, Num2MPagesForReqHeap,    0)                               \
   F(uint32_t, NumReservedSlabs,        0)                               \
+  F(uint32_t, NumReservedMBForSlabs,   0)                               \
   F(uint32_t, Num1GPagesForA0,         0)                               \
   F(uint32_t, Num2MPagesForA0,         0)                               \
   F(bool, BigAllocUseLocalArena,       true)                            \
@@ -1125,12 +1126,6 @@ struct RuntimeOption {
   F(string, PCRECacheType, std::string("static"))                       \
   F(bool, EnableCompactBacktrace, true)                                 \
   F(bool, EnableNuma, (numa_num_nodes > 1) && ServerExecutionMode())    \
-  /* Use 1G pages for jemalloc metadata. */                             \
-  F(bool, EnableArenaMetadata1GPage, false)                             \
-  /* Use 1G pages for jemalloc metadata (NUMA arenas if applicable). */ \
-  F(bool, EnableNumaArenaMetadata1GPage, false)                         \
-  /* Reserved space on 1G pages for jemalloc metadata (arena0). */      \
-  F(uint64_t, ArenaMetadataReservedSize, 216 << 20)                     \
   F(bool, EnableCallBuiltin, true)                                      \
   F(bool, EnableReusableTC,   reuseTCDefault())                         \
   F(bool, LogServerRestartStats, false)                                 \
