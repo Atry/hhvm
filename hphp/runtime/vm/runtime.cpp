@@ -16,6 +16,7 @@
 #include "hphp/runtime/vm/runtime.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/coeffects-config.h"
+#include "hphp/runtime/base/implicit-context.h"
 #include "hphp/runtime/server/source-root-info.h"
 #include "hphp/runtime/base/zend-string.h"
 #include "hphp/runtime/base/builtin-functions.h"
@@ -421,40 +422,104 @@ void raiseCoeffectsFunParamCoeffectRulesViolation(const Func* f) {
   raise_warning(errMsg);
 }
 
-void raiseModuleBoundaryViolation(const Class* cls,
-                                  const Func* callee,
-                                  const StringData* callerModule) {
-  assertx(callee);
-  assertx(IMPLIES(callee->isMethod(), cls));
-  assertx(callee->isInternal());
-  // Internal functions must always have a module
-  assertx(callee->moduleName());
-  assertx(callee->moduleName() != callerModule);
-  auto const errMsg = [&] {
-    auto const calleeName = cls
-      ? folly::sformat("method {}::{}", cls->name(), callee->name())
-      : folly::sformat("function {}", callee->name());
-    return folly::sformat(
-      "Accessing internal {} in module {} from {} is not allowed",
-      calleeName,
-      callee->moduleName(),
-      callerModule
-        ? folly::sformat("module {}", callerModule)
-        : "outside of a module");
-  };
-  if (RO::EvalEnforceModules == 1) {
-    raise_warning(errMsg());
-  } else if (RO::EvalEnforceModules > 1) {
-    SystemLib::throwModuleBoundaryViolationExceptionObject(errMsg());
+namespace {
+
+void moduleBoundaryViolationImpl(
+  std::string symbol,
+  const StringData* symbolModule,
+  const StringData* fromModule
+) {
+  assertx(RO::EvalEnforceModules);
+  // Internal symbols must always have a module
+  assertx(symbolModule != nullptr);
+  assertx(symbolModule != fromModule);
+  assertx(!symbol.empty());
+
+  auto const errMsg = folly::sformat(
+    "Accessing internal {} in module {} from {} is not allowed",
+    symbol,
+    symbolModule,
+    fromModule
+      ? folly::sformat("module {}", fromModule)
+      : "outside of a module"
+  );
+  if (RO::EvalEnforceModules > 1) {
+    SystemLib::throwModuleBoundaryViolationExceptionObject(errMsg);
   }
+  raise_warning(errMsg);
 }
 
-void raiseImplicitContextStateInvalidException(const Func* func) {
-  SystemLib::throwInvalidOperationExceptionObject(folly::sformat(
+} // namespace
+
+void raiseModuleBoundaryViolation(const Class* ctx,
+                                  const Func* callee,
+                                  const StringData* callerModule) {
+  if (!RO::EvalEnforceModules) return;
+
+  assertx(callee);
+  assertx(IMPLIES(callee->isMethod(), ctx));
+  assertx(callee->isInternal());
+  return moduleBoundaryViolationImpl(
+    ctx ? folly::sformat("method {}::{}", ctx->name(), callee->name())
+        : folly::sformat("function {}", callee->name()),
+    callee->moduleName(),
+    callerModule
+  );
+}
+
+void raiseModuleBoundaryViolation(const Class* cls,
+                                  const StringData* callerModule) {
+  if (!RO::EvalEnforceModules) return;
+
+  assertx(cls);
+  assertx(cls->isInternal());
+  return moduleBoundaryViolationImpl(
+    folly::sformat("class {}", cls->name()),
+    cls->moduleName(),
+    callerModule
+  );
+}
+
+void raiseImplicitContextStateInvalid(const Func* func,
+                                      ImplicitContext::State state) {
+  auto const msg = folly::sformat(
     "{} is a [defaults] memoized function, "
-    "but it is called with an active implicit context",
-    func->fullName()
-  ));
+    "but it is called with {} state implicit context",
+    func->fullName(),
+    ImplicitContext::stateToString(state)
+  );
+  if (!ImplicitContext::isStateSoft(state)) {
+    SystemLib::throwInvalidOperationExceptionObject(msg);
+  }
+  raise_warning(msg);
+}
+
+void raiseImplicitContextSoftInaccessibleStateInvalid(const Func* func,
+                                                      ImplicitContext::State state) {
+  auto const msg = folly::sformat(
+    "{} is a soft IC inaccessible memoized function, "
+    "but it is called with {} state implicit context",
+    func->fullName(),
+    ImplicitContext::stateToString(state)
+  );
+  if (!ImplicitContext::isStateSoft(state)) {
+    SystemLib::throwInvalidOperationExceptionObject(msg);
+  }
+  raise_warning(msg);
+}
+
+void raiseImplicitContextStateInvalidDispatch(const Func* func) {
+  auto const obj = *ImplicitContext::activeCtx;
+  assertx(obj);
+  auto const context = Native::data<ImplicitContext>(obj);
+
+  if (func->isNoICMemoize()) {
+    raiseImplicitContextStateInvalid(func, context->m_state);
+    return;
+  }
+
+  assertx(func->isSoftMakeICInaccessibleMemoize());
+  raiseImplicitContextSoftInaccessibleStateInvalid(func, context->m_state);
 }
 
 //////////////////////////////////////////////////////////////////////

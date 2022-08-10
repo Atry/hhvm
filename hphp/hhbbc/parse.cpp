@@ -35,6 +35,7 @@
 #include <folly/sorted_vector_types.h>
 
 #include "hphp/runtime/base/repo-auth-type.h"
+#include "hphp/runtime/base/bespoke/type-structure.h"
 #include "hphp/runtime/ext/std/ext_std_misc.h"
 #include "hphp/runtime/vm/func-emitter.h"
 #include "hphp/runtime/vm/hhbc-codec.h"
@@ -43,6 +44,8 @@
 #include "hphp/runtime/vm/unit-emitter.h"
 
 #include "hphp/hhbbc/cfg.h"
+#include "hphp/hhbbc/class-util.h"
+#include "hphp/hhbbc/debug.h"
 #include "hphp/hhbbc/eval-cell.h"
 #include "hphp/hhbbc/func-util.h"
 #include "hphp/hhbbc/optimize.h"
@@ -58,7 +61,6 @@ namespace {
 
 //////////////////////////////////////////////////////////////////////
 
-const StaticString s_Closure("Closure");
 const StaticString s_toString("__toString");
 const StaticString s_Stringish("Stringish");
 const StaticString s_StringishObject("StringishObject");
@@ -70,8 +72,6 @@ const StaticString s___NoContextSensitiveAnalysis(
 //////////////////////////////////////////////////////////////////////
 
 struct ParseUnitState {
-  std::atomic<uint32_t>& nextFuncId;
-
   /*
    * This is computed once for each unit and stashed here.  We support
    * having either a SourceLocTable or a LineTable.  If we're
@@ -100,24 +100,13 @@ struct ParseUnitState {
     }
   };
   hphp_fast_map<php::SrcLoc, int32_t, SrcLocHash> srcLocs;
-
-  /*
-   * Set of functions that should be processed in the constant
-   * propagation pass.
-   *
-   * Must include every function with a DefCns for correctness; cinit,
-   * pinit and sinit functions are added to improve overall
-   * performance.
-   */
-  hphp_fast_set<php::Func*> constPassFuncs;
-
 };
 
 //////////////////////////////////////////////////////////////////////
 
-std::set<Offset> findBasicBlocks(const FuncEmitter& fe) {
-  std::set<Offset> blockStarts;
-  auto markBlock = [&] (Offset off) { blockStarts.insert(off); };
+std::vector<Offset> findBasicBlocks(const FuncEmitter& fe) {
+  std::vector<Offset> blockStarts;
+  auto markBlock = [&] (Offset off) { blockStarts.emplace_back(off); };
 
   // Each entry point for a DV funclet is the start of a basic
   // block.
@@ -127,8 +116,6 @@ std::set<Offset> findBasicBlocks(const FuncEmitter& fe) {
 
   // The main entry point is also a basic block start.
   markBlock(0);
-
-  bool traceBc = false;
 
   /*
    * For each instruction, add it to the set if it must be the start
@@ -150,8 +137,6 @@ std::set<Offset> findBasicBlocks(const FuncEmitter& fe) {
       instrIsNonCallControlFlow(op) ||
       instrFlags(op) & TF ||
       (isFCall(op) && !instrJumpTargets(bc, offset).empty());
-
-    if (options.TraceBytecodes.count(op)) traceBc = true;
 
     if (breaksBB && !atLast) {
       markBlock(nextOff);
@@ -187,14 +172,13 @@ std::set<Offset> findBasicBlocks(const FuncEmitter& fe) {
   }
 
   // Now, each interval in blockStarts delinates a basic block.
-  blockStarts.insert(fe.bcPos());
+  blockStarts.emplace_back(fe.bcPos());
 
-  if (traceBc) {
-    FTRACE(0, "TraceBytecode (parse): {}::{} in {}\n",
-           fe.pce() ? fe.pce()->name()->data() : "",
-           fe.name, fe.ue().m_filepath);
-  }
-
+  std::sort(blockStarts.begin(), blockStarts.end());
+  blockStarts.erase(
+    std::unique(blockStarts.begin(), blockStarts.end()),
+    blockStarts.end()
+  );
   return blockStarts;
 }
 
@@ -562,7 +546,7 @@ void build_cfg(ParseUnitState& puState,
     }()
   );
 
-  std::map<Offset,std::pair<BlockId, copy_ptr<php::Block>>> blockMap;
+  hphp_fast_map<Offset,std::pair<BlockId, copy_ptr<php::Block>>> blockMap;
   auto const bc = fe.bc();
 
   auto findBlock = [&] (Offset off, bool catchEntry = false) {
@@ -676,15 +660,15 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
     fe.name->data() && *fe.name->data() ? fe.name->data() : "pseudomain");
 
   auto ret         = std::make_unique<php::Func>();
-  ret->idx         = puState.nextFuncId.fetch_add(1, std::memory_order_relaxed);
+  ret->idx         = 0; // Will be assigned later on
   ret->name        = fe.name;
   ret->srcInfo     = php::SrcInfo { fe.getLocation(),
                                     fe.docComment };
-  ret->unit        = unit;
+  ret->unit        = unit->filename;
   ret->cls         = cls;
 
-  ret->attrs              = static_cast<Attr>((fe.attrs & ~AttrNoOverride) |
-                                              AttrUnique | AttrPersistent);
+  ret->attrs       = static_cast<Attr>((fe.attrs & ~AttrNoOverride) |
+                                       AttrUnique | AttrPersistent);
 
   // We do not support AttrInterceptable in hhbbc so make sure it is not set
   always_assert((ret->attrs & AttrInterceptable) == 0);
@@ -696,7 +680,6 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
   ret->hasReturnWithMultiUBs = fe.hasReturnWithMultiUBs;
   ret->returnUBs          = fe.retUpperBounds;
   ret->originalFilename   = fe.originalFilename;
-  ret->originalClass      = ret->cls;
 
   ret->isClosureBody       = fe.isClosureBody;
   ret->isAsync             = fe.isAsync;
@@ -783,6 +766,10 @@ std::unique_ptr<php::Func> parse_func(ParseUnitState& puState,
    * still have a std::nullopt return type.
    */
   if (fe.isNative) {
+    // We shouldn't be processing native functions in an extern-worker
+    // job right now.
+    assertx(!extern_worker::g_in_job);
+
     auto const f = [&] () -> HPHP::Func* {
       if (ret->cls) {
         auto const cls = Class::lookup(ret->cls->name);
@@ -832,14 +819,8 @@ void parse_methods(ParseUnitState& puState,
   for (auto& me : pce.methods()) {
     auto f = parse_func(puState, unit, ret, *me);
     if (f->name == s_86cinit.get()) {
-      puState.constPassFuncs.insert(f.get());
       cinit = std::move(f);
     } else {
-      if (f->name == s_86pinit.get() ||
-          f->name == s_86sinit.get() ||
-          f->name == s_86linit.get()) {
-        puState.constPassFuncs.insert(f.get());
-      }
       ret->methods.push_back(std::move(f));
     }
   }
@@ -847,9 +828,10 @@ void parse_methods(ParseUnitState& puState,
 }
 
 void add_stringish(php::Class* cls) {
-  // The runtime adds StringishObject to any class providing a __toString() function,
-  // so we mirror that here to make sure analysis of interfaces is correct.
-  // All StringishObjects are also XHPChild, so handle it here as well.
+  // The runtime adds StringishObject to any class providing a
+  // __toString() function, so we mirror that here to make sure
+  // analysis of interfaces is correct.  All StringishObjects are also
+  // XHPChild, so handle it here as well.
   if (cls->attrs & AttrInterface && cls->name->isame(s_StringishObject.get())) {
     return;
   }
@@ -860,13 +842,13 @@ void add_stringish(php::Class* cls) {
     if (iface->isame(s_XHPChild.get())) { hasXHP = true; }
   }
 
-
   const auto has_toString = std::any_of(
     begin(cls->methods),
     end(cls->methods),
     [](const auto& func) { return func->name == s_toString.get(); });
   if (has_toString) {
-    FTRACE(2, "Adding Stringish, StringishObject and XHPChild to {}\n", cls->name->data());
+    FTRACE(2, "Adding Stringish, StringishObject and XHPChild to {}\n",
+           cls->name->data());
     cls->interfaceNames.push_back(s_StringishObject.get());
     if (!hasXHP && !cls->name->isame(s_XHPChild.get())) {
       cls->interfaceNames.push_back(s_XHPChild.get());
@@ -885,7 +867,7 @@ std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
   ret->name               = pce.name();
   ret->srcInfo            = php::SrcInfo { pce.getLocation(),
                                            pce.docComment() };
-  ret->unit               = unit;
+  ret->unit               = unit->filename;
   ret->closureContextCls  = nullptr;
   ret->parentName         = pce.parentName()->empty() ? nullptr
                                                       : pce.parentName();
@@ -945,14 +927,32 @@ std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
     }
   }
 
+  auto const getTypeStructureConst = [&] (const PreClassEmitter::Const& cconst) {
+    auto const val = cconst.valOption();
+    if (!RO::EvalEmitBespokeTypeStructures ||
+        !val.has_value() ||
+        !isArrayLikeType(val->type())) {
+      return val;
+    }
+    auto const ad = val->val().parr;
+    if (!bespoke::TypeStructure::isValidTypeStructure(ad)) return val;
+
+    auto const ts = bespoke::TypeStructure::MakeFromVanillaStatic(ad);
+    return make_optional(make_tv<KindOfPersistentDict>(ts));
+  };
+
   auto& constMap = pce.constMap();
   for (size_t idx = 0; idx < constMap.size(); ++idx) {
     auto& cconst = constMap[idx];
+    auto const cconstValue = (cconst.kind() == ConstModifiers::Kind::Type)
+      ? getTypeStructureConst(cconst)
+      : cconst.valOption();
+
     ret->constants.push_back(
       php::Const {
         cconst.name(),
         ret.get(),
-        cconst.valOption(),
+        cconstValue,
         cconst.coeffects(),
         nullptr,
         cconst.kind(),
@@ -964,6 +964,10 @@ std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
   }
 
   if (ret->attrs & AttrBuiltin) {
+    // We shouldn't be processing any builtins in an extern-worker job
+    // right now.
+    assertx(!extern_worker::g_in_job);
+
     if (auto nativeConsts = Native::getClassConstants(ret->name)) {
       for (auto const& cnsMap : *nativeConsts) {
         TypedValueAux tvaux;
@@ -995,19 +999,17 @@ std::unique_ptr<php::Class> parse_class(ParseUnitState& puState,
 
 void assign_closure_context(const ParseUnitState&, php::Class*);
 
-php::Class*
-find_closure_context(const ParseUnitState& puState,
-                     php::Func* createClFunc) {
+LSString find_closure_context(const ParseUnitState& puState,
+                              php::Func* createClFunc) {
   if (auto const cls = createClFunc->cls) {
-    if (cls->parentName &&
-        cls->parentName->isame(s_Closure.get())) {
+    if (is_closure(*cls)) {
       // We have a closure created by a closure's invoke method, which
       // means it should inherit the outer closure's context, so we
       // have to know that first.
       assign_closure_context(puState, cls);
       return cls->closureContextCls;
     }
-    return cls;
+    return cls->name;
   }
   return nullptr;
 }
@@ -1041,32 +1043,20 @@ void assign_closure_context(const ParseUnitState& puState,
   clo->closureContextCls = representative;
 }
 
-void find_additional_metadata(const ParseUnitState& puState,
-                              php::Unit* unit) {
-  for (auto& c : unit->classes) {
-    if (!c->parentName || !c->parentName->isame(s_Closure.get())) {
-      continue;
-    }
-    assign_closure_context(puState, c.get());
-  }
-}
-
 //////////////////////////////////////////////////////////////////////
 
 }
 
-std::unique_ptr<php::Constant> parse_constant(const Constant& c, php::Unit* unit) {
+std::unique_ptr<php::Constant> parse_constant(const Constant& c) {
   return std::unique_ptr<php::Constant>(new php::Constant{
-    unit,
     c.name,
     c.val,
     c.attrs | AttrUnique | AttrPersistent
   });
 }
 
-std::unique_ptr<php::Module> parse_module(const Module& m, php::Unit* unit) {
+std::unique_ptr<php::Module> parse_module(const Module& m) {
   return std::unique_ptr<php::Module>(new php::Module{
-    unit,
     m.name,
     php::SrcInfo {{m.line0, m.line1}},
     m.attrs | AttrUnique | AttrPersistent,
@@ -1074,12 +1064,18 @@ std::unique_ptr<php::Module> parse_module(const Module& m, php::Unit* unit) {
   });
 }
 
-std::unique_ptr<php::TypeAlias> parse_type_alias(php::Unit* unit,
-                                                 const TypeAliasEmitter& te) {
+std::unique_ptr<php::TypeAlias> parse_type_alias(const TypeAliasEmitter& te) {
   FTRACE(2, "  type alias: {}\n", te.name()->data());
 
+  auto ts = te.typeStructure();
+  if (RO::EvalEmitBespokeTypeStructures) {
+    if (!ts.isNull() && bespoke::TypeStructure::isValidTypeStructure(ts.get())) {
+      auto const newTs = bespoke::TypeStructure::MakeFromVanillaStatic(ts.get());
+      ts = ArrNR{newTs};
+    }
+  }
+
   return std::unique_ptr<php::TypeAlias>(new php::TypeAlias {
-    unit,
     php::SrcInfo { te.getLocation() },
     te.name(),
     te.value(),
@@ -1087,86 +1083,88 @@ std::unique_ptr<php::TypeAlias> parse_type_alias(php::Unit* unit,
     te.type(),
     te.nullable(),
     te.userAttributes(),
-    te.typeStructure(),
+    ts,
     Array{}
   });
 }
 
-void parse_unit(php::Program& prog, const UnitEmitter* uep) {
-  Trace::Bump bumper{Trace::hhbbc_parse, kSystemLibBump, uep->isASystemLib()};
-  FTRACE(2, "parse_unit {}\n", uep->m_filepath->data());
+ParsedUnit parse_unit(const UnitEmitter& ue) {
+  Trace::Bump bumper{Trace::hhbbc_parse, kSystemLibBump, ue.isASystemLib()};
+  FTRACE(2, "parse_unit {}\n", ue.m_filepath->data());
 
-  if (RuntimeOption::EvalAbortBuildOnVerifyError && !uep->check(false)) {
-    fprintf(
-      stderr,
-      "The unoptimized unit for %s did not pass verification, "
-      "bailing because Eval.AbortBuildOnVerifyError is set\n",
-      uep->m_filepath->data()
-    );
-    _Exit(1);
+  ParsedUnit ret;
+  ret.unit = std::make_unique<php::Unit>();
+
+  ret.unit->filename       = ue.m_filepath;
+  ret.unit->metaData       = ue.m_metaData;
+  ret.unit->fileAttributes = ue.m_fileAttributes;
+  ret.unit->moduleName     = ue.m_moduleName;
+
+  if (RO::EvalAbortBuildOnVerifyError && !ue.check(false)) {
+    // Record a FatalInfo without a location. This represents a
+    // verifier failure.
+    php::FatalInfo fi{
+      std::nullopt,
+      FatalOp::Parse,
+      folly::sformat(
+        "The unoptimized unit for {} did not pass verification, "
+        "bailing because Eval.AbortBuildOnVerifyError is set\n",
+        ue.m_filepath
+      )
+    };
+    ret.unit->fatalInfo = std::make_unique<php::FatalInfo>(std::move(fi));
+    return ret;
   }
-
-  auto const& ue = *uep;
-
-  auto ret      = std::make_unique<php::Unit>();
-  ret->filename = ue.m_filepath;
-  ret->metaData = ue.m_metaData;
-  ret->fileAttributes = ue.m_fileAttributes;
-  ret->moduleName = ue.m_moduleName;
 
   if (ue.m_fatalUnit) {
     php::FatalInfo fi{ue.m_fatalLoc, ue.m_fatalOp, ue.m_fatalMsg};
-    ret->fatalInfo = std::make_unique<php::FatalInfo>(fi);
+    ret.unit->fatalInfo = std::make_unique<php::FatalInfo>(std::move(fi));
   }
 
-  ParseUnitState puState{ prog.nextFuncId };
+  ParseUnitState puState;
 
   for (size_t i = 0; i < ue.numPreClasses(); ++i) {
-    auto cls = parse_class(puState, ret.get(), *ue.pce(i));
-    ret->classes.push_back(std::move(cls));
+    auto cls = parse_class(puState, ret.unit.get(), *ue.pce(i));
+    ret.unit->classes.emplace_back(cls->name);
+    ret.classes.emplace_back(std::move(cls));
   }
 
-  for (auto& fe : ue.fevec()) {
-    auto func = parse_func(puState, ret.get(), nullptr, *fe);
+  for (auto const& fe : ue.fevec()) {
     assertx(!fe->pce());
-    ret->funcs.push_back(std::move(func));
+    auto func = parse_func(puState, ret.unit.get(), nullptr, *fe);
+    ret.unit->funcs.emplace_back(func->name);
+    ret.funcs.emplace_back(std::move(func));
   }
 
-  ret->srcLocs.resize(puState.srcLocs.size());
-  for (auto& srcInfo : puState.srcLocs) {
-    ret->srcLocs[srcInfo.second] = srcInfo.first;
+  ret.unit->srcLocs.resize(puState.srcLocs.size());
+  for (auto const& srcInfo : puState.srcLocs) {
+    ret.unit->srcLocs[srcInfo.second] = srcInfo.first;
   }
 
-  for (auto& te : ue.typeAliases()) {
-    ret->typeAliases.push_back(
-      parse_type_alias(ret.get(), *te)
-    );
+  for (auto const& te : ue.typeAliases()) {
+    ret.unit->typeAliases.emplace_back(parse_type_alias(*te));
   }
 
-  for (auto& c : ue.constants()) {
-    ret->constants.push_back(
-      parse_constant(c, ret.get())
-    );
+  for (auto const& c : ue.constants()) {
+    ret.unit->constants.emplace_back(parse_constant(c));
   }
 
-  for (auto& m : ue.modules()) {
-    ret->modules.push_back(
-      parse_module(m, ret.get())
-    );
+  for (auto const& m : ue.modules()) {
+    ret.unit->modules.emplace_back(parse_module(m));
   }
 
-  find_additional_metadata(puState, ret.get());
-
-  assertx(check(*ret));
-
-  std::lock_guard<std::mutex> _{prog.lock};
-  for (auto const item : puState.constPassFuncs) {
-    prog.constInits.push_back(item);
+  for (auto& c : ret.classes) {
+    if (!is_closure(*c)) continue;
+    assign_closure_context(puState, c.get());
   }
-  auto unitSn = prog.units.size();
-  ret->sn = unitSn;
-  ret->sha1 = SHA1 { unitSn };
-  prog.units.push_back(std::move(ret));
+
+  if (debug) {
+    for (auto const& f : ret.funcs)   always_assert(check(*f));
+    for (auto const& c : ret.classes) always_assert(check(*c));
+  }
+  state_after("parse", ret);
+
+  return ret;
 }
 
 //////////////////////////////////////////////////////////////////////

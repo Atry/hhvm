@@ -3,9 +3,8 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::EnvFlags;
-use crate::ParseError;
-use crate::Profile;
+use std::fs;
+
 // use crate::compile_rust as compile;
 use ocamlrep::rc::RcOc;
 use options::LangFlags;
@@ -19,7 +18,10 @@ use oxidized::namespace_env::Env as NamespaceEnv;
 use oxidized::pos::Pos;
 use oxidized::relative_path::RelativePath;
 use parser_core_types::source_text::SourceText;
-use std::fs;
+
+use crate::EnvFlags;
+use crate::ParseError;
+use crate::Profile;
 
 struct ExprTreeLiteralExtractor {
     literals: Vec<(Pos, ast::ExpressionTree)>,
@@ -96,6 +98,7 @@ fn desugar_and_replace_et_literals(flags: EnvFlags, program: ast::Program, src: 
 /// syntax.
 pub fn desugar_and_print(filepath: RelativePath, flags: EnvFlags) {
     let is_systemlib = flags.contains(EnvFlags::IS_SYSTEMLIB);
+    let types_in_compilation = flags.contains(EnvFlags::TYPES_IN_COMPILATION);
     let opts = Options::from_configs(&[]).expect("Invalid options");
     let content = fs::read(filepath.to_absolute()).unwrap();
     let source_text = SourceText::make(RcOc::new(filepath), &content);
@@ -113,6 +116,7 @@ pub fn desugar_and_print(filepath: RelativePath, flags: EnvFlags) {
         false,
         ns,
         is_systemlib,
+        types_in_compilation,
         &mut Profile::default(),
     ) {
         Err(ParseError(_, msg, _)) => panic!("Parsing failed: {}", msg),

@@ -3,17 +3,19 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use anyhow::Result;
 use datastore::ChangesStore;
 use datastore::DeltaStore;
-use datastore::NonEvictingStore;
 use datastore::ReadonlyStore;
 use hh24_types::ToplevelCanonSymbolHash;
 use hh24_types::ToplevelSymbolHash;
 use naming_provider::NamingProvider;
 use ocamlrep::rc::RcOc;
+use oxidized::file_info;
 use oxidized::file_info::NameType;
-use oxidized::file_info::{self};
 use oxidized::naming_types;
 use parking_lot::Mutex;
 use pos::ConstName;
@@ -22,8 +24,7 @@ use pos::ModuleName;
 use pos::RelativePath;
 use pos::TypeName;
 use reverse_naming_table::ReverseNamingTable;
-use std::path::PathBuf;
-use std::sync::Arc;
+use shm_store::ShmStore;
 
 /// Designed after naming_heap.ml.
 pub struct NamingTable {
@@ -41,14 +42,26 @@ impl NamingTable {
             db.set_db_path(db_path)?;
         }
         Ok(Self {
-            types: ReverseNamingTable::new(Arc::new(TypeDb(Arc::clone(&db)))),
-            funs: ReverseNamingTable::new(Arc::new(FunDb(Arc::clone(&db)))),
+            types: ReverseNamingTable::new(
+                Arc::new(TypeDb(Arc::clone(&db))),
+                "TypePos",
+                "TypeCanon",
+            ),
+            funs: ReverseNamingTable::new(Arc::new(FunDb(Arc::clone(&db))), "FunPos", "FunCanon"),
             consts: ChangesStore::new(Arc::new(DeltaStore::new(
-                Arc::new(NonEvictingStore::new()), // TODO: make this sharedmem
+                Arc::new(ShmStore::new(
+                    "ConstPos",
+                    shm_store::Evictability::NonEvictable,
+                    shm_store::Compression::None,
+                )),
                 Arc::new(ConstDb(Arc::clone(&db))),
             ))),
             modules: ChangesStore::new(Arc::new(DeltaStore::new(
-                Arc::new(NonEvictingStore::new()), // TODO: make this sharedmem
+                Arc::new(ShmStore::new(
+                    "ModulePos",
+                    shm_store::Evictability::NonEvictable,
+                    shm_store::Compression::None,
+                )),
                 Arc::new(ModuleDb(Arc::clone(&db))),
             ))),
             db,
@@ -188,7 +201,7 @@ impl std::fmt::Debug for NamingTable {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 enum Pos {
     Full(pos::BPos),
     File(NameType, RelativePath),
@@ -314,15 +327,18 @@ impl ReadonlyStore<ToplevelSymbolHash, Pos> for ModuleDb {
 }
 
 mod reverse_naming_table {
+    use std::hash::Hash;
+    use std::sync::Arc;
+
     use anyhow::Result;
     use datastore::ChangesStore;
     use datastore::DeltaStore;
-    use datastore::NonEvictingStore;
     use datastore::ReadonlyStore;
     use hh24_types::ToplevelCanonSymbolHash;
     use hh24_types::ToplevelSymbolHash;
-    use std::hash::Hash;
-    use std::sync::Arc;
+    use serde::de::DeserializeOwned;
+    use serde::Serialize;
+    use shm_store::ShmStore;
 
     /// In-memory delta for symbols which support a canon-name lookup API (types
     /// and funs).
@@ -333,11 +349,15 @@ mod reverse_naming_table {
 
     impl<K, P> ReverseNamingTable<K, P>
     where
-        K: Copy + Hash + Eq + Send + Sync + 'static,
+        K: Copy + Hash + Eq + Send + Sync + 'static + Serialize + DeserializeOwned,
         K: Into<ToplevelSymbolHash> + Into<ToplevelCanonSymbolHash>,
-        P: Clone + Send + Sync + 'static,
+        P: Clone + Send + Sync + 'static + Serialize + DeserializeOwned,
     {
-        pub fn new<F>(fallback: Arc<F>) -> Self
+        pub fn new<F>(
+            fallback: Arc<F>,
+            pos_prefix: &'static str,
+            canon_prefix: &'static str,
+        ) -> Self
         where
             F: ReadonlyStore<ToplevelSymbolHash, P>
                 + ReadonlyStore<ToplevelCanonSymbolHash, K>
@@ -345,11 +365,19 @@ mod reverse_naming_table {
         {
             Self {
                 positions: ChangesStore::new(Arc::new(DeltaStore::new(
-                    Arc::new(NonEvictingStore::new()), // TODO: make this sharedmem
+                    Arc::new(ShmStore::new(
+                        pos_prefix,
+                        shm_store::Evictability::NonEvictable,
+                        shm_store::Compression::None,
+                    )),
                     Arc::clone(&fallback) as _,
                 ))),
                 canon_names: ChangesStore::new(Arc::new(DeltaStore::new(
-                    Arc::new(NonEvictingStore::new()), // TODO: make this sharedmem
+                    Arc::new(ShmStore::new(
+                        canon_prefix,
+                        shm_store::Evictability::NonEvictable,
+                        shm_store::Compression::None,
+                    )),
                     fallback,
                 ))),
             }

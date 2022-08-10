@@ -11,13 +11,23 @@ module KMap = Typing_continuations.Map
 
 exception Refactor_sd_exn of string
 
-type mode =
+type analysis_mode =
   | FlagTargets
   | DumpConstraints
   | SimplifyConstraints
   | SolveConstraints [@deriving eq]
 
-type options = { mode: mode }
+type refactor_mode =
+  | Class
+  | Function
+  | Method
+
+type options = {
+  analysis_mode: analysis_mode;
+  refactor_mode: refactor_mode;
+}
+
+type element_info = { element_name: string }
 
 type entity_ =
   | Literal of Pos.t
@@ -30,6 +40,7 @@ type constraint_ =
   | Introduction of Pos.t
   | Upcast of entity_ * Pos.t
   | Subset of entity_ * entity_
+  | Called of Pos.t
 
 type refactor_sd_result =
   | Exists_Upcast of Pos.t

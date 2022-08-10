@@ -229,8 +229,9 @@ pub mod members {
 }
 
 pub mod user_attributes {
-    use lazy_static::lazy_static;
     use std::collections::HashSet;
+
+    use lazy_static::lazy_static;
 
     pub const OVERRIDE: &str = "__Override";
 
@@ -514,8 +515,9 @@ pub mod special_idents {
 }
 
 pub mod pseudo_functions {
-    use lazy_static::lazy_static;
     use std::collections::HashSet;
+
+    use lazy_static::lazy_static;
 
     pub const ISSET: &str = "\\isset";
 
@@ -603,8 +605,9 @@ pub mod std_lib_functions {
 }
 
 pub mod typehints {
-    use lazy_static::lazy_static;
     use std::collections::HashSet;
+
+    use lazy_static::lazy_static;
 
     pub const NULL: &str = "null";
 
@@ -760,8 +763,9 @@ pub mod literal {
 }
 
 pub mod pseudo_consts {
-    use lazy_static::lazy_static;
     use std::collections::HashSet;
+
+    use lazy_static::lazy_static;
 
     pub const G__LINE__: &str = "\\__LINE__";
 
@@ -840,9 +844,11 @@ pub mod readonly {
 }
 
 pub mod coeffects {
-    use lazy_static::lazy_static;
     use std::collections::HashSet;
     use std::fmt;
+
+    use lazy_static::lazy_static;
+    use serde::Serialize;
 
     pub const DEFAULTS: &str = "defaults";
 
@@ -892,7 +898,17 @@ pub mod coeffects {
         ZONED_SET.contains(x)
     }
 
-    #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone)]
+    pub fn is_any_zoned_or_defaults(x: &str) -> bool {
+        lazy_static! {
+            static ref ZONED_SET: HashSet<&'static str> =
+                vec![ZONED, ZONED_WITH, ZONED_LOCAL, ZONED_SHALLOW, DEFAULTS]
+                    .into_iter()
+                    .collect();
+        }
+        ZONED_SET.contains(x)
+    }
+
+    #[derive(PartialEq, Eq, Hash, Debug, Copy, Clone, Serialize)]
     #[repr(C)]
     pub enum Ctx {
         Defaults,
@@ -1064,8 +1080,9 @@ pub mod shapes {
 }
 
 pub mod superglobals {
-    use lazy_static::lazy_static;
     use std::collections::HashSet;
+
+    use lazy_static::lazy_static;
     pub const GLOBALS: &str = "$GLOBALS";
 
     pub static SUPERGLOBALS: &[&str] = &[
@@ -1107,6 +1124,7 @@ pub mod unstable_features {
     pub const READONLY: &str = "readonly";
     pub const EXPRESSION_TREES: &str = "expression_trees";
     pub const MODULES: &str = "modules";
+    pub const MODULE_REFERENCES: &str = "module_references";
 }
 
 pub mod regex {
@@ -1135,6 +1153,7 @@ pub mod expression_trees {
     pub const NULL_TYPE: &str = "nullType";
     pub const VOID_TYPE: &str = "voidType";
     pub const SYMBOL_TYPE: &str = "symbolType";
+    pub const LAMBDA_TYPE: &str = "lambdaType";
 
     pub const VISIT_INT: &str = "visitInt";
     pub const VISIT_FLOAT: &str = "visitFloat";

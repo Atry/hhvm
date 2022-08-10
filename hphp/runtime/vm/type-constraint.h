@@ -232,6 +232,13 @@ struct TypeConstraint {
     return !isCallable() && !isNothing() && !isNoReturn();
   }
 
+  bool validForEnumBase() const {
+    auto const resolved = resolvedWithAutoload();
+    return resolved.isInt() || resolved.isString() ||
+           resolved.isArrayKey() || resolved.isClassname() ||
+           resolved.isNothing();
+  }
+
   /*
    * Format this TypeConstraint for display to the user. Context is used to
    * optionally resolve This to its class name. Extra will cause the resolved

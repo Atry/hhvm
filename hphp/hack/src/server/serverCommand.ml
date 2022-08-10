@@ -54,6 +54,7 @@ let rpc_command_needs_full_check : type a. a t -> bool =
   | GEN_REMOTE_DECLS_FULL -> false
   | GEN_REMOTE_DECLS_INCREMENTAL -> false
   | GEN_SHALLOW_DECLS_DIR _ -> false
+  | GEN_REMOTE_FILES -> false
   | STATS -> false
   | DISCONNECT -> false
   | STATUS_SINGLE _ -> false
@@ -94,6 +95,9 @@ let rpc_command_needs_full_check : type a. a t -> bool =
   | EXTRACT_STANDALONE _ -> false
   | CONCATENATE_ALL _ -> true
   | GO_TO_DEFINITION _ -> false
+  | PREPARE_CALL_HIERARCHY _ -> false
+  | CALL_HIERARCHY_INCOMING_CALLS _ -> true
+  | CALL_HIERARCHY_OUTGOING_CALLS _ -> false
   | BIGCODE _ -> false
   | PAUSE true -> false
   (* when you unpause, then it will catch up *)

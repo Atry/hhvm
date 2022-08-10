@@ -329,8 +329,12 @@ static const struct {
                    {Stack1,           None,         OutNone         }},
   { OpClassHasReifiedGenerics,
                    {Stack1,           Stack1,       OutBoolean      }},
+  { OpGetClsRGProp,
+                   {Stack1,           Stack1,       OutVec          }},
   { OpHasReifiedParent,
                    {Stack1,           Stack1,       OutBoolean      }},
+  { OpCheckClsRGSoft,
+                   {Stack1,           None,         OutNone         }},
   { OpNativeImpl,  {None,             None,         OutNone         }},
   { OpCreateCl,    {BStackN,          Stack1,       OutObject       }},
   { OpIdx,         {StackTop3,        Stack1,       OutUnknown      }},
@@ -950,7 +954,9 @@ bool dontGuardAnyInputs(const NormalizedInstruction& ni) {
   case Op::RecordReifiedGeneric:
   case Op::CheckClsReifiedGenericMismatch:
   case Op::ClassHasReifiedGenerics:
+  case Op::GetClsRGProp:
   case Op::HasReifiedParent:
+  case Op::CheckClsRGSoft:
   case Op::ConcatN:
   case Op::Concat:
   case Op::ContCheck:

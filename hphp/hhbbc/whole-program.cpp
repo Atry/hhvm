@@ -21,11 +21,12 @@
 #include <memory>
 #include <set>
 
+#include <folly/AtomicLinkedList.h>
 #include <folly/Memory.h>
 #include <folly/ScopeGuard.h>
 
+#include "hphp/runtime/vm/repo-global-data.h"
 #include "hphp/runtime/vm/unit-emitter.h"
-#include "hphp/util/struct-log.h"
 
 #include "hphp/hhbbc/analyze.h"
 #include "hphp/hhbbc/class-util.h"
@@ -42,7 +43,14 @@
 #include "hphp/hhbbc/type-system.h"
 #include "hphp/hhbbc/wide-func.h"
 
-namespace HPHP::HHBBC {
+#include "hphp/util/extern-worker.h"
+#include "hphp/util/struct-log.h"
+
+namespace HPHP {
+
+using namespace extern_worker;
+
+namespace HHBBC {
 
 TRACE_SET_MOD(hhbbc);
 
@@ -132,107 +140,133 @@ struct WorkResult {
 
 //////////////////////////////////////////////////////////////////////
 
-template<typename F>
-void all_unit_contexts(const php::Unit* u, F&& fun) {
-  for (auto& c : u->classes) {
-    for (auto& m : c->methods) {
-      fun(Context { u, m.get(), c.get()});
+std::vector<Context> all_unit_contexts(const Index& index,
+                                       const php::Unit& u) {
+  std::vector<Context> ret;
+  index.for_each_unit_class(
+    u,
+    [&] (const php::Class& c) {
+      for (auto const& m : c.methods) {
+        ret.emplace_back(Context { &u, m.get(), &c });
+      }
     }
-  }
-  for (auto& f : u->funcs) {
-    fun(Context { u, f.get() });
-  }
+  );
+  index.for_each_unit_func(
+    u,
+    [&] (const php::Func& f) { ret.emplace_back(Context { &u, &f }); }
+  );
+  return ret;
 }
 
-std::vector<Context> const_pass_contexts(const php::Program& program) {
+std::vector<Context> const_pass_contexts(const Index& index) {
+  /*
+   * Set of functions that should be processed in the constant
+   * propagation pass.
+   *
+   * Must include every function with a DefCns for correctness; cinit,
+   * pinit and sinit functions are added to improve overall
+   * performance.
+   */
   std::vector<Context> ret;
-  ret.reserve(program.constInits.size());
-  for (auto func : program.constInits) {
-    assertx(func);
-    ret.push_back(Context { func->unit, func, func->cls });
+  for (auto const& c : index.program().classes) {
+    for (auto const& m : c->methods) {
+      if (m->name == s_86cinit.get() ||
+          m->name == s_86pinit.get() ||
+          m->name == s_86sinit.get() ||
+          m->name == s_86linit.get()) {
+        ret.emplace_back(
+          Context {
+            index.lookup_class_unit(*c),
+            m.get(),
+            c.get()
+          }
+        );
+      }
+    }
   }
   return ret;
 }
 
 // Return all the WorkItems we'll need to start analyzing this
 // program.
-std::vector<WorkItem> initial_work(const php::Program& program,
+std::vector<WorkItem> initial_work(const Index& index,
                                    AnalyzeMode mode) {
   std::vector<WorkItem> ret;
 
   if (mode == AnalyzeMode::ConstPass) {
-    auto const ctxs = const_pass_contexts(program);
+    auto const ctxs = const_pass_contexts(index);
     std::transform(begin(ctxs), end(ctxs), std::back_inserter(ret),
       [&] (Context ctx) { return WorkItem { WorkType::Func, ctx }; }
     );
     return ret;
   }
 
-  for (auto& u : program.units) {
-    /*
-     * If we're not doing private property inference, schedule only
-     * function-at-a-time work items.
-     */
-    if (!options.HardPrivatePropInference) {
-      all_unit_contexts(u.get(), [&] (Context&& c) {
-          ret.emplace_back(WorkType::Func, std::move(c));
-        }
-      );
+  auto const& program = index.program();
+  for (auto const& c : program.classes) {
+    if (c->closureContextCls) {
+      // For class-at-a-time analysis, closures that are associated
+      // with a class context are analyzed as part of that context.
       continue;
     }
-
-    for (auto& c : u->classes) {
-      if (c->closureContextCls) {
-        // For class-at-a-time analysis, closures that are associated
-        // with a class context are analyzed as part of that context.
-        continue;
+    auto const unit = index.lookup_class_unit(*c);
+    if (is_used_trait(*c)) {
+      for (auto const& f : c->methods) {
+        ret.emplace_back(
+          WorkType::Func,
+          Context { unit, f.get(), f->cls }
+        );
       }
-      if (is_used_trait(*c)) {
-        for (auto& f : c->methods) {
-          ret.emplace_back(WorkType::Func,
-                           Context { u.get(), f.get(), f->cls });
-        }
-      } else {
-        ret.emplace_back(WorkType::Class,
-                         Context { u.get(), nullptr, c.get() });
-      }
+    } else {
+      ret.emplace_back(
+        WorkType::Class,
+        Context { unit, nullptr, c.get() }
+      );
     }
-    for (auto& f : u->funcs) {
-      ret.emplace_back(WorkType::Func, Context { u.get(), f.get() });
-    }
+  }
+  for (auto const& f : program.funcs) {
+    ret.emplace_back(
+      WorkType::Func,
+      Context { index.lookup_func_unit(*f), f.get() }
+    );
   }
   return ret;
 }
 
-std::vector<Context> opt_prop_type_hints_contexts(const php::Program& program) {
+std::vector<Context> opt_prop_type_hints_contexts(const Index& index) {
   std::vector<Context> ret;
-  for (auto& u : program.units) {
-    for (auto& c : u->classes) {
-      ret.emplace_back(Context { u.get(), nullptr, c.get() });
-    }
+  for (auto const& c : index.program().classes) {
+    ret.emplace_back(
+      Context { index.lookup_class_unit(*c), nullptr, c.get() }
+    );
   }
   return ret;
 }
 
-WorkItem work_item_for(const DependencyContext& d, AnalyzeMode mode) {
+WorkItem work_item_for(const DependencyContext& d,
+                       AnalyzeMode mode,
+                       const Index& index) {
   switch (d.tag()) {
     case DependencyContextType::Class: {
       auto const cls = (const php::Class*)d.ptr();
       assertx(mode != AnalyzeMode::ConstPass &&
-              options.HardPrivatePropInference &&
               !is_used_trait(*cls));
-      return WorkItem { WorkType::Class, Context { cls->unit, nullptr, cls } };
+      return WorkItem {
+        WorkType::Class,
+        Context { index.lookup_class_unit(*cls), nullptr, cls }
+      };
     }
     case DependencyContextType::Func: {
       auto const func = (const php::Func*)d.ptr();
-      auto const cls = !func->cls ? nullptr :
-        func->cls->closureContextCls ?
-        func->cls->closureContextCls : func->cls;
+      auto const cls = func->cls
+        ? index.lookup_closure_context(*func->cls)
+        : nullptr;
       assertx(!cls ||
               mode == AnalyzeMode::ConstPass ||
-              !options.HardPrivatePropInference ||
               is_used_trait(*cls));
-      return WorkItem { WorkType::Func, Context { func->unit, func, cls } };
+      return WorkItem {
+        WorkType::Func,
+        Context { index.lookup_func_unit(*func), func, cls }
+      };
     }
     case DependencyContextType::Prop:
     case DependencyContextType::FuncFamily:
@@ -266,8 +300,7 @@ WorkItem work_item_for(const DependencyContext& d, AnalyzeMode mode) {
  * Repeat until the work list is empty.
  *
  */
-void analyze_iteratively(Index& index, php::Program& program,
-                         AnalyzeMode mode) {
+void analyze_iteratively(Index& index, AnalyzeMode mode) {
   trace_time tracer(mode == AnalyzeMode::ConstPass ?
                     "analyze constants" : "analyze iteratively");
 
@@ -285,7 +318,7 @@ void analyze_iteratively(Index& index, php::Program& program,
 
   std::vector<DependencyContextSet> deps_vec{parallel::num_threads};
 
-  auto work = initial_work(program, mode);
+  auto work = initial_work(index, mode);
   while (!work.empty()) {
     auto results = [&] {
       trace_time trace(
@@ -327,7 +360,7 @@ void analyze_iteratively(Index& index, php::Program& program,
       index.refine_constants(fa, deps);
       update_bytecode(func, std::move(fa.blockUpdates));
 
-      if (options.AnalyzePublicStatics && mode == AnalyzeMode::NormalPass) {
+      if (mode == AnalyzeMode::NormalPass) {
         index.record_public_static_mutations(
           *func,
           std::move(fa.publicSPropMutations)
@@ -337,16 +370,17 @@ void analyze_iteratively(Index& index, php::Program& program,
       if (fa.resolvedConstants.size()) {
         index.refine_class_constants(fa.ctx, fa.resolvedConstants, deps);
       }
-      for (auto& kv : fa.closureUseTypes) {
-        assertx(is_closure(*kv.first));
-        if (index.refine_closure_use_vars(kv.first, kv.second)) {
-          auto const func = find_method(kv.first, s_invoke.get());
+      for (auto const& [cls, vars] : fa.closureUseTypes) {
+        assertx(is_closure(*cls));
+        if (index.refine_closure_use_vars(cls, vars)) {
+          auto const func = find_method(cls, s_invoke.get());
           always_assert_flog(
             func != nullptr,
             "Failed to find __invoke on {} during index update\n",
-            kv.first->name->data()
+            cls->name
           );
-          auto const ctx = Context { func->unit, func, kv.first };
+          auto const ctx =
+            Context { index.lookup_func_unit(*func), func, cls };
           deps.insert(index.dependency_context(ctx));
         }
       }
@@ -397,21 +431,21 @@ void analyze_iteratively(Index& index, php::Program& program,
 
     auto& deps = deps_vec[0];
 
-    if (options.AnalyzePublicStatics && mode == AnalyzeMode::NormalPass) {
+    if (mode == AnalyzeMode::NormalPass) {
       index.refine_public_statics(deps);
     }
 
     work.clear();
     work.reserve(deps.size());
-    for (auto& d : deps) work.push_back(work_item_for(d, mode));
+    for (auto& d : deps) work.push_back(work_item_for(d, mode, index));
     deps.clear();
   }
 }
 
-void prop_type_hint_pass(Index& index, php::Program& program) {
+void prop_type_hint_pass(Index& index) {
   trace_time tracer("optimize prop type-hints");
 
-  auto const contexts = opt_prop_type_hints_contexts(program);
+  auto const contexts = opt_prop_type_hints_contexts(index);
   parallel::for_each(
     contexts,
     [&] (Context ctx) { optimize_class_prop_type_hints(index, ctx); }
@@ -441,37 +475,30 @@ void prop_type_hint_pass(Index& index, php::Program& program) {
  */
 template<typename F>
 void final_pass(Index& index,
-                php::Program& program,
                 const StatsHolder& stats,
                 F emitUnit) {
   trace_time final_pass("final pass");
   index.freeze();
   auto const dump_dir = debug_dump_to();
   parallel::for_each(
-    program.units,
-    [&] (std::unique_ptr<php::Unit>& unit) {
+    index.program().units,
+    [&] (const std::unique_ptr<php::Unit>& unit) {
       // optimize_func can remove 86*init methods from classes, so we
       // have to save the contexts for now.
-      std::vector<Context> contexts;
-      all_unit_contexts(unit.get(), [&] (Context&& ctx) {
-          contexts.push_back(std::move(ctx));
-        }
-      );
-      for (auto const& context : contexts) {
+      for (auto const& context : all_unit_contexts(index, *unit)) {
         // This const_cast is safe since no two threads update the same Func.
         auto func = php::WideFunc::mut(const_cast<php::Func*>(context.func));
         auto const ctx = AnalysisContext { context.unit, func, context.cls };
         optimize_func(index, analyze_func(index, ctx, CollectionOpts{}), func);
       }
-      assertx(check(*unit));
-      state_after("optimize", *unit);
+      state_after("optimize", *unit, index);
       if (!dump_dir.empty()) {
         if (Trace::moduleEnabledRelease(Trace::hhbbc_dump, 2)) {
-          dump_representation(dump_dir, unit.get());
+          dump_representation(dump_dir, index, *unit);
         }
-        dump_index(dump_dir, index, unit.get());
+        dump_index(dump_dir, index, *unit);
       }
-      collect_stats(stats, index, unit.get());
+      collect_stats(stats, index, *unit);
       emitUnit(*unit);
     }
   );
@@ -483,29 +510,186 @@ void final_pass(Index& index,
 
 //////////////////////////////////////////////////////////////////////
 
-namespace php {
+// Right now Key is nothing, and Value is the UnitEmitter.
 
-void ProgramPtr::clear() { delete m_program; }
+struct WholeProgramInput::Key::Impl {
+  enum class Type {
+    Fail,
+    Unit,
+    Func,
+    Class
+  };
+  Type type;
+  LSString name;
+  std::vector<SString> dependencies;
+
+  Impl(Type type, SString name, std::vector<SString> dependencies)
+    : type{type}, name{name}, dependencies{std::move(dependencies)} {}
+};
+struct WholeProgramInput::Value::Impl {
+  std::unique_ptr<php::Func> func;
+  std::unique_ptr<php::Class> cls;
+  std::unique_ptr<php::Unit> unit;
+
+  explicit Impl(std::nullptr_t) {}
+  explicit Impl(std::unique_ptr<php::Func> func) : func{std::move(func)} {}
+  explicit Impl(std::unique_ptr<php::Class> cls) : cls{std::move(cls)} {}
+  explicit Impl(std::unique_ptr<php::Unit> unit) : unit{std::move(unit)} {}
+};
+struct WholeProgramInput::Impl {
+  folly::AtomicLinkedList<std::pair<Key, Ref<Value>>> values;
+};
+
+WholeProgramInput::WholeProgramInput() : m_impl{new Impl} {}
+
+void WholeProgramInput::add(Key k, extern_worker::Ref<Value> v) {
+  assertx(m_impl);
+  m_impl->values.insertHead(std::make_pair(std::move(k), std::move(v)));
+}
+
+std::vector<std::pair<WholeProgramInput::Key, WholeProgramInput::Value>>
+WholeProgramInput::make(std::unique_ptr<UnitEmitter> ue) {
+  assertx(ue);
+
+  auto parsed = parse_unit(*ue);
+
+  std::vector<std::pair<Key, Value>> out;
+
+  auto const add = [&] (Key::Impl::Type type,
+                        SString name,
+                        auto v,
+                        std::vector<SString> deps = {}) {
+    Key key;
+    Value value;
+    key.m_impl.reset(new Key::Impl{type, name, std::move(deps)});
+    value.m_impl.reset(new Value::Impl{std::move(v)});
+    out.emplace_back(std::move(key), std::move(value));
+  };
+
+  if (parsed.unit) {
+    if (auto const& fi = parsed.unit->fatalInfo) {
+      if (!fi->fatalLoc) {
+        add(Key::Impl::Type::Fail, makeStaticString(fi->fatalMsg), nullptr);
+        return out;
+      }
+    }
+    auto const name = parsed.unit->filename;
+    add(Key::Impl::Type::Unit, name, std::move(parsed.unit));
+  }
+  for (auto& c : parsed.classes) {
+    auto const name = c->name;
+    auto deps = Index::Input::makeDeps(*c);
+    add(
+      Key::Impl::Type::Class,
+      name,
+      std::move(c),
+      std::move(deps)
+    );
+  }
+  for (auto& f : parsed.funcs) {
+    auto const name = f->name;
+    add(Key::Impl::Type::Func, name, std::move(f));
+  }
+  return out;
+}
+
+void WholeProgramInput::Key::serde(BlobEncoder& sd) const {
+  assertx(m_impl);
+  sd(m_impl->type)(m_impl->name);
+  if (m_impl->type == Impl::Type::Class) sd(m_impl->dependencies);
+}
+void WholeProgramInput::Key::serde(BlobDecoder& sd) {
+  Key::Impl::Type type;
+  SString name;
+  std::vector<SString> dependencies;
+  sd(type)(name);
+  if (type == Impl::Type::Class) sd(dependencies);
+  m_impl.reset(new Impl{type, name, std::move(dependencies)});
+}
+
+void WholeProgramInput::Value::serde(BlobEncoder& sd) const {
+  assertx(m_impl);
+  assertx(
+    (bool)m_impl->func + (bool)m_impl->cls + (bool)m_impl->unit <= 1
+  );
+  if (m_impl->func) {
+    sd(m_impl->func, nullptr);
+  } else if (m_impl->cls) {
+    sd(m_impl->cls);
+  } else if (m_impl->unit) {
+    sd(m_impl->unit);
+  }
+}
+
+void WholeProgramInput::Key::Deleter::operator()(Impl* i) const {
+  delete i;
+}
+void WholeProgramInput::Value::Deleter::operator()(Impl* i) const {
+  delete i;
+}
+void WholeProgramInput::Deleter::operator()(Impl* i) const {
+  delete i;
+}
+
+//////////////////////////////////////////////////////////////////////
+
+namespace {
+
+Index::Input make_index_input(WholeProgramInput input) {
+  Index::Input out;
+
+  using WPI = WholeProgramInput;
+  using Key = WPI::Key::Impl;
+
+  input.m_impl->values.sweep(
+    [&] (std::pair<WPI::Key, Ref<WPI::Value>>&& p) {
+      switch (p.first.m_impl->type) {
+        case Key::Type::Fail:
+          // An unit which failed the verifier. This causes us
+          // to exit immediately with an error.
+           fprintf(stderr, "%s", p.first.m_impl->name->data());
+           _Exit(1);
+           break;
+         case Key::Type::Class:
+           out.classes.emplace_back(
+             Index::Input::ClassMeta{
+               p.second.cast<std::unique_ptr<php::Class>>(),
+               p.first.m_impl->name,
+               std::move(p.first.m_impl->dependencies)
+             }
+           );
+           break;
+         case Key::Type::Func:
+           out.funcs.emplace_back(
+             p.first.m_impl->name,
+             p.second.cast<std::unique_ptr<php::Func>>()
+           );
+           break;
+         case Key::Type::Unit:
+           out.units.emplace_back(
+             p.first.m_impl->name,
+             p.second.cast<std::unique_ptr<php::Unit>>()
+           );
+           break;
+      }
+    }
+  );
+
+  return out;
+}
 
 }
 
-php::ProgramPtr make_program() {
-  return php::ProgramPtr{ new php::Program };
-}
+//////////////////////////////////////////////////////////////////////
 
-void add_unit_to_program(const UnitEmitter* ue, php::Program& program) {
-  parse_unit(program, ue);
-}
-
-void whole_program(php::ProgramPtr program,
-                   const UnitEmitterCallback& callback,
+void whole_program(WholeProgramInput inputs,
+                   std::unique_ptr<coro::TicketExecutor> executor,
+                   std::unique_ptr<Client> client,
+                   const EmitCallback& callback,
+                   DisposeCallback dispose,
                    Optional<StructuredLogEntry> sample,
                    int num_threads) {
   trace_time tracer("whole program");
-
-  if (options.TestCompression || RO::EvalHHBBCTestCompression) {
-    php::testCompression(*program);
-  }
 
   if (num_threads > 0) {
     parallel::num_threads = num_threads;
@@ -513,13 +697,17 @@ void whole_program(php::ProgramPtr program,
     parallel::final_threads = (num_threads > 1) ? (num_threads - 1) : 1;
   }
 
-  state_after("parse", *program);
+  Index index{
+    make_index_input(std::move(inputs)),
+    std::move(executor),
+    std::move(client),
+    std::move(dispose)
+  };
 
-  Index index(program.get());
   auto stats = allocate_stats();
   auto const emitUnit = [&] (php::Unit& unit) {
     auto ue = emit_unit(index, unit);
-    if (RuntimeOption::EvalAbortBuildOnVerifyError && !ue->check(false)) {
+    if (RO::EvalAbortBuildOnVerifyError && !ue->check(false)) {
       fprintf(
         stderr,
         "The optimized unit for %s did not pass verification, "
@@ -531,49 +719,32 @@ void whole_program(php::ProgramPtr program,
     callback(std::move(ue));
   };
 
-  if (!options.NoOptimizations) {
-    auto cleanup_pre_analysis = std::thread([&] { index.cleanup_pre_analysis(); });
-    assertx(check(*program));
-    prop_type_hint_pass(index, *program);
-    index.rewrite_default_initial_values(*program);
-    index.use_class_dependencies(false);
-    analyze_iteratively(index, *program, AnalyzeMode::ConstPass);
-    // Defer preresolve type-structures and initializing public static
-    // property types until after the constant pass, to try to get
-    // better initial values.
-    index.preresolve_type_structures(*program);
-    index.init_public_static_prop_types();
-    index.preinit_bad_initial_prop_values();
-    index.use_class_dependencies(options.HardPrivatePropInference);
-    analyze_iteratively(index, *program, AnalyzeMode::NormalPass);
-    auto cleanup_for_final = std::thread([&] { index.cleanup_for_final(); });
-    index.join_iface_vtable_thread();
-    parallel::num_threads = parallel::final_threads;
-    final_pass(index, *program, stats, emitUnit);
-    cleanup_pre_analysis.join();
-    cleanup_for_final.join();
-  } else {
-    debug_dump_program(index, *program);
-    index.join_iface_vtable_thread();
-    parallel::for_each(
-      program->units,
-      [&] (const std::unique_ptr<php::Unit>& unit) {
-        collect_stats(stats, index, unit.get());
-        emitUnit(*unit);
-      }
-    );
-  }
+  auto cleanup_pre_analysis =
+    std::thread([&] { index.cleanup_pre_analysis(); });
+  assertx(check(index.program()));
+  prop_type_hint_pass(index);
+  index.rewrite_default_initial_values();
+  index.use_class_dependencies(false);
+  analyze_iteratively(index, AnalyzeMode::ConstPass);
+  // Defer preresolve type-structures and initializing public static
+  // property types until after the constant pass, to try to get
+  // better initial values.
+  index.preresolve_type_structures();
+  index.init_public_static_prop_types();
+  index.preinit_bad_initial_prop_values();
+  index.use_class_dependencies(true);
+  analyze_iteratively(index, AnalyzeMode::NormalPass);
+  auto cleanup_for_final = std::thread([&] { index.cleanup_for_final(); });
+  index.join_iface_vtable_thread();
+  parallel::num_threads = parallel::final_threads;
+  final_pass(index, stats, emitUnit);
+  cleanup_pre_analysis.join();
+  cleanup_for_final.join();
 
   print_stats(stats);
 
-  auto const numUnits = program->units.size();
-  {
-    auto const logging = Trace::moduleEnabledRelease(Trace::hhbbc_time, 1);
-    auto const enable =
-      logging && !Trace::moduleEnabledRelease(Trace::hhbbc_time, 1);
-    Trace::BumpRelease bumper(Trace::hhbbc_time, -1, enable);
-    index.cleanup_post_emit(std::move(program));
-  }
+  auto const numUnits = index.program().units.size();
+  index.cleanup_post_emit();
 
   summarize_memory(sample.get_pointer());
   if (sample && numUnits >= RO::EvalHHBBCMinUnitsToLog) {
@@ -587,4 +758,4 @@ void whole_program(php::ProgramPtr program,
 
 //////////////////////////////////////////////////////////////////////
 
-}
+}}

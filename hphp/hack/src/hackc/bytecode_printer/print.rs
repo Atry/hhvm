@@ -3,26 +3,12 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::coeffects;
-use crate::context::Context;
-use crate::write::angle;
-use crate::write::braces;
-use crate::write::concat;
-use crate::write::concat_by;
-use crate::write::concat_str;
-use crate::write::concat_str_by;
-use crate::write::fmt_separated;
-use crate::write::fmt_separated_with;
-use crate::write::newline;
-use crate::write::option;
-use crate::write::option_or;
-use crate::write::paren;
-use crate::write::quotes;
-use crate::write::square;
-use crate::write::triple_quotes;
-use crate::write::wrap_by;
-use crate::write::Error;
-use crate::write::{self};
+use std::borrow::Cow;
+use std::io;
+use std::io::Result;
+use std::io::Write;
+use std::write;
+
 use ffi::Maybe;
 use ffi::Maybe::*;
 use ffi::Pair;
@@ -68,12 +54,28 @@ use hhbc_string_utils::float;
 use hhvm_types_ffi::ffi::*;
 use itertools::Itertools;
 use oxidized::ast_defs;
-use std::borrow::Cow;
-use std::io::Result;
-use std::io::Write;
-use std::io::{self};
-use std::write;
 use write_bytes::write_bytes;
+
+use crate::coeffects;
+use crate::context::Context;
+use crate::write;
+use crate::write::angle;
+use crate::write::braces;
+use crate::write::concat;
+use crate::write::concat_by;
+use crate::write::concat_str;
+use crate::write::concat_str_by;
+use crate::write::fmt_separated;
+use crate::write::fmt_separated_with;
+use crate::write::newline;
+use crate::write::option;
+use crate::write::option_or;
+use crate::write::paren;
+use crate::write::quotes;
+use crate::write::square;
+use crate::write::triple_quotes;
+use crate::write::wrap_by;
+use crate::write::Error;
 
 macro_rules! write_if {
     ($pred:expr, $($rest:tt)*) => {
@@ -1139,6 +1141,7 @@ fn print_type_info_(w: &mut dyn Write, is_enum: bool, ti: &HhasTypeInfo<'_>) -> 
 }
 
 // T125888411: User type not printed
+// T126391106: also -- no name and "" as a name both print as "", which is ambiguous for the assembler
 fn print_typedef_info(w: &mut dyn Write, ti: &HhasTypeInfo<'_>) -> Result<()> {
     angle(w, |w| {
         write_bytes!(

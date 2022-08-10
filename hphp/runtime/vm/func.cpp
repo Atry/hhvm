@@ -721,7 +721,7 @@ Func::SharedData::SharedData(BCPtr bc, Offset bclen,
   m_allFlags.m_returnByValue = false;
   m_allFlags.m_isMemoizeWrapper = false;
   m_allFlags.m_isMemoizeWrapperLSB = false;
-  m_allFlags.m_isKeyedByImplicitContextMemoize = false;
+  m_allFlags.m_memoizeICType = Func::MemoizeICType::NoIC;
   m_allFlags.m_isPhpLeafFn = isPhpLeafFn;
   m_allFlags.m_hasReifiedGenerics = false;
   m_allFlags.m_hasParamsWithMultiUBs = false;
@@ -884,9 +884,9 @@ Func* Func::load(const StringData* name) {
 namespace {
 void handleModuleBoundaryViolation(const Func* callee, const Func* caller) {
   if (!RO::EvalEnforceModules || !callee || !caller) return;
-  auto const moduleName = caller->unit()->moduleName();
-  if (!will_call_raise_module_boundary_violation(callee, moduleName)) return;
-  raiseModuleBoundaryViolation(nullptr, callee, moduleName);
+  if (will_symbol_raise_module_boundary_violation(callee, caller)) {
+    raiseModuleBoundaryViolation(nullptr, callee, caller->moduleName());
+  }
 }
 } // namespace
 

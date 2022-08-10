@@ -49,6 +49,7 @@ impl<'a> PushCount<'a> for instr::Hhbc {
         match self {
             // --- 0 pushed values
             Hhbc::CheckClsReifiedGenericMismatch(..)
+            | Hhbc::CheckClsRGSoft(..)
             | Hhbc::CheckThis(_)
             | Hhbc::ContCheck(..)
             | Hhbc::InitProp(..)
@@ -113,6 +114,7 @@ impl<'a> PushCount<'a> for instr::Hhbc {
             | Hhbc::CreateCl { .. }
             | Hhbc::CreateCont(..)
             | Hhbc::Div(..)
+            | Hhbc::GetClsRGProp(..)
             | Hhbc::GetMemoKeyL(..)
             | Hhbc::HasReifiedParent(..)
             | Hhbc::Idx(..)
@@ -149,6 +151,7 @@ impl<'a> PushCount<'a> for instr::Hhbc {
             | Hhbc::Pow(..)
             | Hhbc::Print(..)
             | Hhbc::RecordReifiedGeneric(..)
+            | Hhbc::ResolveClass(..)
             | Hhbc::ResolveClsMethod(..)
             | Hhbc::ResolveClsMethodD(..)
             | Hhbc::ResolveClsMethodS(..)

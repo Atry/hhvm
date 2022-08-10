@@ -3,34 +3,32 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<5dc75b2deb593ef70fb33420b9fe9e6e>>
+// @generated SignedSource<<7e84cd062e73caf2def04e1b14883a47>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
 
 use arena_trait::TrivialDrop;
-use eq_modulo_pos::EqModuloPos;
-use eq_modulo_pos::EqModuloPosAndReason;
-use no_pos_hash::NoPosHash;
-use ocamlrep_derive::FromOcamlRep;
-use ocamlrep_derive::FromOcamlRepIn;
-use ocamlrep_derive::ToOcamlRep;
-use serde::Deserialize;
-use serde::Serialize;
-
-#[allow(unused_imports)]
-use crate::*;
-
-pub use crate::ast_defs::shape_map;
-
 pub use ast_defs::OgNullFlavor;
 pub use ast_defs::Pos;
 pub use ast_defs::PositionedByteString;
 pub use ast_defs::PropOrMethod;
 pub use ast_defs::Pstring;
 pub use ast_defs::Visibility;
+use eq_modulo_pos::EqModuloPos;
+use eq_modulo_pos::EqModuloPosAndReason;
 pub use local_id::LocalId;
+use no_pos_hash::NoPosHash;
+use ocamlrep_derive::FromOcamlRep;
+use ocamlrep_derive::FromOcamlRepIn;
+use ocamlrep_derive::ToOcamlRep;
+use serde::Deserialize;
+use serde::Serialize;
 pub use shape_map::ShapeMap;
+
+pub use crate::ast_defs::shape_map;
+#[allow(unused_imports)]
+use crate::*;
 
 #[derive(
     Clone,
@@ -190,6 +188,7 @@ pub struct Contexts(pub Pos, pub Vec<Hint>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "hfparam_")]
 #[repr(C)]
 pub struct HfParamInfo {
     pub kind: ast_defs::ParamKind,
@@ -212,6 +211,7 @@ pub struct HfParamInfo {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "hf_")]
 #[repr(C)]
 pub struct HintFun {
     pub is_readonly: Option<ast_defs::ReadonlyKind>,
@@ -380,6 +380,7 @@ pub enum TypeRefinement {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "tr_")]
 #[repr(C)]
 pub struct TypeRefinementBounds {
     pub lower: Vec<Hint>,
@@ -402,6 +403,7 @@ pub struct TypeRefinementBounds {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "sfi_")]
 #[repr(C)]
 pub struct ShapeFieldInfo {
     pub optional: bool,
@@ -425,6 +427,7 @@ pub struct ShapeFieldInfo {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "nsi_")]
 #[repr(C)]
 pub struct NastShapeInfo {
     pub allows_unknown_fields: bool,
@@ -531,6 +534,7 @@ arena_deserializer::impl_deserialize_in_arena!(TypedefVisibility);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "e_")]
 #[repr(C)]
 pub struct Enum_ {
     pub base: Hint,

@@ -1282,14 +1282,14 @@ static xmlDocPtr serialize_response_call(
           }
         }
         hdr_ret = ht->m_data;
-        obj->setProp(nullptr, s_headerfault.get(), *hdr_ret.asTypedValue());
+        obj->setProp(nullctx, s_headerfault.get(), *hdr_ret.asTypedValue());
       }
 
       if (h->function) {
         if (serialize_response_call2(head, h->function,
                                      h->function_name.data(), uri,
                                      hdr_ret, version, 0) == SOAP_ENCODED) {
-          obj->setProp(nullptr, s_headerfault.get(), *hdr_ret.asTypedValue());
+          obj->setProp(nullctx, s_headerfault.get(), *hdr_ret.asTypedValue());
           use = SOAP_ENCODED;
         }
       } else {
@@ -2462,8 +2462,8 @@ void HHVM_METHOD(SoapClient, __construct,
     if (wsdl.isNull()) {
       /* Fetching non-WSDL mode options */
       data->m_uri   = options[s_uri].toString();
-      data->m_style = options[s_style].toInt32(); // SOAP_RPC || SOAP_DOCUMENT
-      data->m_use   = options[s_use].toInt32(); // SOAP_LITERAL || SOAP_ENCODED
+      data->m_style = (int)options[s_style].toInt64(); // SOAP_RPC || SOAP_DOCUMENT
+      data->m_use   = (int)options[s_use].toInt64(); // SOAP_LITERAL || SOAP_ENCODED
 
       if (data->m_uri.empty()) {
         throw SoapException("'uri' option is required in nonWSDL mode");
@@ -2485,15 +2485,15 @@ void HHVM_METHOD(SoapClient, __construct,
     }
 
     if (options.exists(s_soap_version)) {
-      data->m_soap_version = options[s_soap_version].toInt32();
+      data->m_soap_version = (int)options[s_soap_version].toInt64();
     }
 
     data->m_login = options[s_login].toString();
     data->m_password = options[s_password].toString();
-    data->m_authentication = options[s_authentication].toInt32();
+    data->m_authentication = (int)options[s_authentication].toInt64();
 
     data->m_proxy_host = options[s_proxy_host].toString();
-    data->m_proxy_port = options[s_proxy_port].toInt32();
+    data->m_proxy_port = (int)options[s_proxy_port].toInt64();
     data->m_proxy_login = options[s_proxy_login].toString();
     data->m_proxy_password = options[s_proxy_password].toString();
 
@@ -2506,7 +2506,7 @@ void HHVM_METHOD(SoapClient, __construct,
       data->m_exceptions = options[s_exceptions].toBoolean();
     }
     if (options.exists(s_compression)) {
-      data->m_compression = options[s_compression].toInt32();
+      data->m_compression = (int)options[s_compression].toInt64();
     }
 
     String encoding = options[s_encoding].toString();
@@ -2519,8 +2519,8 @@ void HHVM_METHOD(SoapClient, __construct,
       s_soap_data->register_encoding(data->m_encoding);
     }
     data->m_client_classmap = options[s_classmap].toArray();
-    data->m_features = options[s_features].toInt32();
-    data->m_ssl_method = options[s_ssl_method].toInt32();
+    data->m_features = (int)options[s_features].toInt64();
+    data->m_ssl_method = (int)options[s_ssl_method].toInt64();
     data->m_connection_timeout = options[s_connection_timeout].toInt64();
     data->m_user_agent = options[s_user_agent].toString();
 
@@ -3030,19 +3030,19 @@ void HHVM_METHOD(SoapVar, __construct,
       return;
     }
   }
-  this_->setProp(nullptr, s_enc_type.get(), make_tv<KindOfInt64>(ntype));
-  if (data.toBoolean()) this_->setProp(nullptr, s_enc_value.get(), *data.asTypedValue());
+  this_->setProp(nullctx, s_enc_type.get(), make_tv<KindOfInt64>(ntype));
+  if (data.toBoolean()) this_->setProp(nullctx, s_enc_value.get(), *data.asTypedValue());
   if (!type_name.empty()) {
-    this_->setProp(nullptr, s_enc_stype.get(), type_name.asTypedValue());
+    this_->setProp(nullctx, s_enc_stype.get(), type_name.asTypedValue());
   }
   if (!type_namespace.empty()) {
-    this_->setProp(nullptr, s_enc_ns.get(), type_namespace.asTypedValue());
+    this_->setProp(nullctx, s_enc_ns.get(), type_namespace.asTypedValue());
   }
   if (!node_name.empty()) {
-    this_->setProp(nullptr, s_enc_name.get(), node_name.asTypedValue());
+    this_->setProp(nullctx, s_enc_name.get(), node_name.asTypedValue());
   }
   if (!node_namespace.empty()) {
-    this_->setProp(nullptr, s_enc_namens.get(), node_namespace.asTypedValue());
+    this_->setProp(nullctx, s_enc_namens.get(), node_namespace.asTypedValue());
   }
 }
 
@@ -3101,10 +3101,10 @@ void HHVM_METHOD(SoapHeader, __construct,
   nativeData->m_data = data;
   nativeData->m_mustUnderstand = mustunderstand;
 
-  this_->setProp(nullptr, s_namespace.get(), ns.asTypedValue());
-  this_->setProp(nullptr, s_name.get(), name.asTypedValue());
-  this_->setProp(nullptr, s_data.get(), data.asInitTVTmp());
-  this_->setProp(nullptr, s_mustUnderstand.get(),
+  this_->setProp(nullctx, s_namespace.get(), ns.asTypedValue());
+  this_->setProp(nullctx, s_name.get(), name.asTypedValue());
+  this_->setProp(nullctx, s_data.get(), data.asInitTVTmp());
+  this_->setProp(nullctx, s_mustUnderstand.get(),
                  make_tv<KindOfBoolean>(mustunderstand));
 
   if (actor.isInteger() &&

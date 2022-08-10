@@ -420,6 +420,7 @@ type _ t =
   | GEN_REMOTE_DECLS_FULL : unit t
   | GEN_REMOTE_DECLS_INCREMENTAL : unit t
   | GEN_SHALLOW_DECLS_DIR : string -> unit t
+  | GEN_REMOTE_FILES : unit t
   | FUN_DEPS_BATCH : (string * int * int) list -> string list t
   | LIST_FILES_WITH_ERRORS : string list t
   | FILE_DEPENDENTS : string list -> string list t
@@ -427,6 +428,18 @@ type _ t =
   | EXTRACT_STANDALONE : Extract_standalone.target -> string t
   | CONCATENATE_ALL : string list -> string t
   | GO_TO_DEFINITION : labelled_file * int * int -> Go_to_definition.result t
+  | PREPARE_CALL_HIERARCHY :
+      labelled_file * int * int
+      -> Lsp.PrepareCallHierarchy.result t
+  | CALL_HIERARCHY_INCOMING_CALLS :
+      Lsp.CallHierarchyItem.t
+      -> Lsp.CallHierarchyIncomingCalls.callHierarchyIncomingCall list
+         Done_or_retry.t
+         list
+         t
+  | CALL_HIERARCHY_OUTGOING_CALLS :
+      Lsp.CallHierarchyItem.t
+      -> Lsp.CallHierarchyOutgoingCalls.result t
   | BIGCODE : string -> string t
   | PAUSE : bool -> unit t
   | GLOBAL_INFERENCE :

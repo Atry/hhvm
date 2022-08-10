@@ -213,7 +213,7 @@ namespace {
 
 NEVER_INLINE
 const Func* lookup(const Class* cls, const StringData* name,
-                   const MethodLookupCallContext& callCtx) {
+                   const MemberLookupContext& callCtx) {
   auto const func = lookupMethodCtx(cls, name, callCtx, CallType::ObjMethod,
                                     MethodLookupErrorOptions::RaiseOnNotFound);
   assertx(func);
@@ -271,7 +271,7 @@ void smashImmediate(TCA movAddr, const Class* cls, const Func* func) {
 EXTERNALLY_VISIBLE const Func*
 handleDynamicCall(const Class* cls, const StringData* name,
                   const Class* ctx, const Func* callerFunc) {
-  auto const callCtx = MethodLookupCallContext(ctx, callerFunc);
+  auto const callCtx = MemberLookupContext(ctx, callerFunc);
   // Perform lookup without any caching.
   return lookup(cls, name, callCtx);
 }
@@ -283,7 +283,7 @@ handleStaticCall(const Class* cls, const StringData* name,
   assertx(name->isStatic());
   assertx(cls);
   auto& mce = rds::handleToRef<Entry, rds::Mode::Normal>(mceHandle);
-  auto const callCtx = MethodLookupCallContext(ctx, callerFunc);
+  auto const callCtx = MemberLookupContext(ctx, callerFunc);
   if (!rds::isHandleInit(mceHandle, rds::NormalTag{})) {
     // If the low bit is set in mcePrime, we have not yet smashed the immediate
     // into the TC, or the value was not cacheable.
@@ -291,7 +291,7 @@ handleStaticCall(const Class* cls, const StringData* name,
       // First fill the request local cache for this call.
       auto const func = lookup(cls, name, callCtx);
       if (RO::EvalEnforceModules == 1 &&
-          will_call_raise_module_boundary_violation(func, callCtx.moduleName())) {
+          will_symbol_raise_module_boundary_violation(func, &callCtx)) {
         // If we raised a warning, do not cache/smash the func
         return func;
       }
@@ -322,7 +322,7 @@ handleStaticCall(const Class* cls, const StringData* name,
   if (UNLIKELY(cls->numMethods() <= oldFunc->methodSlot())) {
     auto const func = lookup(cls, name, callCtx);
     if (RO::EvalEnforceModules == 1 &&
-        will_call_raise_module_boundary_violation(func, callCtx.moduleName())) {
+        will_symbol_raise_module_boundary_violation(func, &callCtx)) {
       // If we raised a warning, do not cache the func
       return func;
     }
@@ -385,7 +385,7 @@ handleStaticCall(const Class* cls, const StringData* name,
       if (UNLIKELY(cand->isStaticInPrologue())) {
         throw_has_this_need_static(cand);
       }
-      if (will_call_raise_module_boundary_violation(cand, callCtx.moduleName())) {
+      if (will_symbol_raise_module_boundary_violation(cand, &callCtx)) {
         raiseModuleBoundaryViolation(cls, cand, callCtx.moduleName());
         return cand;
       }
@@ -405,7 +405,7 @@ handleStaticCall(const Class* cls, const StringData* name,
     // can't be static, because the last one wasn't.
     if (LIKELY(cand->baseCls() == oldFunc->baseCls())) {
       assertx(!cand->isStaticInPrologue());
-      if (will_call_raise_module_boundary_violation(cand, callCtx.moduleName())) {
+      if (will_symbol_raise_module_boundary_violation(cand, &callCtx)) {
         raiseModuleBoundaryViolation(cls, cand, callCtx.moduleName());
         return cand;
       }
@@ -416,7 +416,7 @@ handleStaticCall(const Class* cls, const StringData* name,
 
   auto const func = lookup(cls, name, callCtx);
   if (RO::EvalEnforceModules == 1 &&
-      will_call_raise_module_boundary_violation(func, callCtx.moduleName())) {
+      will_symbol_raise_module_boundary_violation(func, &callCtx)) {
     // If we raised a warning, do not cache the func
     return func;
   }
@@ -482,7 +482,7 @@ StaticMethodCache::lookup(rds::Handle handle, const NamedEntity *ne,
   // Class::load().
   assertx(cls == ne->getCachedClass());
 
-  auto const callCtx = MethodLookupCallContext(ctx, callerFunc);
+  auto const callCtx = MemberLookupContext(ctx, callerFunc);
   LookupResult res = lookupClsMethod(f, cls, methName,
                                      nullptr, // there may be an active
                                               // this, but we can just fall
@@ -518,7 +518,7 @@ StaticMethodFCache::lookup(rds::Handle handle, const Class* cls,
   Stats::inc(Stats::TgtCache_StaticMethodFHit, -1);
 
   const Func* f;
-  auto const callCtx = MethodLookupCallContext(ctx, callerFunc);
+  auto const callCtx = MemberLookupContext(ctx, callerFunc);
   LookupResult res = lookupClsMethod(f, cls, methName,
                                      nullptr,
                                      callCtx,

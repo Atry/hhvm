@@ -8,8 +8,13 @@ mod crc;
 mod expr_trees;
 mod facts;
 mod parse;
+mod profile;
 mod util;
 mod verify;
+
+use std::io::BufRead;
+use std::path::Path;
+use std::path::PathBuf;
 
 use ::compile::EnvFlags;
 use ::compile::HHBCFlags;
@@ -20,11 +25,8 @@ use byte_unit::Byte;
 use clap::Parser;
 use hhvm_options::HhvmOptions;
 use oxidized::decl_parser_options::DeclParserOptions;
+use oxidized::relative_path;
 use oxidized::relative_path::RelativePath;
-use oxidized::relative_path::{self};
-use std::io::BufRead;
-use std::path::Path;
-use std::path::PathBuf;
 
 /// Hack Compiler
 #[derive(Parser, Debug, Default)]
@@ -81,6 +83,10 @@ struct Opts {
     /// Controls systemlib specific logic
     #[clap(long)]
     is_systemlib: bool,
+
+    /// [Experimental] Enable Types in Compilation
+    #[clap(long)]
+    types_in_compilation: bool,
 }
 
 /// Hack Compiler
@@ -166,6 +172,9 @@ impl Opts {
         }
         if self.is_systemlib {
             flags |= EnvFlags::IS_SYSTEMLIB;
+        }
+        if self.types_in_compilation {
+            flags |= EnvFlags::TYPES_IN_COMPILATION;
         }
         flags
     }

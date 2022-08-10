@@ -72,6 +72,19 @@ struct RuntimeCoeffects;
 struct StringData;
 struct c_Awaitable;
 
+struct MemberLookupContext {
+  explicit MemberLookupContext(const Class*); // used when we know the class is nonnull, or we are okay with module being null
+  MemberLookupContext(const Class*, const Func*);
+  MemberLookupContext(const Class*, const StringData*);
+
+  const Class* cls() const;
+  const StringData* moduleName() const;
+private:
+  Either<const Class*, const StringData*> m_data;
+};
+
+static const MemberLookupContext nullctx = MemberLookupContext(nullptr);
+
 namespace collections {
 struct CollectionsExtension;
 }
@@ -641,6 +654,11 @@ public:
   bool isInternal() const;
 
   /*
+   * What module does this function belong to?
+   */
+  const StringData* moduleName() const;
+
+  /*
    * Is this class allowed to be constructed dynamically?
    */
   bool isDynamicallyConstructible() const;
@@ -1003,12 +1021,12 @@ public:
    * this class or any ancestor.  Note that if the return is marked as
    * accessible, then the property must exist.
    */
-  PropSlotLookup getDeclPropSlot(const Class*, const StringData*) const;
+  PropSlotLookup getDeclPropSlot(const MemberLookupContext&, const StringData*) const;
 
   /*
    * The equivalent of getDeclPropSlot(), but for static properties.
    */
-  PropSlotLookup findSProp(const Class*, const StringData*) const;
+  PropSlotLookup findSProp(const MemberLookupContext&, const StringData*) const;
 
   /*
    * Get the request-local value of the static property `sPropName', as well as
@@ -1022,14 +1040,14 @@ public:
    *
    * May perform initialization.
    */
-  PropValLookup getSProp(const Class*, const StringData*) const;
-  PropValLookup getSPropIgnoreLateInit(const Class*, const StringData*) const;
+  PropValLookup getSProp(const MemberLookupContext&, const StringData*) const;
+  PropValLookup getSPropIgnoreLateInit(const MemberLookupContext&, const StringData*) const;
 
   /*
    * Return whether or not a declared instance property is accessible from the
    * given context.
    */
-  static bool IsPropAccessible(const Prop&, Class*);
+  static bool IsPropAccessible(const Prop&, const MemberLookupContext&);
 
 
   /////////////////////////////////////////////////////////////////////////////
@@ -1999,7 +2017,6 @@ bool isEnum(const Class* cls);
 bool isEnumClass(const Class* cls);
 bool isAnyEnum(const Class* cls);
 bool isAbstract(const Class* cls);
-bool isFinal(const Class* cls);
 bool isNormalClass(const Class* cls);
 
 /*

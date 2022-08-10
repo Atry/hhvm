@@ -2,11 +2,8 @@
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
-use crate::emit_attribute;
-use crate::emit_body;
-use crate::emit_fatal;
-use crate::emit_memoize_helpers;
-use crate::emit_native_opcode;
+use std::borrow::Cow;
+
 use ast_scope::Lambda;
 use ast_scope::Scope;
 use ast_scope::ScopeItem;
@@ -14,8 +11,8 @@ use env::emitter::Emitter;
 use error::Error;
 use error::Result;
 use ffi::Slice;
+use hhbc::hhas_attribute;
 use hhbc::hhas_attribute::HhasAttribute;
-use hhbc::hhas_attribute::{self};
 use hhbc::hhas_coeffects::HhasCoeffects;
 use hhbc::hhas_method::HhasMethod;
 use hhbc::hhas_method::HhasMethodFlags;
@@ -31,7 +28,12 @@ use options::HhvmFlags;
 use options::Options;
 use oxidized::ast;
 use oxidized::ast_defs;
-use std::borrow::Cow;
+
+use crate::emit_attribute;
+use crate::emit_body;
+use crate::emit_fatal;
+use crate::emit_memoize_helpers;
+use crate::emit_native_opcode;
 
 pub fn from_asts<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,

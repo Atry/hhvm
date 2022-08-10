@@ -9,6 +9,11 @@
 mod compiler_ffi_impl;
 pub mod external_decl_provider;
 
+use std::ffi::c_void;
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt;
+use std::path::PathBuf;
+
 use anyhow::Result;
 use compile::EnvFlags;
 use cxx::CxxString;
@@ -21,10 +26,8 @@ use oxidized::relative_path::RelativePath;
 use oxidized_by_ref::direct_decl_parser::Decls;
 use oxidized_by_ref::direct_decl_parser::ParsedFile;
 use parser_core_types::source_text::SourceText;
-use std::ffi::c_void;
-use std::ffi::OsStr;
-use std::os::unix::ffi::OsStrExt;
-use std::path::PathBuf;
+use sha1::Digest;
+use sha1::Sha1;
 
 #[allow(clippy::derivable_impls)]
 #[cxx::bridge]
@@ -50,7 +53,7 @@ pub mod compile_ffi {
     }
 
     pub struct DeclResult {
-        hash: u64,
+        nopos_hash: u64,
         serialized: Vec<u8>,
         decls: Box<DeclsHolder>,
         has_errors: bool,
@@ -135,6 +138,7 @@ pub mod compile_ffi {
             is_evaled: bool,
             for_debugger_eval: bool,
             disable_toplevel_elaboration: bool,
+            enable_ir: bool,
         ) -> u8;
 
         /// Compile Hack source code to a HackCUnit or an error.
@@ -161,19 +165,21 @@ pub mod compile_ffi {
             text: &CxxString,
         ) -> DeclResult;
 
+        fn hash_unit(unit: &HackCUnitWrapper) -> [u8; 20];
+
         /// Return true if this type (class or alias) is in the given Decls.
-        fn hackc_type_exists(result: &DeclResult, symbol: &str) -> bool;
+        fn hackc_type_exists(decls: &DeclResult, symbol: &str) -> bool;
 
         /// For testing: return true if deserializing produces the expected Decls.
-        fn hackc_verify_deserialization(result: &DeclResult) -> bool;
+        fn hackc_verify_deserialization(decls: &DeclResult) -> bool;
 
         /// Serialize a FactsResult to JSON
         fn hackc_facts_to_json_cpp_ffi(facts: FactsResult, pretty: bool) -> String;
 
         /// Extract Facts from Decls, passing along the source text hash.
-        unsafe fn hackc_decls_to_facts_cpp_ffi(
+        fn hackc_decls_to_facts_cpp_ffi(
             decl_flags: i32,
-            decl_result: &DeclResult,
+            decls: &DeclResult,
             sha1sum: &CxxString,
         ) -> FactsResult;
     }
@@ -199,6 +205,7 @@ fn make_env_flags(
     is_evaled: bool,
     for_debugger_eval: bool,
     disable_toplevel_elaboration: bool,
+    enable_ir: bool,
 ) -> u8 {
     let mut flags = EnvFlags::empty();
     if is_systemlib {
@@ -212,6 +219,9 @@ fn make_env_flags(
     }
     if disable_toplevel_elaboration {
         flags |= EnvFlags::DISABLE_TOPLEVEL_ELABORATION;
+    }
+    if enable_ir {
+        flags |= EnvFlags::ENABLE_IR;
     }
     flags.bits()
 }
@@ -232,6 +242,13 @@ impl compile_ffi::NativeEnv {
             flags: compile::EnvFlags::from_bits(env.flags)?,
         })
     }
+}
+
+fn hash_unit(unit: &HackCUnitWrapper) -> [u8; 20] {
+    let mut hasher = Sha1::new();
+    let slice: &[u8] = &bincode::serialize(&unit.0).unwrap();
+    hasher.update(slice);
+    hasher.finalize().into()
 }
 
 fn hackc_compile_from_text_cpp_ffi(
@@ -313,7 +330,7 @@ pub fn hackc_direct_decl_parse(
         direct_decl_parser::parse_decls_without_reference_text(&opts.0, filename, text, alloc);
 
     compile_ffi::DeclResult {
-        hash: no_pos_hash::position_insensitive_hash(&parsed_file.decls),
+        nopos_hash: no_pos_hash::position_insensitive_hash(&parsed_file.decls),
         serialized: decl_provider::serialize_decls(&parsed_file.decls).unwrap(),
         decls: Box::new(DeclsHolder {
             decls: parsed_file.decls,

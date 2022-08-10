@@ -2,8 +2,10 @@
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
-use crate::emit_attribute;
-use crate::emit_expression;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::marker::PhantomData;
+
 use ast_scope::Scope;
 use emit_type_hint::hint_to_type_info;
 use emit_type_hint::Kind;
@@ -24,16 +26,16 @@ use instruction_sequence::instr;
 use instruction_sequence::InstrSeq;
 use oxidized::aast_defs::Hint;
 use oxidized::aast_defs::Hint_;
+use oxidized::aast_visitor;
 use oxidized::aast_visitor::AstParams;
 use oxidized::aast_visitor::Node;
-use oxidized::aast_visitor::{self};
 use oxidized::ast as a;
 use oxidized::ast_defs::Id;
 use oxidized::ast_defs::ReadonlyKind;
 use oxidized::pos::Pos;
-use std::collections::BTreeMap;
-use std::collections::BTreeSet;
-use std::marker::PhantomData;
+
+use crate::emit_attribute;
+use crate::emit_expression;
 
 pub fn from_asts<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
@@ -106,10 +108,6 @@ fn from_ast<'a, 'arena, 'decl>(
     if param.is_variadic {
         tparams.push("array");
     };
-    let nullable = param
-        .expr
-        .as_ref()
-        .map_or(false, |a::Expr(_, _, e)| e.is_null());
     let type_info = {
         let param_type_hint = if param.is_variadic {
             Some(Hint(
@@ -131,7 +129,7 @@ fn from_ast<'a, 'arena, 'decl>(
                 emitter.alloc,
                 &Kind::Param,
                 false,
-                nullable,
+                false, /* meaning only set nullable based on given hint */
                 &tparams[..],
                 &h,
             )?)
@@ -140,12 +138,9 @@ fn from_ast<'a, 'arena, 'decl>(
         }
     };
     // Do the type check for default value type and hint type
-    if !nullable {
-        if let Some(err_msg) =
-            default_type_check(&param.name, type_info.as_ref(), param.expr.as_ref())
-        {
-            return Err(Error::fatal_parse(&param.pos, err_msg));
-        }
+    if let Some(err_msg) = default_type_check(&param.name, type_info.as_ref(), param.expr.as_ref())
+    {
+        return Err(Error::fatal_parse(&param.pos, err_msg));
     }
     aast_visitor::visit(
         &mut ResolverVisitor {

@@ -116,7 +116,7 @@ type t = {
   po_interpret_soft_types_as_like_types: bool;
   tco_enable_strict_string_concat_interp: bool;
   tco_ignore_unsafe_cast: bool;
-  tco_readonly: bool;
+  tco_no_parser_readonly_check: bool;
   tco_enable_expression_trees: bool;
   tco_enable_modules: bool;
   tco_allowed_expression_tree_visitors: string list;
@@ -143,6 +143,7 @@ type t = {
   tco_use_manifold_cython_client: bool;
   tco_record_fine_grained_dependencies: bool;
   tco_loop_iteration_upper_bound: int option;
+  tco_expression_tree_virtualize_functions: bool;
 }
 [@@deriving eq, show]
 
@@ -303,7 +304,7 @@ let default =
     po_interpret_soft_types_as_like_types = false;
     tco_enable_strict_string_concat_interp = false;
     tco_ignore_unsafe_cast = false;
-    tco_readonly = false;
+    tco_no_parser_readonly_check = false;
     tco_enable_expression_trees = false;
     tco_enable_modules = false;
     tco_allowed_expression_tree_visitors = [];
@@ -330,6 +331,7 @@ let default =
     tco_use_manifold_cython_client = false;
     tco_record_fine_grained_dependencies = false;
     tco_loop_iteration_upper_bound = None;
+    tco_expression_tree_virtualize_functions = false;
   }
 
 let make
@@ -456,7 +458,7 @@ let make
     ?(tco_enable_strict_string_concat_interp =
       default.tco_enable_strict_string_concat_interp)
     ?(tco_ignore_unsafe_cast = default.tco_ignore_unsafe_cast)
-    ?(tco_readonly = default.tco_readonly)
+    ?(tco_no_parser_readonly_check = default.tco_no_parser_readonly_check)
     ?(tco_enable_expression_trees = default.tco_enable_expression_trees)
     ?(tco_enable_modules = default.tco_enable_modules)
     ?(tco_allowed_expression_tree_visitors =
@@ -495,6 +497,8 @@ let make
     ?(tco_record_fine_grained_dependencies =
       default.tco_record_fine_grained_dependencies)
     ?(tco_loop_iteration_upper_bound = default.tco_loop_iteration_upper_bound)
+    ?(tco_expression_tree_virtualize_functions =
+      default.tco_expression_tree_virtualize_functions)
     () =
   {
     tco_experimental_features;
@@ -603,7 +607,7 @@ let make
     po_interpret_soft_types_as_like_types;
     tco_enable_strict_string_concat_interp;
     tco_ignore_unsafe_cast;
-    tco_readonly;
+    tco_no_parser_readonly_check;
     tco_enable_expression_trees;
     tco_enable_modules;
     tco_allowed_expression_tree_visitors;
@@ -630,6 +634,7 @@ let make
     tco_use_manifold_cython_client;
     tco_record_fine_grained_dependencies;
     tco_loop_iteration_upper_bound;
+    tco_expression_tree_virtualize_functions;
   }
 
 let tco_experimental_feature_enabled t s =
@@ -822,9 +827,10 @@ let set_global_inference t = { t with tco_global_inference = true }
 
 let set_ordered_solving t b = { t with tco_ordered_solving = b }
 
-let set_tco_readonly t b = { t with tco_readonly = b }
+let set_tco_no_parser_readonly_check t b =
+  { t with tco_no_parser_readonly_check = b }
 
-let tco_readonly t = t.tco_readonly
+let tco_no_parser_readonly_check t = t.tco_no_parser_readonly_check
 
 let po_parser_errors_only t = t.po_parser_errors_only
 
@@ -939,3 +945,6 @@ let tco_record_fine_grained_dependencies t =
   t.tco_record_fine_grained_dependencies
 
 let tco_loop_iteration_upper_bound t = t.tco_loop_iteration_upper_bound
+
+let tco_expression_tree_virtualize_functions t =
+  t.tco_expression_tree_virtualize_functions

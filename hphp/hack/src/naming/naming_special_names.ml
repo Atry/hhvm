@@ -405,7 +405,7 @@ module UserAttributes = struct
             } );
           ( uaDocs,
             {
-              contexts = [cls];
+              contexts = [cls; enum; enumcls; typealias];
               autocomplete = true;
               doc = "Shows the linked URL when hovering over this type.";
             } );
@@ -1118,6 +1118,10 @@ module Shapes = struct
   let toArray = "toArray"
 
   let toDict = "toDict"
+end
+
+module Hips = struct
+  let inspect = "\\inspect"
 end
 
 module Superglobals = struct

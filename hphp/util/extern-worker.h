@@ -227,11 +227,19 @@ struct Ref {
   // Client). This is exposed mainly for testing. Users shouldn't
   // care.
   bool fromFallback() const { return m_fromFallback; }
+
+  // Cast the T this ref contains to a U. Any type can be casted to
+  // any other type, so use with care. This breaks any type-safety the
+  // ref provides.
+  template <typename U> Ref<U> cast() const {
+    return Ref<U>{m_id, m_fromFallback};
+  }
 private:
   Ref(RefId, bool);
   RefId m_id;
   bool m_fromFallback;
   friend struct Client;
+  template <typename U> friend struct Ref;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -394,15 +402,15 @@ struct Options {
   std::filesystem::path m_workingDir{std::filesystem::temp_directory_path()};
   std::chrono::seconds m_timeout{std::chrono::minutes{15}};
   std::chrono::seconds m_minTTL{std::chrono::hours{3}};
-  std::chrono::milliseconds m_throttleBaseWait{0};
-  size_t m_throttleRetries{0};
+  std::chrono::milliseconds m_throttleBaseWait{25};
+  size_t m_throttleRetries{7};
   bool m_verboseLogging{false};
   bool m_cacheExecs{true};
   bool m_useEdenFS{true};
   bool m_cleanup{true};
   bool m_useRichClient{true};
-  bool m_useZippyRichClient{true};
-  bool m_useP2P{true};
+  bool m_useZippyRichClient{false};
+  bool m_useP2P{false};
   std::string m_useCase;
 };
 
@@ -537,12 +545,17 @@ struct Client {
     std::atomic<size_t> filesUploaded{0};
     std::atomic<size_t> blobsUploaded{0};
 
+    // Number of bytes for files or blobs actually uploaded.
+    std::atomic<size_t> fileBytesUploaded{0};
+    std::atomic<size_t> blobBytesUploaded{0};
+
     // Number of times we fell back when uploading a file or blob.
     std::atomic<size_t> fileFallbacks{0};
     std::atomic<size_t> blobFallbacks{0};
 
-    // Number of blobs downloaded (because of a load call).
+    // Number of blobs/bytes downloaded (because of a load call).
     std::atomic<size_t> downloads{0};
+    std::atomic<size_t> bytesDownloaded{0};
 
     // Total number of execs attempted (per input).
     std::atomic<size_t> execs{0};
@@ -560,8 +573,34 @@ struct Client {
     std::atomic<size_t> optimisticExecs{0};
 
     std::atomic<size_t> throttles{0};
+
+    void reset() {
+      filesRead.store(0);
+      files.store(0);
+      blobs.store(0);
+      filesQueried.store(0);
+      blobsQueried.store(0);
+      filesUploaded.store(0);
+      blobsUploaded.store(0);
+      fileBytesUploaded.store(0);
+      blobBytesUploaded.store(0);
+      fileFallbacks.store(0);
+      blobFallbacks.store(0);
+      downloads.store(0);
+      bytesDownloaded.store(0);
+      execs.store(0);
+      execCacheHits.store(0);
+      execFallbacks.store(0);
+      execCpuUsec.store(0);
+      execAllocatedCores.store(0);
+      execMaxUsedMem.store(0);
+      execReservedMem.store(0);
+      optimisticExecs.store(0);
+      throttles.store(0);
+    }
   };
   const Stats& getStats() const { return m_stats; }
+  void resetStats() { m_stats.reset(); }
 
   // Synthetically force a fallback event when storing data or
   // executing a job, as if the implementation failed. This is for
@@ -668,6 +707,9 @@ private:
 
   friend struct Client;
 };
+
+// If true, we're running inside a job.
+extern thread_local bool g_in_job;
 
 // Hook for providing an implementation. An implementation can set
 // g_impl_hook to a function which optionally creates a Client::Impl.

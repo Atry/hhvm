@@ -1772,7 +1772,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case RaiseCoeffectsFunParamTypeViolation:
   case LdCoeffectFunParamNaive:
   case RaiseModuleBoundaryViolation:
-  case RaiseImplicitContextStateInvalidException:
+  case RaiseImplicitContextStateInvalid:
     return may_load_store(AEmpty, AEmpty);
 
   case LdClsPropAddrOrNull:   // may run 86{s,p}init, which can autoload
@@ -1797,6 +1797,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case CheckClsReifiedGenericMismatch:
   case CheckClsRGSoft:
   case CheckFunReifiedGenericMismatch:
+  case GetClsRGProp:
   case CheckInOutMismatch:
   case CheckReadonlyMismatch:
   case ConvTVToStr:

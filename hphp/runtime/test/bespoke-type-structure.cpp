@@ -23,13 +23,23 @@
 
 namespace HPHP {
 
+namespace {
+
+bool same_arrays(const ArrayData* a1, const ArrayData* a2) {
+  return a1->same(a2);
+}
+
+}
+
+using Kind = TypeStructure::Kind;
+
 TEST(BespokeTypeStructure, Methods) {
   auto t = StringData::Make("T");
   auto kind = StringData::Make("kind");
   auto soft = StringData::Make("soft");
   auto alias = StringData::Make("alias");
 
-  auto kindInt = Variant{int8_t(TypeStructure::Kind::T_int)};
+  auto kindInt = Variant{int8_t(Kind::T_int)};
 
   {
     Array arr = Array::CreateDict();
@@ -109,6 +119,65 @@ TEST(BespokeTypeStructure, Methods) {
     auto tvVal = bespoke::TypeStructure::GetPosVal(ts, 1);
     EXPECT_TRUE(isStringType(tvVal.m_type));
   }
+  {
+    // shape type structure = shape("y" => int)
+    Array field = make_dict_array("y", make_dict_array("kind", kindInt));
+    Array arr = make_dict_array(
+      "kind", int8_t(Kind::T_shape),
+      "fields", field
+    );
+    auto ts = bespoke::TypeStructure::MakeFromVanilla(arr.get());
+    EXPECT_TRUE(ts->typeKind() == Kind::T_shape);
+
+    auto const tvFields = bespoke::TypeStructure::NvGetStr(ts, StringData::Make("fields"));
+    EXPECT_TRUE(isArrayLikeType(tvFields.m_type));
+
+    auto const tvAllowsUnknownFields =
+      bespoke::TypeStructure::NvGetStr(ts, StringData::Make("allows_unknown_fields"));
+    EXPECT_TRUE(tvAllowsUnknownFields.m_type == KindOfUninit);
+
+    auto const* vad = ts->escalateWithCapacity(ts->size(), __func__);
+    EXPECT_TRUE(vad->isVanilla());
+    EXPECT_TRUE(vad->size() == ts->size());
+
+    auto const vadKind = vad->get(Variant{"kind"});
+    EXPECT_TRUE(vadKind.m_type == KindOfInt64);
+    EXPECT_TRUE(val(vadKind).num == int8_t(Kind::T_shape));
+
+    auto const vadFields = vad->get(Variant{"fields"});
+    EXPECT_TRUE(isArrayLikeType(vadFields.m_type));
+    EXPECT_TRUE(same_arrays(vadFields.val().parr, field.get()));
+
+    bespoke::TypeStructure* ts2 = ts->copy<false>();
+    EXPECT_TRUE(ts2->typeKind() == Kind::T_shape);
+  }
+  {
+    // tuple type structure = (string, int)
+    Array elemTypes = make_vec_array(
+      make_dict_array("kind", int8_t(Kind::T_string)),
+      make_dict_array("kind", kindInt)
+    );
+    Array arr = make_dict_array(
+      "kind", int8_t(Kind::T_tuple),
+      "elem_types", elemTypes
+    );
+    auto ts = bespoke::TypeStructure::MakeFromVanilla(arr.get());
+    EXPECT_TRUE(ts->typeKind() == Kind::T_tuple);
+    auto const* vad = ts->escalateWithCapacity(ts->size(), __func__);
+    EXPECT_TRUE(vad->isVanilla());
+    EXPECT_TRUE(vad->size() == ts->size());
+
+    auto const vadKind = vad->get(Variant{"kind"});
+    EXPECT_TRUE(vadKind.m_type == KindOfInt64);
+    EXPECT_TRUE(val(vadKind).num == int8_t(Kind::T_tuple));
+
+    auto const vadFields = vad->get(Variant{"elem_types"});
+    EXPECT_TRUE(isArrayLikeType(vadFields.m_type));
+    EXPECT_TRUE(same_arrays(vadFields.val().parr, elemTypes.get()));
+
+    bespoke::TypeStructure* ts2 = ts->copy<false>();
+    EXPECT_TRUE(ts2->typeKind() == Kind::T_tuple);
+  }
 
   Array arr = Array::CreateDict();
   arr.set(Variant{"kind"}, kindInt);
@@ -130,7 +199,7 @@ TEST(BespokeTypeStructure, Methods) {
   EXPECT_TRUE(isStringType(vadAlias.m_type));
   EXPECT_TRUE(val(vadAlias).pstr->same(t));
 
-  bespoke::TypeStructure* ts2 = ts->copy();
+  auto const ts2 = ts->copy<false>();
   EXPECT_TRUE(ts2->typeKind() == TypeStructure::Kind::T_int);
   EXPECT_TRUE(ts2->nullable());
   EXPECT_TRUE(ts2->soft());

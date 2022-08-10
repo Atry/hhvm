@@ -6,30 +6,31 @@
 //! Verifier for HackIR.  This traverses the HackIR structures and makes sure
 //! that the required invariants still hold true.
 
+use std::collections::hash_map::Entry;
+
 use analysis::PredecessorFlags;
 use analysis::Predecessors;
-use core::instr::HasEdges;
-use core::instr::HasOperands;
-use core::instr::Hhbc;
-use core::instr::IrToBc;
-use core::instr::Special;
-use core::instr::Terminator;
-use core::string_intern::StringInterner;
-use core::Block;
-use core::BlockId;
-use core::BlockIdMap;
-use core::FullInstrId;
-use core::Func;
-use core::Instr;
-use core::InstrId;
-use core::InstrIdSet;
-use core::ValueId;
+use ir_core::instr::HasEdges;
+use ir_core::instr::HasOperands;
+use ir_core::instr::Hhbc;
+use ir_core::instr::IrToBc;
+use ir_core::instr::Special;
+use ir_core::instr::Terminator;
+use ir_core::string_intern::StringInterner;
+use ir_core::Block;
+use ir_core::BlockId;
+use ir_core::BlockIdMap;
+use ir_core::FullInstrId;
+use ir_core::Func;
+use ir_core::Instr;
+use ir_core::InstrId;
+use ir_core::InstrIdSet;
+use ir_core::ValueId;
 use itertools::Itertools;
 use print::DisplayFunc;
 use print::FmtBid;
 use print::FmtRawVid;
 use print::FmtVid;
-use std::collections::hash_map::Entry;
 
 type Result<T = ()> = anyhow::Result<T>;
 

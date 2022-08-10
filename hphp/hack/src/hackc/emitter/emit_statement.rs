@@ -2,13 +2,6 @@
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
-use crate::emit_expression::emit_await;
-use crate::emit_expression::emit_expr;
-use crate::emit_expression::LValOp;
-use crate::emit_expression::SetRange;
-use crate::emit_expression::{self as emit_expr};
-use crate::emit_fatal;
-use crate::try_finally_rewriter as tfr;
 use emit_pos::emit_pos;
 use emit_pos::emit_pos_then;
 use env::emitter::Emitter;
@@ -35,12 +28,20 @@ use naming_special_names_rust::special_idents;
 use naming_special_names_rust::superglobals;
 use oxidized::aast as a;
 use oxidized::ast;
+use oxidized::ast_defs;
 use oxidized::ast_defs::ParamKind;
-use oxidized::ast_defs::{self};
 use oxidized::local_id;
 use oxidized::pos::Pos;
 use regex::Regex;
 use statement_state::StatementState;
+
+use crate::emit_expression::emit_await;
+use crate::emit_expression::emit_expr;
+use crate::emit_expression::LValOp;
+use crate::emit_expression::SetRange;
+use crate::emit_expression::{self as emit_expr};
+use crate::emit_fatal;
+use crate::try_finally_rewriter as tfr;
 
 // Expose a mutable ref to state for emit_body so that it can set it appropriately
 pub(crate) fn set_state<'arena, 'decl>(

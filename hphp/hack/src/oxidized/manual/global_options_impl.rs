@@ -117,7 +117,7 @@ impl Default for GlobalOptions {
             po_interpret_soft_types_as_like_types: false,
             tco_enable_strict_string_concat_interp: false,
             tco_ignore_unsafe_cast: false,
-            tco_readonly: false,
+            tco_no_parser_readonly_check: false,
             tco_enable_modules: false,
             tco_enable_expression_trees: false,
             tco_allowed_expression_tree_visitors: vec![],
@@ -144,6 +144,7 @@ impl Default for GlobalOptions {
             tco_use_manifold_cython_client: false,
             tco_record_fine_grained_dependencies: false,
             tco_loop_iteration_upper_bound: None,
+            tco_expression_tree_virtualize_functions: false,
         }
     }
 }

@@ -2,23 +2,26 @@
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
-use crate::ClassName;
-use crate::ConstName;
-use crate::FunctionName;
-use bstr::BString;
-use ffi::Slice;
-use ffi::Str;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
 
+use bstr::BString;
+use ffi::Slice;
+use ffi::Str;
+use serde::Serialize;
+
+use crate::ClassName;
+use crate::ConstName;
+use crate::FunctionName;
+
 /// Data structure for keeping track of symbols (and includes) we
 /// encounter in the course of emitting bytecode for an AST. We split
 /// them into these four categories for the sake of HHVM, which has
 /// a dedicated lookup function corresponding to each.
-#[derive(Default, Clone, Debug)]
+#[derive(Default, Clone, Debug, Serialize)]
 #[repr(C)]
 pub struct HhasSymbolRefs<'arena> {
     pub includes: Slice<'arena, IncludePath<'arena>>,
@@ -30,7 +33,7 @@ pub struct HhasSymbolRefs<'arena> {
 /// NOTE(hrust): order matters (hhbc_hhas write includes in sorted order)
 pub type IncludePathSet<'arena> = BTreeSet<IncludePath<'arena>>;
 
-#[derive(Clone, Debug, Eq)]
+#[derive(Clone, Debug, Eq, Serialize)]
 #[repr(C)]
 pub enum IncludePath<'arena> {
     Absolute(Str<'arena>),                         // /foo/bar/baz.php

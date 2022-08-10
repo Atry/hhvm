@@ -23,8 +23,8 @@
 #include "hphp/runtime/base/bespoke/layout.h"
 #include "hphp/runtime/base/bespoke/struct-dict.h"
 #include "hphp/runtime/base/bespoke/type-structure.h"
-#include "hphp/runtime/base/memory-manager-defs.h"
 #include "hphp/runtime/base/runtime-option.h"
+#include "hphp/runtime/base/vanilla-dict-defs.h"
 #include "hphp/runtime/server/memory-stats.h"
 #include "hphp/runtime/vm/jit/mcgen-translate.h"
 #include "hphp/runtime/vm/jit/vm-protect.h"
@@ -471,30 +471,6 @@ std::vector<const StringData*> LoggingProfile::knownStructKeys() const {
   return ret;
 }
 
-bool LoggingProfile::shouldUseBespokeTypeStructure() {
-  if (key.locationType != LocationType::TypeConstant &&
-      key.locationType != LocationType::TypeAlias) {
-    return false;
-  }
-
-  // check for correct keys and values types
-  auto const vad = data->staticSampledArray;
-  if (vad == nullptr || !TypeStructure::isValidTypeStructure(vad)) return false;
-
-  // check that no operations could have modified the array
-  for (auto const& eventAndCount : data->events) {
-    auto const event = EventKey(eventAndCount.first);
-    if (!arrayOpIsRead(event.getOp()) &&
-        event.getOp() != ArrayOp::ConstructStr &&
-        event.getOp() != ArrayOp::ConstructInt &&
-        event.getOp() != ArrayOp::APCInitStr &&
-        event.getOp() != ArrayOp::APCInitStr) {
-      return false;
-    }
-  }
-  return true;
-}
-
 //////////////////////////////////////////////////////////////////////////////
 
 SinkProfile::SinkProfile(SinkProfileKey key)
@@ -531,6 +507,12 @@ void SinkProfile::update(const ArrayData* ad) {
   const LoggingArray* lad = nullptr;
   if (!ad->isVanilla()) {
     auto const index = BespokeArray::asBespoke(ad)->layoutIndex();
+    // Update count of bespoke type structures before bailing out
+    if (index == TypeStructure::GetLayoutIndex()) {
+      data->typeStructureCount++;
+      data->sampledCount++;
+      return;
+    }
     if (index != LoggingArray::GetLayoutIndex()) return;
     lad = LoggingArray::As(ad);
   }
@@ -1153,6 +1135,8 @@ LoggingProfile* getLoggingProfile(LoggingProfileKey key) {
     assertx(it->second->key == key);
     return it->second;
   }
+  auto const ad = getStaticArray(key);
+  if (ad && !ad->isVanilla()) return nullptr;
 
   // Hold the read mutex while we're constructing the new profile so that we
   // cannot stop profiling until this mutation is complete.
@@ -1160,7 +1144,6 @@ LoggingProfile* getLoggingProfile(LoggingProfileKey key) {
   if (!s_profiling.load(std::memory_order_acquire)) return nullptr;
 
   auto profile = std::make_unique<LoggingProfile>(key);
-  auto const ad = getStaticArray(key);
   if (ad) {
     profile->data->staticLoggingArray = LoggingArray::MakeStatic(ad, profile.get());
     profile->data->staticSampledArray = ad->makeSampledStaticArray();
@@ -1177,7 +1160,7 @@ LoggingProfile* getLoggingProfile(LoggingProfileKey key) {
       freeStaticArray(profile->data->staticLoggingArray);
     } else {
       MemoryStats::LogAlloc(AllocKind::StaticArray, sizeof(LoggingArray));
-      MemoryStats::LogAlloc(AllocKind::StaticArray, allocSize(ad));
+      MemoryStats::LogAlloc(AllocKind::StaticArray, ad->heapSize());
     }
   }
 

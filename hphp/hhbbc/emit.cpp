@@ -36,6 +36,7 @@
 #include "hphp/hhbbc/type-structure.h"
 #include "hphp/hhbbc/unit-util.h"
 
+#include "hphp/runtime/base/array-data.h"
 #include "hphp/runtime/base/repo-auth-type.h"
 #include "hphp/runtime/base/tv-comparisons.h"
 
@@ -111,19 +112,18 @@ std::enable_if_t<std::remove_reference_t<Bc>::op != op>
 caller(F&&, Bc&&) {}
 
 Id recordClass(EmitUnitState& euState, UnitEmitter& ue, Id id) {
-  auto cls = euState.unit->classes[id].get();
+  auto cls = euState.unit->classes[id];
   euState.pceInfo.push_back(
-    { ue.newPreClassEmitter(cls->name->toCppString()), id }
+    { ue.newPreClassEmitter(cls->toCppString()), id }
   );
   return euState.pceInfo.back().pce->id();
 }
 
 //////////////////////////////////////////////////////////////////////
 
-php::SrcLoc srcLoc(const php::Func& func, int32_t ix) {
+php::SrcLoc srcLoc(const php::Unit& unit, const php::Func& func, int32_t ix) {
   if (ix < 0) return php::SrcLoc{};
-  auto const unit = func.originalUnit ? func.originalUnit : func.unit;
-  return unit->srcLocs[ix];
+  return unit.srcLocs[ix];
 }
 
 /*
@@ -266,7 +266,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState, UnitEmitter& ue, FuncEmitter& f
   // Offset of the last emitted bytecode.
   Offset lastOff { 0 };
 
-  bool traceBc = false;
+  auto const unit = euState.index.lookup_func_original_unit(*func);
 
   SCOPE_ASSERT_DETAIL("emit") {
     std::string ret;
@@ -331,10 +331,8 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState, UnitEmitter& ue, FuncEmitter& f
     auto const startOffset = fe.bcPos();
     lastOff = startOffset;
 
-    FTRACE(4, " emit: {} -- {} @ {}\n", currentStackDepth, show(func, inst),
-           show(srcLoc(*func, inst.srcLoc)));
-
-    if (options.TraceBytecodes.count(inst.op)) traceBc = true;
+    FTRACE(4, " emit: {} -- {} @ {}\n", currentStackDepth, show(*func, inst),
+           show(srcLoc(*unit, *func, inst.srcLoc)));
 
     auto const emit_vsa = [&] (const CompactVector<LSString>& keys) {
       auto n = keys.size();
@@ -375,7 +373,7 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState, UnitEmitter& ue, FuncEmitter& f
     };
 
     auto const emit_srcloc = [&] {
-      auto const sl = srcLoc(*func, inst.srcLoc);
+      auto const sl = srcLoc(*unit, *func, inst.srcLoc);
       auto const loc = sl.isValid() ?
         Location::Range(sl.start.line, sl.start.col, sl.past.line, sl.past.col)
         : Location::Range(-1,-1,-1,-1);
@@ -680,12 +678,6 @@ EmitBcInfo emit_bytecode(EmitUnitState& euState, UnitEmitter& ue, FuncEmitter& f
     FTRACE(2, "      block {} end: {}\n", bid, info.past);
   }
 
-  if (traceBc) {
-    FTRACE(0, "TraceBytecode (emit): {}::{} in {}\n",
-           func->cls ? func->cls->name->data() : "",
-           func->name, func->unit->filename);
-  }
-
   return ret;
 }
 
@@ -971,7 +963,7 @@ void emit_ehent_tree(FuncEmitter& fe, const php::WideFunc& func,
 void emit_finish_func(EmitUnitState& state, FuncEmitter& fe,
                       php::WideFunc& wf, const EmitBcInfo& info) {
   auto const& func = *wf;
-  if (info.containsCalls) fe.containsCalls = true;;
+  if (info.containsCalls) fe.containsCalls = true;
 
   emit_locals_and_params(fe, func, info);
   emit_ehent_tree(fe, wf, info);
@@ -982,7 +974,7 @@ void emit_finish_func(EmitUnitState& state, FuncEmitter& fe,
   fe.retUpperBounds = func.returnUBs;
   fe.originalFilename =
     func.originalFilename ? func.originalFilename :
-    func.originalUnit ? func.originalUnit->filename : nullptr;
+    func.originalUnit ? func.originalUnit : nullptr;
   fe.isClosureBody = func.isClosureBody;
   fe.isAsync = func.isAsync;
   fe.isGenerator = func.isGenerator;
@@ -1256,45 +1248,47 @@ void emit_module(UnitEmitter& ue, const php::Module& module) {
 
 }
 
-std::unique_ptr<UnitEmitter> emit_unit(const Index& index, php::Unit& unit) {
+std::unique_ptr<UnitEmitter> emit_unit(Index& index, php::Unit& unit) {
   Trace::Bump bumper{
     Trace::hhbbc_emit, kSystemLibBump, is_systemlib_part(unit)
   };
 
-  assertx(check(unit));
+  assertx(check(unit, index));
 
-  auto ue = std::make_unique<UnitEmitter>(unit.sha1,
+  static std::atomic<uint64_t> nextUnitId{0};
+  auto unitSn = nextUnitId++;
+
+  auto ue = std::make_unique<UnitEmitter>(SHA1 { unitSn },
                                           SHA1{},
                                           Native::s_noNativeFuncs);
   FTRACE(1, "  unit {}\n", unit.filename->data());
-  ue->m_sn = unit.sn;
+  ue->m_sn = unitSn;
   ue->m_filepath = unit.filename;
   ue->m_metaData = unit.metaData;
   ue->m_fileAttributes = unit.fileAttributes;
   ue->m_moduleName = unit.moduleName;
 
   if (unit.fatalInfo) {
+    // We should have dealt with verifier failures long ago.
+    assertx(unit.fatalInfo->fatalLoc.has_value());
     ue->m_fatalUnit = true;
     ue->m_fatalOp = unit.fatalInfo->fatalOp;
-    ue->m_fatalLoc = unit.fatalInfo->fatalLoc;
+    ue->m_fatalLoc = *unit.fatalInfo->fatalLoc;
     ue->m_fatalMsg = unit.fatalInfo->fatalMsg;
   }
 
   EmitUnitState state { index, &unit };
   state.classOffsets.resize(unit.classes.size(), kInvalidOffset);
 
-  // Go thought all constant and see if they still need their matching 86cinit
-  // func. In repo mode we are able to optimize away most of them away. And if
-  // the const don't need them anymore we should not emit them.
-  std::unordered_set<
-    const StringData*,
-    string_data_hash,
-    string_data_same
-  > const_86cinit_funcs;
+  // Go thought all constants and see if they still need their
+  // matching 86cinit func. In repo mode we are able to optimize away
+  // most of them away. And if the const don't need them anymore we
+  // should not emit them.
+  hphp_fast_set<const StringData*> const_86cinit_funcs;
   for (size_t id = 0; id < unit.constants.size(); ++id) {
     auto& c = unit.constants[id];
     if (type(c->val) != KindOfUninit) {
-      const_86cinit_funcs.insert(Constant::funcNameFromName(c->name));
+      const_86cinit_funcs.emplace(Constant::funcNameFromName(c->name));
     }
   }
 
@@ -1302,26 +1296,34 @@ std::unique_ptr<UnitEmitter> emit_unit(const Index& index, php::Unit& unit) {
    * Top level funcs are always defined when the unit is loaded, and
    * don't have a DefFunc bytecode. Process them up front.
    */
-  for (size_t id = 0; id < unit.funcs.size(); ++id) {
-    auto const f = unit.funcs[id].get();
-    if (const_86cinit_funcs.find(f->name) != const_86cinit_funcs.end()) {
-      continue;
+  index.for_each_unit_func_mutable(
+    unit,
+    [&] (php::Func& f) {
+      if (const_86cinit_funcs.find(f.name) != const_86cinit_funcs.end()) {
+        return;
+      }
+      auto fe = ue->newFuncEmitter(f.name);
+      emit_func(state, *ue, *fe, f);
     }
-    auto fe = ue->newFuncEmitter(f->name);
-    emit_func(state, *ue, *fe, *f);
-  }
+  );
 
   /*
    * Find any top-level classes that need to be included due to
    * hoistability.
    */
-  for (size_t id = 0; id < unit.classes.size(); ++id) {
-    if (state.classOffsets[id] != kInvalidOffset) continue;
-    auto const c = unit.classes[id].get();
-    // Closures are AlwaysHoistable; but there's no need to include
-    // them unless there's a reachable CreateCl.
-    if (is_closure(*c)) continue;
-    recordClass(state, *ue, id);
+  {
+    size_t nextId = 0;
+    index.for_each_unit_class(
+      unit,
+      [&] (const php::Class& c) {
+        auto const id = nextId++;
+        if (state.classOffsets[id] != kInvalidOffset) return;
+        // Closures are AlwaysHoistable; but there's no need to include
+        // them unless there's a reachable CreateCl.
+        if (is_closure(c)) return;
+        recordClass(state, *ue, id);
+      }
+    );
   }
 
   size_t pceId = 0;
@@ -1329,8 +1331,13 @@ std::unique_ptr<UnitEmitter> emit_unit(const Index& index, php::Unit& unit) {
   while (pceId < state.pceInfo.size()) {
     auto const& pceInfo = state.pceInfo[pceId++];
     auto const id = pceInfo.origId;
-    emit_class(state, *ue, pceInfo.pce,
-               state.classOffsets[id], *unit.classes[id]);
+    emit_class(
+      state,
+      *ue,
+      pceInfo.pce,
+      state.classOffsets[id],
+      *index.lookup_unit_class_mutable(unit, id)
+    );
   }
 
   for (size_t id = 0; id < unit.typeAliases.size(); ++id) {

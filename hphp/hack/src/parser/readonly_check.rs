@@ -4,6 +4,9 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use aast::Expr_ as E_;
 use hh_autoimport_rust::is_hh_autoimport_fun;
 use naming_special_names_rust::special_idents;
@@ -21,8 +24,6 @@ use oxidized::pos::Pos;
 use parser_core_types::syntax_error;
 use parser_core_types::syntax_error::Error as ErrorMsg;
 use parser_core_types::syntax_error::SyntaxError;
-use std::collections::HashMap;
-use std::collections::HashSet;
 
 // Local environment which keeps track of how many readonly values it has
 #[derive(PartialEq, Clone)]
@@ -251,7 +252,7 @@ fn rty_expr(context: &mut Context, expr: &Expr) -> Rty {
         Id(_) => Rty::Mutable,
         Dollardollar(lid) => {
             let (id, dollardollar) = &lid.1;
-            let var_name = format!("{}{}", dollardollar.clone(), id);
+            let var_name = format!("{}{}", dollardollar, id);
             context.get_rty(&var_name)
         }
         // First put it in typechecker, then HHVM
@@ -349,7 +350,8 @@ fn explicit_readonly(expr: &mut Expr) {
     match &expr.2 {
         aast::Expr_::ReadonlyExpr(_) => {}
         _ => {
-            expr.2 = aast::Expr_::ReadonlyExpr(Box::new(expr.clone()));
+            let tmp = std::mem::replace(expr, Expr(expr.0, expr.1.clone(), Expr_::Null));
+            expr.2 = aast::Expr_::ReadonlyExpr(Box::new(tmp));
         }
     }
 }
@@ -692,6 +694,28 @@ impl<'ast> VisitorMut<'ast> for Checker {
                 context.add_local(dollardollar, left_rty);
                 self.visit_expr(context, right)?;
             }
+            aast::Expr_::Yield(y) => {
+                // TODO: T128042708 Remove once typechecker change is landed
+                if self.is_typechecker {
+                    let mut expect_mutable = |expr| match rty_expr(context, expr) {
+                        Rty::Readonly => {
+                            self.add_error(expr.pos(), syntax_error::yield_readonly);
+                        }
+                        Rty::Mutable => (),
+                    };
+
+                    match &**y {
+                        aast::Afield::AFkvalue(k, v) => {
+                            expect_mutable(k);
+                            expect_mutable(v);
+                        }
+                        aast::Afield::AFvalue(v) => {
+                            expect_mutable(v);
+                        }
+                    };
+                }
+            }
+
             _ => {}
         }
         Ok(())
@@ -868,6 +892,7 @@ impl<'ast> VisitorMut<'ast> for Checker {
                         let var_name = local_id::get_name(&lid.1).to_string();
                         let rhs_rty = rty_expr(context, &i.1);
                         context.add_local(&var_name, rhs_rty);
+                        i.recurse(context, self.object())?;
                     }
                 }
                 block.recurse(context, self.object())

@@ -3,16 +3,19 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use bstr::BStr;
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::slice::from_raw_parts;
 
+use bstr::BStr;
+use serde::Serialize;
+use serde::Serializer;
+
 /// Maybe<T> is similar to C++ `std::option`. It is just like Rust `Option<T>`
 /// but has repr(C) for use with with cbindgen.
-#[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+#[derive(Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash, Serialize)]
 #[repr(C)]
 pub enum Maybe<T> {
     Just(T),
@@ -146,7 +149,7 @@ impl<U> std::convert::From<Maybe<U>> for Option<U> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash, Serialize)]
 #[repr(C)]
 /// A tuple of two elements.
 pub struct Pair<U, V>(pub U, pub V);
@@ -156,7 +159,7 @@ impl<U, V> std::convert::From<(U, V)> for Pair<U, V> {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash, Serialize)]
 #[repr(C)]
 /// A tuple of three elements.
 pub struct Triple<U, V, W>(pub U, pub V, pub W);
@@ -194,6 +197,14 @@ pub struct Slice<'a, T> {
     marker: std::marker::PhantomData<&'a ()>,
 }
 
+impl<'a, T: serde::Serialize> Serialize for Slice<'a, T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.as_arena_ref().serialize(serializer)
+    }
+}
 // Send+Sync Safety: Slice is no more mutable than T
 unsafe impl<'a, T: Sync> Sync for Slice<'a, T> {}
 unsafe impl<'a, T: Send> Send for Slice<'a, T> {}

@@ -587,9 +587,10 @@ void HHVM_FUNCTION(parse_str,
 bool HHVM_FUNCTION(HH_is_late_init_prop_init,
                    const Object& obj,
                    const String& name) {
-  auto const ctx = fromCaller(
-    [] (const BTFrame& frm) { return frm.func()->cls(); }
+  auto const func = fromCaller(
+    [] (const BTFrame& frm) { return frm.func(); }
   );
+  auto const ctx = MemberLookupContext(func->cls(), func->moduleName());
   auto const val = obj->getPropIgnoreLateInit(ctx, name.get());
   if (!val) {
     SystemLib::throwInvalidArgumentExceptionObject(
@@ -612,9 +613,10 @@ bool HHVM_FUNCTION(HH_is_late_init_sprop_init,
       folly::sformat("Unknown class {}", clsName)
     );
   }
-  auto const ctx = fromCaller(
-    [] (const BTFrame& frm) { return frm.func()->cls(); }
+  auto const func =fromCaller(
+    [] (const BTFrame& frm) { return frm.func(); }
   );
+  auto const ctx =  MemberLookupContext(func->cls(), func->unit()->moduleName());
   auto const lookup = cls->getSPropIgnoreLateInit(ctx, name.get());
   if (!lookup.val || !lookup.accessible) {
     SystemLib::throwInvalidArgumentExceptionObject(

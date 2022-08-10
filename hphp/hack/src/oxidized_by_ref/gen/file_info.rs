@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<ebd7a3a41cd7ff39793f2466615cbcad>>
+// @generated SignedSource<<6c728eb5392039b65991d3b7c8dc7072>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -12,17 +12,14 @@ use arena_trait::TrivialDrop;
 use no_pos_hash::NoPosHash;
 use ocamlrep_derive::FromOcamlRepIn;
 use ocamlrep_derive::ToOcamlRep;
+pub use oxidized::file_info::Mode;
+pub use oxidized::file_info::NameType;
+pub use prim_defs::*;
 use serde::Deserialize;
 use serde::Serialize;
 
 #[allow(unused_imports)]
 use crate::*;
-
-pub use prim_defs::*;
-
-pub use oxidized::file_info::Mode;
-
-pub use oxidized::file_info::NameType;
 
 /// We define two types of positions establishing the location of a given name:
 /// a Full position contains the exact position of a name in a file, and a
@@ -75,6 +72,7 @@ pub use oxidized::file_info::Names;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "sn_")]
 #[repr(C)]
 pub struct SavedNames<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]

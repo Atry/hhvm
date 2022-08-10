@@ -3,6 +3,12 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use ffi::Maybe;
+use ffi::Slice;
+use ffi::Str;
+use ffi::Triple;
+use serde::Serialize;
+
 use crate::hhas_adata::HhasAdata;
 use crate::hhas_attribute::HhasAttribute;
 use crate::hhas_class::HhasClass;
@@ -13,12 +19,8 @@ use crate::hhas_pos::HhasPos;
 use crate::hhas_symbol_refs::HhasSymbolRefs;
 use crate::hhas_typedef::HhasTypedef;
 use crate::FatalOp;
-use ffi::Maybe;
-use ffi::Slice;
-use ffi::Str;
-use ffi::Triple;
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Serialize)]
 #[repr(C)]
 pub struct HackCUnit<'arena> {
     pub adata: Slice<'arena, HhasAdata<'arena>>,

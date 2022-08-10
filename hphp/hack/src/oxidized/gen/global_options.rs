@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<0c87abd253b23d919b2b5ba6f92013fa>>
+// @generated SignedSource<<030ccbb5a3c165d5de755624efa45807>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -134,7 +134,7 @@ pub struct GlobalOptions {
     pub po_interpret_soft_types_as_like_types: bool,
     pub tco_enable_strict_string_concat_interp: bool,
     pub tco_ignore_unsafe_cast: bool,
-    pub tco_readonly: bool,
+    pub tco_no_parser_readonly_check: bool,
     pub tco_enable_expression_trees: bool,
     pub tco_enable_modules: bool,
     pub tco_allowed_expression_tree_visitors: Vec<String>,
@@ -161,4 +161,5 @@ pub struct GlobalOptions {
     pub tco_use_manifold_cython_client: bool,
     pub tco_record_fine_grained_dependencies: bool,
     pub tco_loop_iteration_upper_bound: Option<isize>,
+    pub tco_expression_tree_virtualize_functions: bool,
 }

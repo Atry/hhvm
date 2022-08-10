@@ -3,10 +3,12 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use anyhow::Result;
 use std::ffi::OsStr;
 use std::path::Path;
 use std::path::PathBuf;
+
+use anyhow::bail;
+use anyhow::Result;
 
 /// Took this from https://docs.rs/once_cell/latest/once_cell/index.html#lazily-compiled-regex
 /// with this macro we can avoid re-initializing regexes, which are expensive to do
@@ -32,6 +34,10 @@ pub(crate) fn collect_files(
     let mut files: Vec<(u64, PathBuf)> = paths
         .iter()
         .map(|path| {
+            if !path.exists() {
+                bail!("File or directory '{}' not found", path.display());
+            }
+
             use jwalk::DirEntry;
             use jwalk::Result;
             use jwalk::WalkDir;

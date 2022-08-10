@@ -3,11 +3,13 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::typed_value::TypedValue;
 use ffi::Slice;
 use ffi::Str;
 use naming_special_names::user_attributes as ua;
 use naming_special_names_rust as naming_special_names;
+use serde::Serialize;
+
+use crate::typed_value::TypedValue;
 
 /// Attributes with a name from [naming_special_names::user_attributes] and
 /// a series of arguments.  Emitter code can match on an attribute as follows:
@@ -21,7 +23,7 @@ use naming_special_names_rust as naming_special_names;
 ///   }
 /// ```
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize)]
 #[repr(C)]
 pub struct HhasAttribute<'arena> {
     pub name: Str<'arena>,
@@ -63,14 +65,28 @@ fn is_native_arg<'arena>(s: &str, attrs: impl AsRef<[HhasAttribute<'arena>]>) ->
     })
 }
 
-pub fn is_keyed_by_ic_memoize<'arena>(attrs: impl AsRef<[HhasAttribute<'arena>]>) -> bool {
+fn is_memoize_with<'arena>(attrs: impl AsRef<[HhasAttribute<'arena>]>, arg: &str) -> bool {
     attrs.as_ref().iter().any(|attr| {
         ua::is_memoized_regular(attr.name.unsafe_as_str())
             && attr.arguments.as_ref().iter().any(|tv| match *tv {
-                TypedValue::String(s0) => s0.unsafe_as_str() == "KeyedByIC",
+                TypedValue::String(s0) => s0.unsafe_as_str() == arg,
                 _ => false,
             })
     })
+}
+
+pub fn is_keyed_by_ic_memoize<'arena>(attrs: impl AsRef<[HhasAttribute<'arena>]>) -> bool {
+    is_memoize_with(attrs, "KeyedByIC")
+}
+
+pub fn is_make_ic_inaccessible_memoize<'arena>(attrs: impl AsRef<[HhasAttribute<'arena>]>) -> bool {
+    is_memoize_with(attrs, "MakeICInaccessible")
+}
+
+pub fn is_soft_make_ic_inaccessible_memoize<'arena>(
+    attrs: impl AsRef<[HhasAttribute<'arena>]>,
+) -> bool {
+    is_memoize_with(attrs, "SoftMakeICInaccessible")
 }
 
 fn is_foldable<'arena>(attr: &HhasAttribute<'arena>) -> bool {
@@ -180,9 +196,9 @@ pub mod native_arg {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use naming_special_names::user_attributes as ua;
+
+    use super::*;
 
     #[test]
     fn example_is_memoized_vs_eq_memoize() {

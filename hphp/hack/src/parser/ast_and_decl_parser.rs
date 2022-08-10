@@ -4,13 +4,11 @@
 // LICENSE file in the "hack" directory of this source tree.
 
 use aast_parser::AastParser;
-use aast_parser::{self};
+pub use aast_parser::Result;
 use bumpalo::Bump;
 use oxidized::decl_parser_options::DeclParserOptions;
 use oxidized_by_ref::direct_decl_parser::ParsedFile;
 use parser_core_types::indexed_source_text::IndexedSourceText;
-
-pub use aast_parser::Result;
 pub use rust_aast_parser_types::Env;
 pub use rust_aast_parser_types::ParserResult;
 

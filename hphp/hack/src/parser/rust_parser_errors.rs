@@ -3,19 +3,14 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use itertools::Itertools;
 use std::collections::BTreeMap;
 use std::matches;
 use std::str::FromStr;
 
-use strum::IntoEnumIterator;
-use strum_macros::Display;
-use strum_macros::EnumIter;
-use strum_macros::EnumString;
-use strum_macros::IntoStaticStr;
-
 use hash::HashMap;
 use hash::HashSet;
+use hh_autoimport_rust as hh_autoimport;
+use itertools::Itertools;
 use naming_special_names_rust as sn;
 use oxidized::parser_options::ParserOptions;
 use parser_core_types::indexed_source_text::IndexedSourceText;
@@ -36,8 +31,11 @@ use parser_core_types::syntax_error::{self as errors};
 use parser_core_types::syntax_trait::SyntaxTrait;
 use parser_core_types::syntax_tree::SyntaxTree;
 use parser_core_types::token_kind::TokenKind;
-
-use hh_autoimport_rust as hh_autoimport;
+use strum::IntoEnumIterator;
+use strum_macros::Display;
+use strum_macros::EnumIter;
+use strum_macros::EnumString;
+use strum_macros::IntoStaticStr;
 
 #[derive(Clone, PartialEq, Debug)]
 struct Location {
@@ -92,6 +90,7 @@ enum UnstableFeatures {
     Ifc,
     Readonly,
     Modules,
+    ModuleReferences,
     ClassConstDefault,
     TypeConstMultipleBounds,
     TypeConstSuperBound,
@@ -115,9 +114,10 @@ impl UnstableFeatures {
             UnstableFeatures::Ifc => Unstable,
             UnstableFeatures::Readonly => Preview,
             UnstableFeatures::Modules => Preview,
+            UnstableFeatures::ModuleReferences => Unstable,
             UnstableFeatures::ContextAliasDeclaration => Unstable,
             UnstableFeatures::ContextAliasDeclarationShort => Preview,
-            UnstableFeatures::TypeConstMultipleBounds => Unstable,
+            UnstableFeatures::TypeConstMultipleBounds => Preview,
             UnstableFeatures::TypeConstSuperBound => Unstable,
             UnstableFeatures::ClassConstDefault => Migration,
             UnstableFeatures::TypeRefinements => Unstable,
@@ -431,10 +431,11 @@ fn syntax_to_list<'a>(
     include_separators: bool,
     node: S<'a>,
 ) -> impl DoubleEndedIterator<Item = S<'a>> {
-    use itertools::Either::Left;
-    use itertools::Either::Right;
     use std::iter::empty;
     use std::iter::once;
+
+    use itertools::Either::Left;
+    use itertools::Either::Right;
     let on_list_item =
         move |x: &'a ListItemChildren<'_, PositionedToken<'_>, PositionedValue<'_>>| {
             if include_separators {
@@ -4439,6 +4440,7 @@ impl<'a, State: 'a + Clone> ParserErrors<'a, State> {
                     default(self)
                 }
             }
+            UpcastExpression(x) => self.check_constant_expression(&x.left_operand),
             BinaryExpression(x) => {
                 if let Token(token) = &x.operator.children {
                     use TokenKind::*;
@@ -5225,7 +5227,16 @@ impl<'a, State: 'a + Clone> ParserErrors<'a, State> {
                 self.type_refinement_errors(node);
             }
             FileAttributeSpecification(_) => self.file_attribute_spec(node),
-            ModuleDeclaration(_) => self.check_can_use_feature(node, &UnstableFeatures::Modules),
+            ModuleDeclaration(x) => {
+                self.check_can_use_feature(node, &UnstableFeatures::Modules);
+                if let QualifiedName(x) = &x.name.children {
+                    if let SyntaxList(x) = &x.parts.children {
+                        if x.len() > 1 {
+                            self.check_can_use_feature(node, &UnstableFeatures::ModuleReferences);
+                        }
+                    }
+                }
+            }
             ModuleMembershipDeclaration(_) => {
                 self.check_can_use_feature(node, &UnstableFeatures::Modules);
                 self.in_module = true;

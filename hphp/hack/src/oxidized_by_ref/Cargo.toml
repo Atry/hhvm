@@ -22,8 +22,8 @@ ocamlrep = { path = "../ocamlrep" }
 ocamlrep_caml_builtins = { path = "../utils/ocamlrep_caml_builtins" }
 ocamlrep_derive = { path = "../ocamlrep_derive" }
 oxidized = { path = "../oxidized" }
+rust_to_ocaml_attr = { path = "../rust_to_ocaml/rust_to_ocaml_attr" }
 serde = { version = "1.0.136", features = ["derive", "rc"] }
-typing_deps_hash = { path = "../deps/cargo/typing_deps_hash" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.2", features = ["alloc"], default-features = false }

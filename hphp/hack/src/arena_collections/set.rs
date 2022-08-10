@@ -3,15 +3,15 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use arena_trait::Arena;
+use arena_trait::TrivialDrop;
+use ocamlrep::FromOcamlRepIn;
+use ocamlrep::ToOcamlRep;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::map::Map;
 use crate::map::MapIter;
-use arena_trait::Arena;
-use arena_trait::TrivialDrop;
-use ocamlrep::FromOcamlRepIn;
-use ocamlrep::ToOcamlRep;
 
 /// An arena-allocated set.
 ///
@@ -46,7 +46,7 @@ impl<K: ToOcamlRep + Ord> ToOcamlRep for Set<'_, K> {
         alloc: &'a A,
     ) -> ocamlrep::OpaqueValue<'a> {
         let len = self.count();
-        let mut iter = self.iter();
+        let mut iter = self.iter().map(|x| x.to_ocamlrep(alloc));
         let (value, _) = ocamlrep::sorted_iter_to_ocaml_set(&mut iter, alloc, len);
         value
     }
@@ -218,8 +218,9 @@ impl<'a, T: Ord> Iterator for Intersection<'a, T> {
 
 #[cfg(test)]
 pub mod tests_macro {
-    use super::*;
     use bumpalo::Bump;
+
+    use super::*;
 
     #[test]
     fn test_empty() {
@@ -235,8 +236,9 @@ pub mod tests_macro {
 
 #[cfg(test)]
 pub mod tests_iter {
-    use super::*;
     use bumpalo::Bump;
+
+    use super::*;
 
     #[test]
     fn test_empty() {

@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<30bb8dee46c07782ebbf50ec8866e2df>>
+// @generated SignedSource<<a9df28e87a0855e51ee49c8663917a25>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -16,13 +16,11 @@ use ocamlrep_derive::FromOcamlRepIn;
 use ocamlrep_derive::ToOcamlRep;
 use serde::Deserialize;
 use serde::Serialize;
+pub use typing_defs_core::*;
+pub use typing_defs_flags::*;
 
 #[allow(unused_imports)]
 use crate::*;
-
-pub use typing_defs_flags::*;
-
-pub use typing_defs_core::*;
 
 /// Origin of Class Constant References:
 /// In order to be able to detect cycle definitions like
@@ -117,6 +115,7 @@ arena_deserializer::impl_deserialize_in_arena!(ClassConstRef<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "cd_")]
 #[repr(C)]
 pub struct ConstDecl<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -143,6 +142,7 @@ arena_deserializer::impl_deserialize_in_arena!(ConstDecl<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ce_")]
 #[repr(C)]
 pub struct ClassElt<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -178,6 +178,7 @@ arena_deserializer::impl_deserialize_in_arena!(ClassElt<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "fe_")]
 #[repr(C)]
 pub struct FunElt<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -214,6 +215,7 @@ pub use oxidized::typing_defs::ClassConstKind;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "cc_")]
 #[repr(C)]
 pub struct ClassConst<'a> {
     pub synthesized: bool,
@@ -310,6 +312,7 @@ arena_deserializer::impl_deserialize_in_arena!(Requirement<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "atc_")]
 #[repr(C)]
 pub struct AbstractTypeconst<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -362,6 +365,7 @@ arena_deserializer::impl_deserialize_in_arena!(ConcreteTypeconst<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "patc_")]
 #[repr(C)]
 pub struct PartiallyAbstractTypeconst<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -415,6 +419,7 @@ arena_deserializer::impl_deserialize_in_arena!(Typeconst<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ttc_")]
 #[repr(C)]
 pub struct TypeconstType<'a> {
     pub synthesized: bool,
@@ -468,6 +473,7 @@ arena_deserializer::impl_deserialize_in_arena!(TypeconstType<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "te_")]
 #[repr(C)]
 pub struct EnumType<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -496,6 +502,7 @@ arena_deserializer::impl_deserialize_in_arena!(EnumType<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "td_")]
 #[repr(C)]
 pub struct TypedefType<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -513,6 +520,8 @@ pub struct TypedefType<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
     pub attributes: &'a [&'a UserAttribute<'a>],
     pub internal: bool,
+    #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    pub docs_url: Option<&'a str>,
 }
 impl<'a> TrivialDrop for TypedefType<'a> {}
 arena_deserializer::impl_deserialize_in_arena!(TypedefType<'arena>);

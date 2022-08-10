@@ -226,7 +226,7 @@ void emitCallerDynamicCallChecksUnknown(IRGS& env, SSATmp* callee) {
 
 void emitModuleBoundaryCheckKnown(IRGS& env, const Func* callee) {
   auto const caller = curFunc(env);
-  if (will_call_raise_module_boundary_violation(callee, caller->moduleName())) {
+  if (will_symbol_raise_module_boundary_violation(callee, caller)) {
       auto const data = OptClassAndFuncData { curClass(env), caller };
       gen(env, RaiseModuleBoundaryViolation, data, cns(env, callee));
   }
@@ -484,7 +484,7 @@ void callProfiledFunc(IRGS& env, SSATmp* callee,
 //////////////////////////////////////////////////////////////////////
 
 bool hasConstParamMemoCache(IRGS& env, const Func* callee, SSATmp* objOrClass) {
-  if (!callee->isMemoizeWrapper() || callee->isKeyedByImplicitContextMemoize()) {
+  if (!callee->isMemoizeWrapper() || !callee->isNoICMemoize()) {
     return false;
   }
   if (callee->userAttributes().count(LowStringPtr(s_attr_Deprecated.get()))) {
@@ -600,6 +600,7 @@ void prepareAndCallKnown(IRGS& env, const Func* callee, const FCallArgs& fca,
     }
 
     if (hasRdsCache) {
+      verifyImplicitContextState(env, callee);
       auto const link =
         constParamCacheLink(env, callee, objOrClass, asyncEagerReturn);
       assertx(link.isNormal());
@@ -1085,7 +1086,7 @@ void fcallObjMethodObj(IRGS& env, const FCallArgs& fca, SSATmp* obj,
         assertx(!isInterface(cls));
         obj = gen(env, AssertType, Type::SubObj(cls), obj);
         auto const callCtx =
-          MethodLookupCallContext(callContext(env, fca, cls), curFunc(env));
+          MemberLookupContext(callContext(env, fca, cls), curFunc(env));
         return lookupImmutableObjMethod(cls, methodName->strVal(),
                                         callCtx, true);
       }
@@ -1099,7 +1100,7 @@ void fcallObjMethodObj(IRGS& env, const FCallArgs& fca, SSATmp* obj,
         auto const exactClass =
           obj->type().clsSpec().exact() || cls->attrs() & AttrNoOverride;
         auto const callCtx =
-          MethodLookupCallContext(callContext(env, fca, cls), curFunc(env));
+          MemberLookupContext(callContext(env, fca, cls), curFunc(env));
         return lookupImmutableObjMethod(cls, methodName->strVal(),
                                         callCtx, exactClass);
       }
@@ -1332,7 +1333,7 @@ void emitResolveMethCaller(IRGS& env, const StringData* name) {
   auto const ok = [&] () -> bool {
     auto const cls = lookupUniqueClass(env, className);
     if (cls && !isTrait(cls)) {
-      auto const callCtx = MethodLookupCallContext(curClass(env), curFunc(env));
+      auto const callCtx = MemberLookupContext(curClass(env), curFunc(env));
       auto const res = lookupImmutableObjMethod(cls, methodName, callCtx,
                                                 false);
       return res.func && checkMethCallerTarget(res.func, curClass(env), false);
@@ -1571,7 +1572,7 @@ void emitFCallCtor(IRGS& env, FCallArgs fca, const StringData* clsHint) {
     return obj->type().clsSpec().exactCls();
   }();
   if (exactCls) {
-    auto const callCtx = MethodLookupCallContext(curClass(env), curFunc(env));
+    auto const callCtx = MemberLookupContext(curClass(env), curFunc(env));
     if (auto const ctor = lookupImmutableCtor(exactCls, callCtx)) {
       return prepareAndCallKnown(env, ctor, fca, obj, false, false);
     }
@@ -1684,7 +1685,7 @@ void emitFCallClsMethodD(IRGS& env,
   auto const cls = lookupUniqueClass(env, className);
   if (cls) {
     auto const callCtx =
-      MethodLookupCallContext(callContext(env, fca, cls), curFunc(env));
+      MemberLookupContext(callContext(env, fca, cls), curFunc(env));
     auto const func = lookupImmutableClsMethod(cls, methodName, callCtx, true);
     if (func) {
       if (!classIsPersistentOrCtxParent(env, cls)) {
@@ -1740,7 +1741,7 @@ SSATmp* lookupClsMethodKnown(IRGS& env,
                              bool forward,
                              SSATmp*& calleeCtx,
                              const Class* ctx) {
-  auto const callCtx = MethodLookupCallContext(ctx, curFunc(env));
+  auto const callCtx = MemberLookupContext(ctx, curFunc(env));
   auto const func = lookupImmutableClsMethod(
     baseClass, methodName, callCtx, exact);
   if (!func) return nullptr;
@@ -1834,7 +1835,7 @@ void emitResolveClsMethodD(IRGS& env, const StringData* className,
                            const StringData* methodName) {
   auto const cls = lookupUniqueClass(env, className, false /* trustUnit */);
   if (cls) {
-    auto const callCtx = MethodLookupCallContext(curClass(env), curFunc(env));
+    auto const callCtx = MemberLookupContext(curClass(env), curFunc(env));
     auto const func = lookupImmutableClsMethod(cls, methodName, callCtx, true);
     if (func) {
       checkClsMethodAndLdCtx(env, cls, func, className);
@@ -1878,7 +1879,7 @@ void emitResolveRClsMethodD(IRGS& env, const StringData* className,
 
   auto const cls = lookupUniqueClass(env, className, false /* trustUnit */);
   if (cls) {
-    auto const callCtx = MethodLookupCallContext(curClass(env), curFunc(env));
+    auto const callCtx = MemberLookupContext(curClass(env), curFunc(env));
     auto const func = lookupImmutableClsMethod(cls, methodName, callCtx, true);
     if (func) {
       checkClsMethodAndLdCtx(env, cls, func, className);

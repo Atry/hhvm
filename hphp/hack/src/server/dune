@@ -81,6 +81,14 @@
   (pps lwt_ppx ppx_deriving.std)))
 
 (library
+ (name server_call_hierarchy)
+ (wrapped false)
+ (modules serverPrepareCallHierarchy serverCallHierarchyIncomingCalls serverCallHierarchyOutgoingCalls serverCallHierarchyUtils)
+ (libraries provider_context server_find_refs server_services lsp server_command_types)
+ (preprocess
+  (pps lwt_ppx ppx_deriving.std)))
+
+(library
  (name server_go_to)
  (wrapped false)
  (modules serverGoToDefinition serverGoToImpl)
@@ -266,6 +274,7 @@
   methodJumps
   saveStateService
   serverDepsOutBatch
+  serverDepsUtil
   serverFindTypeVar
   serverFindLocals
   serverFunDepsBatch
@@ -453,6 +462,7 @@
   serverFormat
   serverGenPrefetchDir
   serverGenRemoteDecls
+  serverGenRemoteFiles
   serverGenShallowDeclsToDir
   serverIdle
   serverInferTypeBatch
@@ -493,6 +503,7 @@
   lsp
   parsing_service
   remote
+  remote_files_ffi
   security_stubs
   shallow_classes_provider
   direct_decl_parser
@@ -518,6 +529,7 @@
   typing_service_api
   typing_check_job
   utils_core
+  utils_hash
   version
   watchman_utils
   (select
@@ -570,6 +582,7 @@
     server
     server_env_build
     server_global_inference
+    server_call_hierarchy
     server_go_to
     server_highlight_refs
     server_search

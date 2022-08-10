@@ -704,7 +704,27 @@ public:
    */
   bool isMemoizeWrapperLSB() const;
 
+  /*
+   * What kind of memoized function is this?
+   * NB: MemoizeICType must be a unsigned char in order to enable
+   * struct bit packing.
+   */
+  enum MemoizeICType : unsigned char {
+    NoIC = 0,
+    KeyedByIC = 1,
+    MakeICInaccessible = 2,
+    SoftMakeICInaccessible = 3,
+  };
+
+  MemoizeICType memoizeICType() const;
+
+  bool isNoICMemoize() const;
+
   bool isKeyedByImplicitContextMemoize() const;
+
+  bool isMakeICInaccessibleMemoize() const;
+
+  bool isSoftMakeICInaccessibleMemoize() const;
 
   /*
    * Is this string the name of a memoize implementation.
@@ -1323,7 +1343,7 @@ private:
         bool m_returnByValue : true; // only for builtins
         bool m_isMemoizeWrapper : true;
         bool m_isMemoizeWrapperLSB : true;
-        bool m_isKeyedByImplicitContextMemoize : true;
+        MemoizeICType m_memoizeICType : 2;
         bool m_isPhpLeafFn : true;
         bool m_hasReifiedGenerics : true;
         bool m_hasParamsWithMultiUBs : true;

@@ -445,6 +445,7 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
     (env, ServerGenRemoteDecls.go env genv genv.workers ~incremental:true)
   | GEN_SHALLOW_DECLS_DIR dir ->
     (env, ServerGenShallowDeclsToDir.go env genv genv.workers dir)
+  | GEN_REMOTE_FILES -> (env, ServerGenRemoteFiles.go genv)
   | FUN_DEPS_BATCH positions ->
     (env, ServerFunDepsBatch.go genv.workers positions env)
   | LIST_FILES_WITH_ERRORS -> (env, ServerEnv.list_files env)
@@ -471,6 +472,24 @@ let handle : type a. genv -> env -> is_stale:bool -> a t -> env * a =
     let (ctx, entry) = single_ctx env path file_input in
     Provider_utils.respect_but_quarantine_unsaved_changes ~ctx ~f:(fun () ->
         (env, ServerGoToDefinition.go_quarantined ~ctx ~entry ~line ~column))
+  | PREPARE_CALL_HIERARCHY (labelled_file, line, column) ->
+    let (path, file_input) =
+      ServerCommandTypesUtils.extract_labelled_file labelled_file
+    in
+    let (ctx, entry) = single_ctx env path file_input in
+    Provider_utils.respect_but_quarantine_unsaved_changes ~ctx ~f:(fun () ->
+        ( env,
+          ServerPrepareCallHierarchy.go_quarantined ~ctx ~entry ~line ~column ))
+  | CALL_HIERARCHY_INCOMING_CALLS call_item ->
+    let ctx = Provider_utils.ctx_from_server_env env in
+    let result =
+      ServerCallHierarchyIncomingCalls.go call_item ~ctx ~genv ~env
+    in
+    (env, result)
+  | CALL_HIERARCHY_OUTGOING_CALLS call_item ->
+    let ctx = Provider_utils.ctx_from_server_env env in
+    let result = ServerCallHierarchyOutgoingCalls.go call_item ~ctx in
+    (env, result)
   | BIGCODE path ->
     let (ctx, entry) = single_ctx_path env path in
     let result = ServerBigCode.go_ctx ~ctx ~entry in

@@ -3,16 +3,8 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::emit_adata;
-use crate::emit_attribute;
-use crate::emit_body;
-use crate::emit_constant;
-use crate::emit_expression;
-use crate::emit_memoize_method;
-use crate::emit_method;
-use crate::emit_property;
-use crate::emit_type_constant;
-use crate::emit_xhp;
+use std::collections::BTreeMap;
+
 use emit_property::PropAndInit;
 use env::emitter::Emitter;
 use env::Env;
@@ -33,8 +25,8 @@ use hhbc::hhas_method::HhasMethodFlags;
 use hhbc::hhas_param::HhasParam;
 use hhbc::hhas_pos::HhasSpan;
 use hhbc::hhas_property::HhasProperty;
+use hhbc::hhas_type;
 use hhbc::hhas_type::HhasTypeInfo;
-use hhbc::hhas_type::{self};
 use hhbc::hhas_type_const::HhasTypeConstant;
 use hhbc::ClassName;
 use hhbc::FCallArgs;
@@ -58,7 +50,17 @@ use oxidized::ast::Hint;
 use oxidized::ast::ReifyKind;
 use oxidized::ast::RequireKind;
 use oxidized::namespace_env;
-use std::collections::BTreeMap;
+
+use crate::emit_adata;
+use crate::emit_attribute;
+use crate::emit_body;
+use crate::emit_constant;
+use crate::emit_expression;
+use crate::emit_memoize_method;
+use crate::emit_method;
+use crate::emit_property;
+use crate::emit_type_constant;
+use crate::emit_xhp;
 
 fn add_symbol_refs<'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,

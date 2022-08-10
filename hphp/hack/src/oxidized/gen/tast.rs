@@ -3,24 +3,23 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<c0964bcd8e70f2c0d2e67dc0a0b21a77>>
+// @generated SignedSource<<d9ee0894004b1593f03a773686d1d52e>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
 
+pub use aast_defs::*;
 use no_pos_hash::NoPosHash;
 use ocamlrep_derive::FromOcamlRep;
 use ocamlrep_derive::ToOcamlRep;
 use serde::Deserialize;
 use serde::Serialize;
-
-#[allow(unused_imports)]
-use crate::*;
-
-pub use aast_defs::*;
 pub use typing_defs::PossiblyEnforcedTy;
 pub use typing_defs::Ty;
 pub use typing_defs::ValKind;
+
+#[allow(unused_imports)]
+use crate::*;
 
 pub type DeclTy = typing_defs::Ty;
 
@@ -38,6 +37,7 @@ pub type DeclTy = typing_defs::Ty;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "has_")]
 #[repr(C)]
 pub struct FunTastInfo {
     pub implicit_return: bool,

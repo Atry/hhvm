@@ -23,9 +23,9 @@
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/bespoke-array.h"
+#include "hphp/runtime/base/bespoke/type-structure.h"
 #include "hphp/runtime/base/builtin-functions.h"
 #include "hphp/runtime/base/comparisons.h"
-#include "hphp/runtime/base/memory-manager-defs.h"
 #include "hphp/runtime/base/memory-manager.h"
 #include "hphp/runtime/base/request-info.h"
 #include "hphp/runtime/base/runtime-option.h"
@@ -59,9 +59,10 @@ static_assert(
   " Make sure you changed it with good reason and then update this assert.");
 
 size_t hashArrayPortion(const ArrayData* arr) {
-  assertx(arr->isVanilla());
-
   auto hash = folly::hash::hash_128_to_64(arr->kind(), arr->isLegacyArray());
+
+  auto const isBespoke = bespoke::TypeStructure::isBespokeTypeStructure(arr);
+  hash = folly::hash::hash_combine(hash, isBespoke);
 
   IterateKV(
     arr,
@@ -128,13 +129,14 @@ size_t hashArrayPortion(const ArrayData* arr) {
 }
 
 bool compareArrayPortion(const ArrayData* ad1, const ArrayData* ad2) {
-  assertx(ad1->isVanilla());
-  assertx(ad2->isVanilla());
-
   if (ad1 == ad2) return true;
   if (ad1->kind() != ad2->kind()) return false;
   if (ad1->size() != ad2->size()) return false;
   if (ad1->isLegacyArray() != ad2->isLegacyArray()) return false;
+
+  auto const isBespoke1 = bespoke::TypeStructure::isBespokeTypeStructure(ad1);
+  auto const isBespoke2 = bespoke::TypeStructure::isBespokeTypeStructure(ad2);
+  if (isBespoke1 != isBespoke2) return false;
 
   auto const check = [] (const TypedValue& tv1, const TypedValue& tv2) {
     if (tv1.m_type != tv2.m_type) {
@@ -195,6 +197,8 @@ void ArrayData::GetScalarArray(ArrayData** parr) {
 
   auto const arr = [&]{
     if (base->isVanilla()) return base;
+    // don't escalate for type structures
+    if (bespoke::TypeStructure::isBespokeTypeStructure(base)) return base;
     *parr = BespokeArray::ToVanilla(base, "ArrayData::GetScalarArray");
     decRefArr(base);
     return *parr;
@@ -218,7 +222,14 @@ void ArrayData::GetScalarArray(ArrayData** parr) {
     }());
   }
 
-  arr->onSetEvalScalar();
+  auto const isBespokeTS = bespoke::TypeStructure::isBespokeTypeStructure(arr);
+
+  if (isBespokeTS) {
+    auto ts = bespoke::TypeStructure::As(arr);
+    bespoke::TypeStructure::OnSetEvalScalar(ts);
+  } else {
+    arr->onSetEvalScalar();
+  }
 
   s_cachedHash.first = arr;
   s_cachedHash.second = hashArrayPortion(arr);
@@ -240,15 +251,21 @@ void ArrayData::GetScalarArray(ArrayData** parr) {
 
   if (auto const a = lookup(arr)) return replace(a);
 
+  ArrayData* ad;
+  if (isBespokeTS) {
+    auto const ts = bespoke::TypeStructure::As(arr);
+    ad = bespoke::TypeStructure::CopyStatic(ts);
+  } else {
+    ad = arr->copyStatic();
+  }
   // We should clear the sampled bit in the new static array regardless of
   // whether the input array was sampled, because specializing the input is
   // not sufficient to specialize this new static array.
-  auto const ad = arr->copyStatic();
   ad->m_aux16 &= ~kSampledArray;
   assertx(ad->isStatic());
 
-  // TODO(T68458896): allocSize rounds up to size class, which we shouldn't do.
-  MemoryStats::LogAlloc(AllocKind::StaticArray, allocSize(ad));
+  // TODO(T68458896): heapSize rounds up to size class, which we shouldn't do.
+  MemoryStats::LogAlloc(AllocKind::StaticArray, ad->heapSize());
   if (RuntimeOption::EvalEnableReverseDataMap) {
     data_map::register_start(ad);
   }
@@ -966,6 +983,31 @@ ArrayData* ArrayData::toKeyset(bool copy) {
   KeysetInit init{size()};
   IterateV(this, [&](auto v) { init.add(v); });
   return init.create();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void BlobEncoderHelper<const ArrayData*>::serde(BlobEncoder& encoder,
+                                                const ArrayData* ad) {
+  if (!ad) {
+    encoder(make_tv<KindOfUninit>());
+    return;
+  }
+  assertx(ad->isStatic());
+  encoder(make_array_like_tv(const_cast<ArrayData*>(ad)));
+}
+
+void BlobEncoderHelper<const ArrayData*>::serde(BlobDecoder& decoder,
+                                                const ArrayData*& ad) {
+  TypedValue tv;
+  decoder(tv);
+  if (tv.m_type == KindOfUninit) {
+    ad = nullptr;
+    return;
+  }
+  assertx(tvIsArrayLike(tv));
+  assertx(tv.m_data.parr->isStatic());
+  ad = tv.m_data.parr;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

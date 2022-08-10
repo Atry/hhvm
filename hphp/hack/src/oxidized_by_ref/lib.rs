@@ -3,6 +3,9 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+#[macro_use]
+extern crate rust_to_ocaml_attr;
+
 mod manual;
 
 pub use manual::ast;
@@ -27,6 +30,7 @@ pub use manual::prop_flags;
 pub use manual::relative_path;
 pub use manual::s_map;
 pub use manual::s_set;
+pub use manual::shallow_decl_defs_impl;
 pub use manual::shape_map;
 pub use manual::symbol_name;
 pub use manual::t_shape_map;

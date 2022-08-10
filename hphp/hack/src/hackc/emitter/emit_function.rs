@@ -2,19 +2,14 @@
 //
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
-use crate::emit_attribute;
-use crate::emit_body;
-use crate::emit_memoize_function;
-use crate::emit_memoize_helpers;
 use ast_scope::Scope;
 use ast_scope::ScopeItem;
-use ast_scope::{self};
 use env::emitter::Emitter;
 use error::Result;
 use ffi::Slice;
 use ffi::Str;
+use hhbc::hhas_attribute;
 use hhbc::hhas_attribute::HhasAttribute;
-use hhbc::hhas_attribute::{self};
 use hhbc::hhas_coeffects::HhasCoeffects;
 use hhbc::hhas_function::HhasFunction;
 use hhbc::hhas_pos::HhasSpan;
@@ -25,6 +20,11 @@ use naming_special_names_rust::user_attributes as ua;
 use ocamlrep::rc::RcOc;
 use oxidized::ast;
 use oxidized::ast_defs;
+
+use crate::emit_attribute;
+use crate::emit_body;
+use crate::emit_memoize_function;
+use crate::emit_memoize_helpers;
 
 pub fn emit_function<'a, 'arena, 'decl>(
     e: &mut Emitter<'arena, 'decl>,

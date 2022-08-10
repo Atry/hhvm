@@ -18,6 +18,7 @@
 #include "hphp/util/match.h"
 #include "hphp/util/trace.h"
 
+#include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/type-structure-helpers-defs.h"
@@ -579,11 +580,6 @@ bool optimize_builtin(ISS& env, const php::Func* func, const FCallArgs& fca) {
       !RuntimeOption::EvalEnableCallBuiltin) {
     return false;
   }
-
-  // We rely on strength reduction to convert builtins, but if we do
-  // the analysis on the assumption that builtins will be created, but
-  // don't actually create them, all sorts of things can go wrong.
-  if (!options.StrengthReduce) return false;
 
   // Do not allow for inout arguments, unpack and variadic arguments
   if (func->hasInOutArgs ||

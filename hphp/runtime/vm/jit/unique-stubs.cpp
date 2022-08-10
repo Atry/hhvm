@@ -117,7 +117,7 @@ void storeVMRegs(Vout& v) { storeVmfp(v); storeVmsp(v); }
  */
 void popFrameToFuncEntryRegs(Vout& v) {
   v << copy{rvmfp(), rvmsp()};
-  v << pushm{Vreg(rvmsp()) + AROFF(m_savedRip)};
+  v << restorerip{rvmfp()};
   v << load{Vreg(rvmsp()) + AROFF(m_sfp), rvmfp()};
 }
 
@@ -126,8 +126,8 @@ void popFrameToFuncEntryRegs(Vout& v) {
  */
 void pushFrameFromFuncEntryRegs(Vout& v) {
   v << store{rvmfp(), Vreg(rvmsp()) + AROFF(m_sfp)};
-  v << popm{Vreg(rvmsp()) + AROFF(m_savedRip)};
   v << copy{rvmsp(), rvmfp()};
+  v << phplogue{rvmfp()};
 }
 
 /*
@@ -984,13 +984,12 @@ TCA emitDecRefGeneric(CodeBlock& cb, DataBlock& data, const char* /*name*/) {
 
       // Since we've manually saved the caller saved registers, we can
       // use those for Vregs. We use the helper ABI for this stub
-      // which only allows caller saved registers.
+      // which only allows caller-saved or reserved registers.
       assertx(callerSaved.contains(rdata));
       assertx(callerSaved.contains(rtype));
-      assertx(
-        (callerSaved & abi(CodeKind::Helper).gpUnreserved) ==
-        abi(CodeKind::Helper).gpUnreserved
-      );
+      DEBUG_ONLY auto helper_gpUnres = abi(CodeKind::Helper).gpUnreserved;
+      DEBUG_ONLY auto std_res = abi().gpReserved;
+      assertx(((callerSaved | std_res) & helper_gpUnres) == helper_gpUnres);
 
       auto const dtor = lookupDestructor(v, rtype);
       v << callm{dtor, arg_regs(1)};

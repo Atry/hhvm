@@ -110,7 +110,7 @@ void record(ISS& env, const Bytecode& bc) {
     return;
   }
 
-  ITRACE(2, "  => {}\n", show(env.ctx.func, bc));
+  ITRACE(2, "  => {}\n", show(*env.ctx.func, bc));
   env.replacedBcs.push_back(bc);
 }
 
@@ -176,7 +176,7 @@ bool start_add_elem(ISS& env, Type& ty, Op op) {
   );
   env.replacedBcs.back().srcLoc = env.srcLoc;
   ITRACE(2, "(addelem* -> {}\n",
-         show(env.ctx.func, env.replacedBcs.back()));
+         show(*env.ctx.func, env.replacedBcs.back()));
   push(env, std::move(ty));
   effect_free(env);
   return true;
@@ -259,7 +259,7 @@ int kill_by_slot(ISS& env, int slot) {
   auto const pop = numPop(bc);
   auto const push = numPush(bc);
   ITRACE(2, "kill_by_slot: slot={}, id={}, was {}\n",
-         slot, id, show(env.ctx.func, bc));
+         slot, id, show(*env.ctx.func, bc));
   bc = bc_with_loc(bc.srcLoc, bc::Nop {});
   env.state.stack.kill(pop, push, id);
   reprocess(env);
@@ -306,7 +306,7 @@ void insert_after_slot(ISS& env, int slot,
   ITRACE(2, "insert_after_slot: slot={}, id={}  [{}]\n",
          slot, id,
          from(bcs) |
-         map([&] (const Bytecode& bc) { return show(env.ctx.func, bc); }) |
+         map([&] (const Bytecode& bc) { return show(*env.ctx.func, bc); }) |
          unsplit<std::string>(", "));
 }
 
@@ -340,7 +340,7 @@ void replace_last_op(ISS& env, Bytecode&& bc) {
     env.state.stack.rewind(oldPops - newPops, oldPush - newPush);
   }
   ITRACE(2, "(replace: {}->{}\n",
-         show(env.ctx.func, last), show(env.ctx.func, bc));
+         show(*env.ctx.func, last), show(*env.ctx.func, bc));
   last = bc_with_loc(last.srcLoc, bc);
 }
 
@@ -381,7 +381,7 @@ const Bytecode* last_op(ISS& env, int idx /* = 0 */) {
  */
 void rewind(ISS& env, const Bytecode& bc) {
   assertx(!env.undo);
-  ITRACE(2, "(rewind: {}\n", show(env.ctx.func, bc));
+  ITRACE(2, "(rewind: {}\n", show(*env.ctx.func, bc));
   env.state.stack.rewind(numPop(bc), numPush(bc));
 }
 
@@ -414,7 +414,7 @@ void impl_vec(ISS& env, bool reduce, BytecodeVec&& bcs) {
     using namespace folly::gen;
     ITRACE(2, "(reduce: {}\n",
            from(bcs) |
-           map([&] (const Bytecode& bc) { return show(env.ctx.func, bc); }) |
+           map([&] (const Bytecode& bc) { return show(*env.ctx.func, bc); }) |
            unsplit<std::string>(", "));
     if (bcs.size()) {
       auto ef = !env.flags.reduced || env.flags.effectFree;
@@ -456,7 +456,7 @@ void impl_vec(ISS& env, bool reduce, BytecodeVec&& bcs) {
     auto const canConstProp = env.flags.canConstProp;
     auto const effectFree = env.flags.effectFree;
 
-    ITRACE(3, "    (impl {}\n", show(env.ctx.func, bc));
+    ITRACE(3, "    (impl {}\n", show(*env.ctx.func, bc));
     env.flags.wasPEI          = true;
     env.flags.canConstProp    = false;
     env.flags.effectFree      = false;
@@ -794,7 +794,7 @@ void in(ISS& env, const bc::AddElemC&) {
         (env.state.stack.end() - 3)->type = std::move(*outTy);
         reduce(env, bc::PopC {}, bc::PopC {});
         ITRACE(2, "(addelem* -> {}\n",
-               show(env.ctx.func,
+               show(*env.ctx.func,
                     env.replacedBcs[env.trackedElems.back().idx - env.unchangedBcs]));
         return;
       }
@@ -845,7 +845,7 @@ void in(ISS& env, const bc::AddNewElemC&) {
         (env.state.stack.end() - 2)->type = std::move(*outTy);
         reduce(env, bc::PopC {});
         ITRACE(2, "(addelem* -> {}\n",
-               show(env.ctx.func,
+               show(*env.ctx.func,
                     env.replacedBcs[env.trackedElems.back().idx - env.unchangedBcs]));
         return;
       }
@@ -984,7 +984,7 @@ void in(ISS& env, const bc::File&) {
 
   auto filename = env.ctx.func->originalFilename
     ? env.ctx.func->originalFilename
-    : env.ctx.func->unit->filename;
+    : env.ctx.func->unit;
   if (!FileUtil::isAbsolutePath(filename->slice())) {
     filename = makeStaticString(
       *options.SourceRootForFileBC + filename->toCppString()
@@ -1002,7 +1002,7 @@ void in(ISS& env, const bc::Dir&) {
 
   auto filename = env.ctx.func->originalFilename
     ? env.ctx.func->originalFilename
-    : env.ctx.func->unit->filename;
+    : env.ctx.func->unit;
   if (!FileUtil::isAbsolutePath(filename->slice())) {
     filename = makeStaticString(
       *options.SourceRootForFileBC + filename->toCppString()
@@ -3098,6 +3098,27 @@ void in(ISS& env, const bc::ClassHasReifiedGenerics& op) {
   push(env, t);
 }
 
+void in(ISS& env, const bc::GetClsRGProp& op) {
+  // TODO(T121050961) Optimize for lazy classes too
+  auto const cls = popC(env);
+  if (!thisAvailable(env) || !cls.couldBe(BCls | BLazyCls)) {
+    unreachable(env);
+    return push(env, TBottom);
+  }
+  if (!cls.subtypeOf(BCls) ||
+      !is_specialized_cls(cls) ||
+      !dcls_of(cls).isExact()) {
+    push(env, TVec);
+    return;
+  }
+  auto const &dcls = dcls_of(cls);
+  if (!dcls.cls().couldHaveReifiedGenerics()) {
+    push(env, TInitNull);
+    return;
+  }
+  push(env, TVec);
+}
+
 void in(ISS& env, const bc::HasReifiedParent& op) {
   // TODO(T121050961) Optimize for lazy classes too
   auto const cls = popC(env);
@@ -3125,6 +3146,24 @@ void in(ISS& env, const bc::HasReifiedParent& op) {
     return TBool;
   }();
   push(env, t);
+}
+
+void in(ISS& env, const bc::CheckClsRGSoft& op) {
+  // TODO(T121050961) Optimize for lazy classes too
+  auto const cls = popC(env);
+  if (!cls.couldBe(BCls | BLazyCls)) {
+    unreachable(env);
+    return;
+  }
+  if (!cls.subtypeOf(BCls) ||
+      !is_specialized_cls(cls) ||
+      !dcls_of(cls).isExact()) {
+    return;
+  }
+  auto const &dcls = dcls_of(cls);
+  if (!dcls.cls().couldHaveReifiedGenerics()) {
+    unreachable(env);
+  }
 }
 
 namespace {
@@ -3630,7 +3669,6 @@ bool fcallTryFold(
   }
 
   assertx(!fca.hasUnpack() && !fca.hasGenerics() && fca.numRets() == 1);
-  assertx(options.ConstantFoldBuiltins);
 
   auto const finish = [&] (Type ty) {
     auto const v = tv(ty);
@@ -5278,7 +5316,7 @@ void in(ISS& env, const bc::CreateCl& op) {
     }
     merge_closure_use_vars_into(
       env.collect.closureUseTypes,
-      clsPair.second,
+      *clsPair.second,
       std::move(usedVars)
     );
   }
@@ -5701,7 +5739,7 @@ void dispatch(ISS& env, const Bytecode& op) {
 
 void interpStep(ISS& env, const Bytecode& bc) {
   ITRACE(2, "  {} ({})\n",
-         show(env.ctx.func, bc),
+         show(*env.ctx.func, bc),
          env.unchangedBcs + env.replacedBcs.size());
   Trace::Indent _;
 
@@ -5719,7 +5757,7 @@ void interpStep(ISS& env, const Bytecode& bc) {
   if (env.flags.reduced) return;
 
   auto const_prop = [&] {
-    if (!options.ConstantProp || !env.flags.canConstProp) return false;
+    if (!env.flags.canConstProp) return false;
 
     auto const numPushed   = bc.numPush();
     TinyVector<TypedValue> cells;
@@ -5870,42 +5908,40 @@ BlockId speculateHelper(ISS& env, BlockId orig, bool updateTaken) {
   auto target = orig;
   auto pops = 0;
 
-  if (options.RemoveDeadBlocks) {
-    State temp{env.state, State::Compact{}};
-    while (true) {
-      auto const& func = env.ctx.func;
-      auto const targetBlk = func.blocks()[target].get();
-      if (!targetBlk->multiPred) break;
-      auto const ok = [&] {
+  State temp{env.state, State::Compact{}};
+  while (true) {
+    auto const& func = env.ctx.func;
+    auto const targetBlk = func.blocks()[target].get();
+    if (!targetBlk->multiPred) break;
+    auto const ok = [&] {
         switch (targetBlk->hhbcs.back().op) {
           case Op::JmpZ:
           case Op::JmpNZ:
           case Op::SSwitch:
           case Op::Switch:
-          return true;
+            return true;
           default:
-          return false;
+            return false;
         }
       }();
 
-      if (!ok) break;
+    if (!ok) break;
 
-      Interp interp {
-        env.index, env.ctx, env.collect, target, targetBlk, temp
-      };
+    Interp interp {
+      env.index, env.ctx, env.collect, target, targetBlk, temp
+    };
 
-      auto const old_size = temp.stack.size();
-      auto const new_target = speculate(interp);
-      if (new_target == NoBlockId) break;
+    auto const old_size = temp.stack.size();
+    auto const new_target = speculate(interp);
+    if (new_target == NoBlockId) break;
 
-      const ssize_t delta = old_size - temp.stack.size();
-      assertx(delta >= 0);
-      if (delta && endsInControlFlow) break;
+    const ssize_t delta = old_size - temp.stack.size();
+    assertx(delta >= 0);
+    if (delta && endsInControlFlow) break;
 
-      pops += delta;
-      target = new_target;
-      temp.stack.compact();
-    }
+    pops += delta;
+    target = new_target;
+    temp.stack.compact();
   }
 
   if (endsInControlFlow && updateTaken) {

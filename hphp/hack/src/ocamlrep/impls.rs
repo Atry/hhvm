@@ -11,6 +11,8 @@ use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::ffi::OsString;
+use std::hash::BuildHasher;
+use std::hash::Hash;
 use std::mem::size_of;
 use std::path::Path;
 use std::path::PathBuf;
@@ -20,6 +22,8 @@ use std::sync::Arc;
 use bstr::BStr;
 use bstr::BString;
 use bumpalo::Bump;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 
 use crate::block;
 use crate::from;
@@ -201,13 +205,13 @@ impl FromOcamlRep for f64 {
 
 trivial_from_in_impl!(f64);
 
-impl<T: ToOcamlRep> ToOcamlRep for Box<T> {
+impl<T: ToOcamlRep + Sized> ToOcamlRep for Box<T> {
     fn to_ocamlrep<'a, A: Allocator>(&'a self, alloc: &'a A) -> OpaqueValue<'a> {
         alloc.add(&**self)
     }
 }
 
-impl<T: FromOcamlRep> FromOcamlRep for Box<T> {
+impl<T: FromOcamlRep + Sized> FromOcamlRep for Box<T> {
     fn from_ocamlrep(value: Value<'_>) -> Result<Self, FromError> {
         Ok(Box::new(T::from_ocamlrep(value)?))
     }
@@ -451,6 +455,19 @@ impl<'a, T: FromOcamlRepIn<'a>> FromOcamlRepIn<'a> for &'a [T] {
     }
 }
 
+impl<T: ToOcamlRep> ToOcamlRep for Box<[T]> {
+    fn to_ocamlrep<'a, A: Allocator>(&'a self, alloc: &'a A) -> OpaqueValue<'a> {
+        (**self).to_ocamlrep(alloc)
+    }
+}
+
+impl<T: FromOcamlRep> FromOcamlRep for Box<[T]> {
+    fn from_ocamlrep(value: Value<'_>) -> Result<Self, FromError> {
+        let vec = <Vec<T>>::from_ocamlrep(value)?;
+        Ok(vec.into_boxed_slice())
+    }
+}
+
 impl<T: ToOcamlRep> ToOcamlRep for Vec<T> {
     fn to_ocamlrep<'a, A: Allocator>(&'a self, alloc: &'a A) -> OpaqueValue<'a> {
         alloc.add(self.as_slice())
@@ -486,7 +503,9 @@ impl<K: ToOcamlRep + Ord, V: ToOcamlRep> ToOcamlRep for BTreeMap<K, V> {
             return OpaqueValue::int(0);
         }
         let len = self.len();
-        let mut iter = self.iter();
+        let mut iter = self
+            .iter()
+            .map(|(k, v)| (k.to_ocamlrep(alloc), v.to_ocamlrep(alloc)));
         let (res, _) = sorted_iter_to_ocaml_map(&mut iter, alloc, len);
         res
     }
@@ -506,18 +525,12 @@ impl<'a, K: FromOcamlRep + Ord, V: FromOcamlRep> FromOcamlRepIn<'a> for BTreeMap
     }
 }
 
-/// Given an iterator which emits key-value pairs, build an OCaml Map containing
-/// those bindings. The iterator must emit each key only once. The key-value
-/// pairs must be emitted in ascending order, sorted by key. The iterator must
-/// emit exactly `size` pairs.
-pub fn sorted_iter_to_ocaml_map<
-    'a,
-    'i: 'a,
-    A: Allocator,
-    K: ToOcamlRep + 'i,
-    V: ToOcamlRep + 'i,
->(
-    iter: &mut impl Iterator<Item = (&'i K, &'i V)>,
+/// Given an iterator which emits key-value pairs (already converted to OCaml
+/// values), build an OCaml Map containing those bindings. The iterator must
+/// emit each key only once. The key-value pairs must be emitted in ascending
+/// order, sorted by key. The iterator must emit exactly `size` pairs.
+pub fn sorted_iter_to_ocaml_map<'a, A: Allocator>(
+    iter: &mut impl Iterator<Item = (OpaqueValue<'a>, OpaqueValue<'a>)>,
     alloc: &'a A,
     size: usize,
 ) -> (OpaqueValue<'a>, usize) {
@@ -530,8 +543,8 @@ pub fn sorted_iter_to_ocaml_map<
     let height = std::cmp::max(left_height, right_height) + 1;
     let mut block = alloc.block_with_size(5);
     alloc.set_field(&mut block, 0, left);
-    alloc.set_field(&mut block, 1, alloc.add(key));
-    alloc.set_field(&mut block, 2, alloc.add(val));
+    alloc.set_field(&mut block, 1, key);
+    alloc.set_field(&mut block, 2, val);
     alloc.set_field(&mut block, 3, right);
     alloc.set_field(&mut block, 4, alloc.add_copy(height));
     (block.build(), height)
@@ -582,7 +595,7 @@ impl<T: ToOcamlRep + Ord> ToOcamlRep for BTreeSet<T> {
             return OpaqueValue::int(0);
         }
         let len = self.len();
-        let mut iter = self.iter();
+        let mut iter = self.iter().map(|x| x.to_ocamlrep(alloc));
         let (res, _) = sorted_iter_to_ocaml_set(&mut iter, alloc, len);
         res
     }
@@ -605,8 +618,8 @@ impl<'a, T: FromOcamlRep + Ord> FromOcamlRepIn<'a> for BTreeSet<T> {
 /// Build an OCaml Set containing all items emitted by the given iterator. The
 /// iterator must emit each item only once. The items must be emitted in
 /// ascending order. The iterator must emit exactly `size` items.
-pub fn sorted_iter_to_ocaml_set<'a, 'i: 'a, A: Allocator, T: ToOcamlRep + 'i>(
-    iter: &mut impl Iterator<Item = &'i T>,
+pub fn sorted_iter_to_ocaml_set<'a, A: Allocator>(
+    iter: &mut impl Iterator<Item = OpaqueValue<'a>>,
     alloc: &'a A,
     size: usize,
 ) -> (OpaqueValue<'a>, usize) {
@@ -619,7 +632,7 @@ pub fn sorted_iter_to_ocaml_set<'a, 'i: 'a, A: Allocator, T: ToOcamlRep + 'i>(
     let height = std::cmp::max(left_height, right_height) + 1;
     let mut block = alloc.block_with_size(4);
     alloc.set_field(&mut block, 0, left);
-    alloc.set_field(&mut block, 1, alloc.add(val));
+    alloc.set_field(&mut block, 1, val);
     alloc.set_field(&mut block, 2, right);
     alloc.set_field(&mut block, 3, alloc.add_copy(height));
     (block.build(), height)
@@ -654,6 +667,54 @@ pub fn vec_from_ocaml_set_in<'a, T: FromOcamlRepIn<'a> + Ord>(
     vec.push(from::field_in(block, 1, alloc)?);
     vec_from_ocaml_set_in(block[2], vec, alloc)?;
     Ok(())
+}
+
+impl<K: ToOcamlRep + Ord, V: ToOcamlRep, S: BuildHasher + Default> ToOcamlRep
+    for IndexMap<K, V, S>
+{
+    fn to_ocamlrep<'a, A: Allocator>(&'a self, alloc: &'a A) -> OpaqueValue<'a> {
+        if self.is_empty() {
+            return OpaqueValue::int(0);
+        }
+        let map: BTreeMap<&'a K, &'a V> = self.iter().collect();
+        let len = map.len();
+        let mut iter = map.iter().map(|(k, v)| {
+            let k: &'a K = *k;
+            let v: &'a V = *v;
+            (k.to_ocamlrep(alloc), v.to_ocamlrep(alloc))
+        });
+        let (res, _) = sorted_iter_to_ocaml_map(&mut iter, alloc, len);
+        res
+    }
+}
+
+impl<K: FromOcamlRep + Ord + Hash, V: FromOcamlRep, S: BuildHasher + Default> FromOcamlRep
+    for IndexMap<K, V, S>
+{
+    fn from_ocamlrep(value: Value<'_>) -> Result<Self, FromError> {
+        let map = <BTreeMap<K, V>>::from_ocamlrep(value)?;
+        Ok(map.into_iter().collect())
+    }
+}
+
+impl<T: ToOcamlRep + Ord, S: BuildHasher + Default> ToOcamlRep for IndexSet<T, S> {
+    fn to_ocamlrep<'a, A: Allocator>(&'a self, alloc: &'a A) -> OpaqueValue<'a> {
+        if self.is_empty() {
+            return OpaqueValue::int(0);
+        }
+        let set: BTreeSet<&'a T> = self.iter().collect();
+        let len = set.len();
+        let mut iter = set.iter().copied().map(|x| x.to_ocamlrep(alloc));
+        let (res, _) = sorted_iter_to_ocaml_set(&mut iter, alloc, len);
+        res
+    }
+}
+
+impl<T: FromOcamlRep + Ord + Hash, S: BuildHasher + Default> FromOcamlRep for IndexSet<T, S> {
+    fn from_ocamlrep(value: Value<'_>) -> Result<Self, FromError> {
+        let set = <BTreeSet<T>>::from_ocamlrep(value)?;
+        Ok(set.into_iter().collect())
+    }
 }
 
 impl ToOcamlRep for OsStr {

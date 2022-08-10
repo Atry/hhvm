@@ -3,10 +3,24 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::regex;
-use crate::FileOpts;
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::ffi::OsString;
+use std::fmt;
+use std::fs;
+use std::fs::File;
+use std::io::stdout;
+use std::io::Write;
+use std::os::unix::ffi::OsStringExt;
+use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::Mutex;
+
 use anyhow::anyhow;
 use anyhow::bail;
+use anyhow::ensure;
+use anyhow::Context;
 use anyhow::Result;
 use bstr::ByteSlice;
 use bumpalo::Bump;
@@ -19,23 +33,13 @@ use log::trace;
 use naming_special_names_rust::coeffects::Ctx;
 use once_cell::sync::OnceCell;
 use options::Options;
+use oxidized::relative_path;
 use oxidized::relative_path::RelativePath;
-use oxidized::relative_path::{self};
 use rayon::prelude::*;
 use regex::bytes::Regex;
-use std::collections::HashMap;
-use std::collections::VecDeque;
-use std::ffi::OsString;
-use std::fmt;
-use std::fs::File;
-use std::fs::{self};
-use std::io::stdout;
-use std::io::Write;
-use std::os::unix::ffi::OsStringExt;
-use std::path::Path;
-use std::path::PathBuf;
-use std::str::FromStr;
-use std::sync::Mutex;
+
+use crate::regex;
+use crate::FileOpts;
 
 #[derive(Parser, Debug)]
 pub struct Opts {
@@ -43,7 +47,7 @@ pub struct Opts {
     #[clap(short = 'o')]
     output_file: Option<PathBuf>,
 
-    /// The input hhas file(s) to deserialize back to HackCUnit
+    /// The input hhas file(s) to assemble back to HackCUnit
     #[clap(flatten)]
     files: FileOpts,
 
@@ -53,12 +57,6 @@ pub struct Opts {
 }
 
 type SyncWrite = Mutex<Box<dyn Write + Sync + Send>>;
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct Pos {
-    pub line: usize,
-    pub col: usize,
-}
 
 pub fn run(mut opts: Opts) -> Result<()> {
     let writer: SyncWrite = match &opts.output_file {
@@ -75,10 +73,10 @@ pub fn run(mut opts: Opts) -> Result<()> {
 }
 
 /// Assemble the hhas in a given file to a HackCUnit. Then use bytecode printer
-/// to write the hhas representation of that HCU to output
+/// to write the hhas representation of that HCU to output.
 pub fn process_one_file(f: &Path, opts: &Opts, w: &SyncWrite) -> Result<()> {
     let alloc = Bump::default();
-    let (hcu, fp) = assemble(&alloc, f, opts)?; // Assemble will print the tokens to output
+    let (hcu, fp) = assemble(&alloc, f, opts)?;
     let filepath = RelativePath::make(relative_path::Prefix::Dummy, fp);
     let comp_options: Options = Default::default();
     let ctxt = bytecode_printer::Context::new(&comp_options, Some(&filepath), false);
@@ -138,11 +136,12 @@ fn assemble_from_toks<'arena>(
     let mut include_refs = None;
     let mut typedefs = Vec::new();
     let mut constants = Vec::new();
-    let mut type_constants = Vec::new(); // Should be empty
+    let mut type_constants = Vec::new();
     let mut fatal = None;
     let mut file_attributes = Vec::new();
     let mut module_use = Maybe::Nothing;
-    // First non-comment token should be the filepath
+    let mut modules = Vec::new();
+    // First token should be the filepath
     let fp = assemble_filepath(token_iter)?;
     while token_iter.peek().is_some() {
         if token_iter.peek_if_str(Token::is_decl, ".fatal") {
@@ -154,9 +153,11 @@ fn assemble_from_toks<'arena>(
         } else if token_iter.peek_if_str(Token::is_decl, ".class") {
             classes.push(assemble_class(alloc, token_iter)?);
         } else if token_iter.peek_if_str(Token::is_decl, ".function_refs") {
-            if func_refs.is_some() {
-                bail!("Func refs defined multiple times in file");
-            }
+            ensure!(
+                func_refs.is_none(),
+                "Func refs defined multiple times in file"
+            );
+
             func_refs = Some(assemble_refs(
                 alloc,
                 token_iter,
@@ -164,9 +165,11 @@ fn assemble_from_toks<'arena>(
                 assemble_function_name,
             )?);
         } else if token_iter.peek_if_str(Token::is_decl, ".class_refs") {
-            if class_refs.is_some() {
-                bail!("Class refs defined multiple times in file");
-            }
+            ensure!(
+                class_refs.is_none(),
+                "Class refs defined multiple times in file"
+            );
+
             class_refs = Some(assemble_refs(
                 alloc,
                 token_iter,
@@ -174,9 +177,11 @@ fn assemble_from_toks<'arena>(
                 assemble_class_name,
             )?);
         } else if token_iter.peek_if_str(Token::is_decl, ".constant_refs") {
-            if constant_refs.is_some() {
-                bail!("Constant refs defined multiple times in file");
-            }
+            ensure!(
+                constant_refs.is_none(),
+                "Constant refs defined multiple times in file"
+            );
+
             constant_refs = Some(assemble_refs(
                 alloc,
                 token_iter,
@@ -184,30 +189,39 @@ fn assemble_from_toks<'arena>(
                 assemble_const_name,
             )?);
         } else if token_iter.peek_if_str(Token::is_decl, ".includes") {
-            if include_refs.is_some() {
-                bail!("Includes defined mulitple times in file");
-            }
+            ensure!(
+                include_refs.is_none(),
+                "Includes defined mulitple times in file"
+            );
+
             include_refs = Some(assemble_refs(
                 alloc,
                 token_iter,
                 ".includes",
                 |alloc, t| {
-                    Ok(hhbc::hhas_symbol_refs::IncludePath::Absolute(
-                        t.expect_identifier_into_ffi_str(alloc)?,
-                    ))
+                    let path_str = if t.peek_if(Token::is_decl) {
+                        t.expect_decl_into_ffi_str(alloc)?
+                    } else {
+                        t.expect_identifier_into_ffi_str(alloc)?
+                    };
+                    Ok(hhbc::hhas_symbol_refs::IncludePath::Absolute(path_str))
                 },
             )?)
         } else if token_iter.peek_if_str(Token::is_decl, ".alias") {
             typedefs.push(assemble_typedef(alloc, token_iter)?);
         } else if token_iter.peek_if_str(Token::is_decl, ".const") {
             assemble_const_or_type_const(alloc, token_iter, &mut constants, &mut type_constants)?;
-            if !type_constants.is_empty() {
-                bail!("Type constants defined outside of a class");
-            }
+
+            ensure!(
+                type_constants.is_empty(),
+                "Type constants defined outside of a class"
+            );
         } else if token_iter.peek_if_str(Token::is_decl, ".file_attributes") {
             assemble_file_attributes(alloc, token_iter, &mut file_attributes)?;
         } else if token_iter.peek_if_str(Token::is_decl, ".module_use") {
             module_use = Maybe::Just(assemble_module_use(alloc, token_iter)?);
+        } else if token_iter.peek_if_str(Token::is_decl, ".module") {
+            modules.push(assemble_module(alloc, token_iter)?);
         } else {
             bail!(
                 "Unknown top level identifier: {}",
@@ -221,7 +235,7 @@ fn assemble_from_toks<'arena>(
         classes: Slice::fill_iter(alloc, classes.into_iter()),
         typedefs: Slice::fill_iter(alloc, typedefs.into_iter()),
         file_attributes: Slice::fill_iter(alloc, file_attributes.into_iter()),
-        modules: Default::default(),
+        modules: Slice::from_vec(alloc, modules),
         module_use,
         symbol_refs: hhbc::hhas_symbol_refs::HhasSymbolRefs {
             functions: func_refs.unwrap_or_default(),
@@ -234,6 +248,32 @@ fn assemble_from_toks<'arena>(
     };
 
     Ok((hcu, fp))
+}
+
+/// Ex:
+/// .module m0 (64, 64) {
+///}
+fn assemble_module<'arena>(
+    alloc: &'arena Bump,
+    token_iter: &mut Lexer<'_>,
+) -> Result<hhbc::hhas_module::HhasModule<'arena>> {
+    token_iter.expect_is_str(Token::into_decl, ".module")?;
+    let (attr, attributes) = assemble_special_and_user_attrs(alloc, token_iter)?;
+
+    ensure!(
+        attr == hhvm_types_ffi::ffi::Attr::AttrNone,
+        "Unexpected HHVM attrs in module definition"
+    );
+
+    let name = assemble_class_name(alloc, token_iter)?;
+    let span = assemble_span(token_iter)?;
+    token_iter.expect(Token::into_open_curly)?;
+    token_iter.expect(Token::into_close_curly)?;
+    Ok(hhbc::hhas_module::HhasModule {
+        attributes,
+        name,
+        span,
+    })
 }
 
 /// Ex:
@@ -280,7 +320,6 @@ fn assemble_typedef<'arena>(
     let name = assemble_class_name(alloc, token_iter)?;
     token_iter.expect(Token::into_equal)?;
     if let Maybe::Just(type_info) = assemble_type_info(alloc, token_iter, TypeInfoKind::TypeDef)? {
-        // won't be any user_type
         let span = assemble_span(token_iter)?;
         //tv
         let type_structure = assemble_triple_quoted_typed_value(alloc, token_iter)?;
@@ -506,7 +545,7 @@ fn assemble_method<'arena>(
         _ => Maybe::Nothing,
     };
     let name = assemble_method_name(alloc, token_iter)?;
-    let mut decl_map: HashMap<&[u8], u32> = HashMap::new();
+    let mut decl_map: HashMap<Vec<u8>, u32> = HashMap::new();
     let params = assemble_params(alloc, token_iter, &mut decl_map)?;
     let flags = assemble_method_flags(token_iter)?;
     let (partial_body, coeffects) = assemble_body(alloc, token_iter, &mut decl_map)?;
@@ -668,14 +707,16 @@ fn assemble_prop_name<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
 ) -> Result<hhbc::PropName<'arena>> {
-    let nm = if token_iter.peek_if_str(Token::is_number, "86") {
-        // Only properties that can start with #s start with
-        // 86 and are compiler added ones
-        let under86 = token_iter.expect(Token::into_number)?;
+    // Only properties that can start with #s start with 0 or
+    // 86 and are compiler added ones
+    let nm = if token_iter.peek_if_str(Token::is_number, "86")
+        || token_iter.peek_if_str(Token::is_number, "0")
+    {
+        let num_prefix = token_iter.expect(Token::into_number)?;
         let name = token_iter.expect(Token::into_identifier)?;
-        let mut under86 = under86.to_vec();
-        under86.extend_from_slice(name);
-        Str::new_slice(alloc, &under86)
+        let mut num_prefix = num_prefix.to_vec();
+        num_prefix.extend_from_slice(name);
+        Str::new_slice(alloc, &num_prefix)
     } else {
         token_iter.expect_identifier_into_ffi_str(alloc)?
     };
@@ -895,7 +936,7 @@ fn assemble_triple_quoted_typed_value<'arena>(
     let st = &st[3..st.len() - 3];
     let st = escaper::unescape_literal_bytes_into_vec_bytes(st)?;
     // TvLexer expects an unescaped string.
-    assemble_typed_value(alloc, &mut TvLexer::from_slice(&st, line))
+    assemble_typed_value(alloc, &st, line)
 }
 
 /// tv can look like:
@@ -903,109 +944,220 @@ fn assemble_triple_quoted_typed_value<'arena>(
 /// | v:vec.len():{(tv;)*} | k:keyset.len():{(tv;)*}
 fn assemble_typed_value<'arena>(
     alloc: &'arena Bump,
-    token_iter: &mut TvLexer<'_>,
+    src: &[u8],
+    line: usize,
 ) -> Result<hhbc::TypedValue<'arena>> {
-    let tr = match token_iter
-        .next()
-        .ok_or_else(|| anyhow!("Expected a tv, got end of lexer. Line: {}", token_iter.line))?
-    {
-        TvToken::Uninit => hhbc::TypedValue::Uninit,
-        TvToken::Int(i) => hhbc::TypedValue::Int(i),
-        TvToken::Bool(b) => hhbc::TypedValue::Bool(b),
-        TvToken::Float(f) => hhbc::TypedValue::Float(f),
-        TvToken::LazyClass => todo!(),
-        TvToken::Null => hhbc::TypedValue::Null,
-        TvToken::OpenCurly => bail!("Expected a typed value, got {{. Line {}", token_iter.line),
-        TvToken::CloseCurly => {
-            bail!("Expected a typed value, got }}. Line {}", token_iter.line)
+    fn deserialize<'arena, 'a>(
+        alloc: &'arena Bump,
+        src: &'a [u8],
+        line: usize,
+    ) -> Result<hhbc::TypedValue<'arena>> {
+        /// Returns s after ch if ch is the first character in s, else bails.
+        fn expect<'a>(s: &'a [u8], ch: &'_ [u8]) -> Result<&'a [u8]> {
+            s.strip_prefix(ch)
+                .ok_or_else(|| anyhow!("Expected {:?} in src {:?}", ch, s))
         }
-        TvToken::Semicolon => bail!("Expected a typed value, got ;. Line {}", token_iter.line),
-        TvToken::Error(s) => bail!(
-            "Expected a typed value, got Error: {:?}. Line {}",
-            s,
-            token_iter.line
-        ),
-        TvToken::S => assemble_tv_string(alloc, token_iter)?,
-        TvToken::Vec(u) => assemble_tv_vec(alloc, token_iter, u)?,
-        TvToken::Keyset(u) => assemble_tv_keyset(alloc, token_iter, u)?,
-        TvToken::Dict(u) => assemble_tv_dict(alloc, token_iter, u)?,
-        TvToken::String(_) => bail!(
-            "Free string literal in tv, expecting TV delimiter (i, d, b, etc). Line: {}",
-            token_iter.line
-        ),
-    };
-    if matches!(tr, hhbc::TypedValue::Int(_))
-        || matches!(tr, hhbc::TypedValue::Bool(_))
-        || matches!(tr, hhbc::TypedValue::Float(_))
-        || matches!(tr, hhbc::TypedValue::String(_))
-        || matches!(tr, hhbc::TypedValue::LazyClass(_))
-        || matches!(tr, hhbc::TypedValue::Null)
-    {
-        token_iter.expect(TvToken::into_semicolon)?;
+
+        /// Returns the usize (if exists) at the head of the string and the remainder of the string.
+        fn expect_usize(src: &[u8]) -> Result<(usize, &[u8])> {
+            let (us, rest) = read_while_matches(src, |c| c.is_ascii_digit());
+            Ok((std::str::from_utf8(us)?.parse()?, rest))
+        }
+
+        /// Advances and consumes the start of s until f is no longer true on the
+        /// first character of s. Returns (characters consumed, rest of src)
+        fn read_while_matches(s: &[u8], f: impl Fn(u8) -> bool) -> (&[u8], &[u8]) {
+            let stake = s.iter().position(|c| !f(*c)).unwrap_or(s.len());
+            s.split_at(stake)
+        }
+
+        /// A read_while_matches that also expects c at the end.
+        /// Note that s != first_return + second_return.
+        /// s = first_return + c + second_return
+        fn read_until<'a>(
+            s: &'a [u8],
+            f: impl Fn(u8) -> bool,
+            c: &'_ [u8],
+        ) -> Result<(&'a [u8], &'a [u8])> {
+            let (fst, snd) = read_while_matches(s, f);
+            Ok((fst, expect(snd, c)?))
+        }
+
+        /// i:#;
+        fn deserialize_int<'arena>(src: &[u8]) -> Result<(&[u8], hhbc::TypedValue<'arena>)> {
+            let src = expect(src, b"i")?;
+            let src = expect(src, b":")?;
+            let (num, src) =
+                read_until(src, |c| c.is_ascii_digit() || c == b'-' || c == b'+', b";")?;
+            ensure!(!num.is_empty(), "No # specified for int TV");
+            let num = std::str::from_utf8(num)?.parse::<i64>()?;
+            Ok((src, hhbc::TypedValue::Int(num)))
+        }
+
+        // r"d:[-+]?(NAN|INF|([0-9]+\.?[0-9]*([eE][-+]?[0-9]+\.?[0-9]*)?))"
+        /// d:#;
+        fn deserialize_float<'arena>(src: &[u8]) -> Result<(&[u8], hhbc::TypedValue<'arena>)> {
+            let src = expect(src, b"d")?;
+            let src = expect(src, b":")?;
+            let (num, src) = read_until(src, |c| c != b';', b";")?;
+            let num = std::str::from_utf8(num)?.parse()?;
+            Ok((src, hhbc::TypedValue::Float(hhbc::FloatBits(num))))
+        }
+
+        /// b:0;
+        fn deserialize_bool<'arena>(src: &[u8]) -> Result<(&[u8], hhbc::TypedValue<'arena>)> {
+            let src = expect(src, b"b")?;
+            let src = expect(src, b":")?;
+            let val = src[0] == b'1';
+            let src = expect(&src[1..], b";")?;
+            Ok((src, hhbc::TypedValue::Bool(val)))
+        }
+
+        /// N;
+        fn deserialize_null<'arena>(src: &[u8]) -> Result<(&[u8], hhbc::TypedValue<'arena>)> {
+            let src = expect(src, b"N")?;
+            let src = expect(src, b";")?;
+            Ok((src, hhbc::TypedValue::Null))
+        }
+
+        /// uninit
+        fn deserialize_uninit<'arena>(src: &[u8]) -> Result<(&[u8], hhbc::TypedValue<'arena>)> {
+            Ok((
+                src.strip_prefix(b"uninit")
+                    .ok_or_else(|| anyhow!("Expected uninit in src {:?}", src))?,
+                hhbc::TypedValue::Uninit,
+            ))
+        }
+
+        /// s:s.len():"(escaped s)";
+        fn deserialize_string<'arena, 'a>(
+            alloc: &'arena Bump,
+            src: &'a [u8],
+        ) -> Result<(&'a [u8], hhbc::TypedValue<'arena>)> {
+            let src = expect(src, b"s")?;
+            let src = expect(src, b":")?;
+            let (len, src) = expect_usize(src)?;
+            let src = expect(src, b":")?;
+            let src = expect(src, b"\"")?;
+
+            ensure!(
+                src.len() >= len,
+                "Length specified greater than source length: {}  vs {}",
+                len,
+                src.len()
+            );
+
+            let s = &src[0..len];
+            let src = &src[len..];
+            let src = expect(src, b"\"")?;
+            let src = expect(src, b";")?;
+            Ok((src, hhbc::TypedValue::String(Str::new_slice(alloc, s))))
+        }
+
+        #[derive(PartialEq)]
+        pub enum VecOrKeyset {
+            Vec,
+            Keyset,
+        }
+
+        impl VecOrKeyset {
+            pub fn prefix(&self) -> &[u8] {
+                match self {
+                    VecOrKeyset::Vec => b"v",
+                    VecOrKeyset::Keyset => b"k",
+                }
+            }
+
+            pub fn build<'arena>(
+                &self,
+                content: Slice<'arena, hhbc::TypedValue<'arena>>,
+            ) -> hhbc::TypedValue<'arena> {
+                match self {
+                    VecOrKeyset::Vec => hhbc::TypedValue::Vec(content),
+                    VecOrKeyset::Keyset => hhbc::TypedValue::Keyset(content),
+                }
+            }
+        }
+        /// v:vec.len():{(tv;)*} or k:keyset.len():{(tv;)*}
+        fn deserialize_vec_or_keyset<'arena, 'a>(
+            alloc: &'arena Bump,
+            src: &'a [u8],
+            v_or_k: VecOrKeyset,
+        ) -> Result<(&'a [u8], hhbc::TypedValue<'arena>)> {
+            let src = expect(src, v_or_k.prefix())?;
+            let src = expect(src, b":")?;
+            let (len, src) = expect_usize(src)?;
+            let src = expect(src, b":")?;
+            let mut src = expect(src, b"{")?;
+            let mut tv;
+            let mut tv_vec = Vec::new();
+            for _ in 0..len {
+                (src, tv) = deserialize_tv(alloc, src)?;
+                tv_vec.push(tv);
+            }
+            let src = expect(src, b"}")?;
+            let slice = Slice::from_vec(alloc, tv_vec);
+            Ok((src, v_or_k.build(slice)))
+        }
+
+        /// D:(D.len):{p1_0; p1_1; ...; pD.len_0; pD.len_1}
+        fn deserialize_dict<'arena, 'a>(
+            alloc: &'arena Bump,
+            src: &'a [u8],
+        ) -> Result<(&'a [u8], hhbc::TypedValue<'arena>)> {
+            let src = expect(src, b"D")?;
+            let src = expect(src, b":")?;
+            let (len, src) = expect_usize(src)?;
+            let src = expect(src, b":")?;
+            let mut src = expect(src, b"{")?;
+            let mut tv0;
+            let mut tv1;
+            let mut tv_vec = Vec::new();
+            for _ in 0..len {
+                (src, tv0) = deserialize_tv(alloc, src)?;
+                (src, tv1) = deserialize_tv(alloc, src)?;
+                tv_vec.push(Pair::from((tv0, tv1)));
+            }
+            let src = expect(src, b"}")?;
+            Ok((src, hhbc::TypedValue::Dict(Slice::from_vec(alloc, tv_vec))))
+        }
+
+        fn deserialize_tv<'arena, 'a>(
+            alloc: &'arena Bump,
+            src: &'a [u8],
+        ) -> Result<(&'a [u8], hhbc::TypedValue<'arena>)> {
+            let (src, tr) = match src[0] {
+                b'i' => deserialize_int(src).context("Assembling a TV int")?,
+                b'b' => deserialize_bool(src).context("Assembling a TV bool")?,
+                b'd' => deserialize_float(src).context("Assembling a TV float")?,
+                b'N' => deserialize_null(src).context("Assembling a TV Null")?,
+                b'u' => deserialize_uninit(src).context("Assembling a uninit")?,
+                b's' => deserialize_string(alloc, src).context("Assembling a TV string")?,
+                b'v' => deserialize_vec_or_keyset(alloc, src, VecOrKeyset::Vec)
+                    .context("Assembling a TV vec")?,
+                b'k' => deserialize_vec_or_keyset(alloc, src, VecOrKeyset::Keyset)
+                    .context("Assembling a TV keyset")?,
+                b'D' => deserialize_dict(alloc, src).context("Assembling a TV dict")?,
+                b'l' => todo!(), // Never encounter LazyClass in all WWW...
+                _ => bail!("Unknown tv: {}", src[0]),
+            };
+            Ok((src, tr))
+        }
+
+        ensure!(!src.is_empty(), "Empty typed value. Line {}", line);
+
+        let (src, tv) = deserialize_tv(alloc, src).context(format!("Line {}", line))?;
+
+        ensure!(
+            src.is_empty(),
+            "Unassemble-able TV. Unassembled: {:?}. Line {}",
+            src,
+            line
+        );
+
+        Ok(tv)
     }
-    Ok(tr)
-}
-
-fn assemble_tv_string<'arena>(
-    alloc: &'arena Bump,
-    token_iter: &mut TvLexer<'_>,
-) -> Result<hhbc::TypedValue<'arena>> {
-    let s = token_iter.expect(TvToken::into_string)?;
-    Ok(hhbc::TypedValue::String(Str::new_slice(alloc, s)))
-}
-
-fn assemble_tv_vec<'arena>(
-    alloc: &'arena Bump,
-    token_iter: &mut TvLexer<'_>,
-    len: usize,
-) -> Result<hhbc::TypedValue<'arena>> {
-    Ok(hhbc::TypedValue::Vec(assemble_tv_vec_or_key(
-        alloc, token_iter, len,
-    )?))
-}
-
-fn assemble_tv_keyset<'arena>(
-    alloc: &'arena Bump,
-    token_iter: &mut TvLexer<'_>,
-    len: usize,
-) -> Result<hhbc::TypedValue<'arena>> {
-    Ok(hhbc::TypedValue::Keyset(assemble_tv_vec_or_key(
-        alloc, token_iter, len,
-    )?))
-}
-
-/// Builds whawt follows v or k in a TypedValue::Vec or TypedValue::KeySet
-fn assemble_tv_vec_or_key<'arena>(
-    alloc: &'arena Bump,
-    token_iter: &mut TvLexer<'_>,
-    len: usize,
-) -> Result<Slice<'arena, hhbc::TypedValue<'arena>>> {
-    token_iter.expect(TvToken::into_open_curly)?;
-    let mut vec = Vec::with_capacity(len);
-    for _ in 0..len {
-        vec.push(assemble_typed_value(alloc, token_iter)?);
-    }
-    token_iter.expect(TvToken::into_close_curly)?;
-    Ok(Slice::from_vec(alloc, vec))
-}
-
-/// D:(D.len):{p1_0; p1_1; ...; pD.len_0; pD.len_1}
-fn assemble_tv_dict<'arena>(
-    alloc: &'arena Bump,
-    token_iter: &mut TvLexer<'_>,
-    len: usize,
-) -> Result<hhbc::TypedValue<'arena>> {
-    token_iter.expect(TvToken::into_open_curly)?;
-    let mut dict: Vec<Pair<hhbc::TypedValue<'arena>, hhbc::TypedValue<'arena>>> =
-        Vec::with_capacity(len);
-    for _ in 0..len {
-        dict.push(Pair::from((
-            assemble_typed_value(alloc, token_iter)?,
-            assemble_typed_value(alloc, token_iter)?,
-        )));
-    }
-    token_iter.expect(TvToken::into_close_curly)?;
-    Ok(hhbc::TypedValue::Dict(Slice::from_vec(alloc, dict)))
+    deserialize(alloc, src, line)
 }
 
 /// Class refs look like:
@@ -1059,7 +1211,7 @@ fn assemble_function<'arena>(
     // Assemble_name
 
     let name = assemble_function_name(alloc, token_iter)?;
-    let mut decl_map: HashMap<&[u8], u32> = HashMap::new(); // Will store decls in this order: params, decl_vars, unnamed
+    let mut decl_map: HashMap<Vec<u8>, u32> = HashMap::new(); // Will store decls in this order: params, decl_vars, unnamed
     let params = assemble_params(alloc, token_iter, &mut decl_map)?;
     let flags = assemble_function_flags(name, token_iter)?;
     let (partial_body, coeffects) = assemble_body(alloc, token_iter, &mut decl_map)?;
@@ -1237,7 +1389,7 @@ fn assemble_hhvm_attr(token_iter: &mut Lexer<'_>) -> Result<hhvm_types_ffi::ffi:
         b"persistent" => Attr::AttrPersistent,
         b"private" => Attr::AttrPrivate,
         b"protected" => Attr::AttrProtected,
-        b"provenance_skip_frame" => Attr::AttrProvenanceSkipFrame,
+        b"prov_skip_frame" => Attr::AttrProvenanceSkipFrame,
         b"public" => Attr::AttrPublic,
         b"readonly" => Attr::AttrIsReadonly,
         b"readonly_return" => Attr::AttrReadonlyReturn,
@@ -1356,10 +1508,10 @@ fn assemble_type_constraint(
 }
 
 /// ((a, )*a) | () where a is a param
-fn assemble_params<'arena, 'a>(
+fn assemble_params<'arena>(
     alloc: &'arena Bump,
-    token_iter: &mut Lexer<'a>,
-    decl_map: &mut HashMap<&'a [u8], u32>,
+    token_iter: &mut Lexer<'_>,
+    decl_map: &mut HashMap<Vec<u8>, u32>,
 ) -> Result<Slice<'arena, hhbc::hhas_param::HhasParam<'arena>>> {
     token_iter.expect(Token::into_open_paren)?;
     let mut params = Vec::new();
@@ -1374,10 +1526,10 @@ fn assemble_params<'arena, 'a>(
 }
 
 /// a: [user_attributes]? inout? readonly? ...?<type_info>?name (= default_value)?
-fn assemble_param<'arena, 'a>(
+fn assemble_param<'arena>(
     alloc: &'arena Bump,
-    token_iter: &mut Lexer<'a>,
-    decl_map: &mut HashMap<&'a [u8], u32>,
+    token_iter: &mut Lexer<'_>,
+    decl_map: &mut HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::hhas_param::HhasParam<'arena>> {
     let mut ua_vec = Vec::new();
     let user_attributes = {
@@ -1399,7 +1551,7 @@ fn assemble_param<'arena, 'a>(
         Maybe::Nothing
     };
     let name = token_iter.expect(Token::into_variable)?;
-    decl_map.insert(name, decl_map.len() as u32);
+    decl_map.insert(name.to_vec(), decl_map.len() as u32);
     let name = Str::new_slice(alloc, name);
     let default_value = assemble_default_value(alloc, token_iter)?;
     Ok(hhbc::hhas_param::HhasParam {
@@ -1432,10 +1584,10 @@ fn assemble_default_value<'arena>(
 }
 
 /// { (.doc ...)? (.ismemoizewrapper)? (.ismemoizewrapperlsb)? (.numiters)? (.declvars)? (instructions)* }
-fn assemble_body<'arena, 'a>(
+fn assemble_body<'arena>(
     alloc: &'arena Bump,
-    token_iter: &mut Lexer<'a>,
-    decl_map: &mut HashMap<&'a [u8], u32>,
+    token_iter: &mut Lexer<'_>,
+    decl_map: &mut HashMap<Vec<u8>, u32>,
 ) -> Result<(
     hhbc::hhas_body::HhasBody<'arena>,
     hhbc::hhas_coeffects::HhasCoeffects<'arena>,
@@ -1463,14 +1615,18 @@ fn assemble_body<'arena, 'a>(
             token_iter.expect(Token::into_semicolon)?;
             is_memoize_wrapper = true;
         } else if token_iter.peek_if_str(Token::is_decl, ".numiters") {
-            if num_iters > 0 {
-                bail!("Cannot have more than one .numiters per function body"); // Because only printed once in print.rs
-            }
+            ensure!(
+                num_iters == 0,
+                "Cannot have more than one .numiters per function body"
+            ); // Because only printed once in print.rs
+
             num_iters = assemble_numiters(token_iter)?;
         } else if token_iter.peek_if_str(Token::is_decl, ".declvars") {
-            if !decl_vars.is_empty() {
-                bail!("Cannot have more than one .declvars per function body");
-            }
+            ensure!(
+                decl_vars.is_empty(),
+                "Cannot have more than one .declvars per function body"
+            );
+
             decl_vars = assemble_decl_vars(alloc, token_iter, decl_map)?;
         } else if token_iter.peek_if_str_starts(Token::is_decl, ".coeffects") {
             coeff = assemble_coeffects(alloc, token_iter)?;
@@ -1671,30 +1827,30 @@ fn assemble_numiters(token_iter: &mut Lexer<'_>) -> Result<usize> {
 }
 
 /// Expects .declvars ($x)+;
-fn assemble_decl_vars<'arena, 'a>(
+fn assemble_decl_vars<'arena>(
     alloc: &'arena Bump,
-    token_iter: &mut Lexer<'a>,
-    decl_map: &mut HashMap<&'a [u8], u32>,
+    token_iter: &mut Lexer<'_>,
+    decl_map: &mut HashMap<Vec<u8>, u32>,
 ) -> Result<Slice<'arena, Str<'arena>>> {
     token_iter.expect_is_str(Token::into_decl, ".declvars")?;
     let mut var_names = Vec::new();
     while !token_iter.peek_if(Token::is_semicolon) {
         let var_nm = token_iter.expect_var()?;
+        var_names.push(Str::new_slice(alloc, &var_nm[..]));
         decl_map.insert(var_nm, decl_map.len().try_into().unwrap());
-        var_names.push(Str::new_slice(alloc, var_nm));
     }
     token_iter.expect(Token::into_semicolon)?;
     Ok(Slice::from_vec(alloc, var_names))
 }
 
 /// Opcodes and Pseudos
-fn assemble_instr<'arena, 'a>(
+fn assemble_instr<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
-    decl_map: &mut HashMap<&'a [u8], u32>,
+    decl_map: &mut HashMap<Vec<u8>, u32>,
     tcb_count: &mut usize, // Increase this when get TryCatchBegin, decrease when TryCatchEnd
 ) -> Result<hhbc::Instruct<'arena>> {
-    let label_reg = regex!(r"^((DV|L)[0-9]+)$");
+    let label_reg = regex!(r"^((DV|L)[0-9]+)$").clone();
     if let Some(mut sl_lexer) = token_iter.fetch_until_newline() {
         if sl_lexer.peek_if(Token::is_decl) {
             // Not all pseudos are decls, but all instruction decls are pseudos
@@ -2325,7 +2481,23 @@ fn assemble_instr<'arena, 'a>(
                         || hhbc::Opcode::FuncCred,
                         "FuncCred",
                     ),
-
+                    b"MemoGetEager" => assemble_memo_get_eager(&mut sl_lexer),
+                    b"MemoSetEager" => assemble_memo_set_eager(&mut sl_lexer),
+                    b"RetCSuspended" => assemble_single_opcode_instr(
+                        &mut sl_lexer,
+                        || hhbc::Opcode::RetCSuspended,
+                        "RetCSuspended",
+                    ),
+                    b"CheckClsRGSoft" => assemble_single_opcode_instr(
+                        &mut sl_lexer,
+                        || hhbc::Opcode::CheckClsRGSoft,
+                        "CheckClsRGSoft",
+                    ),
+                    b"GetClsRGProp" => assemble_single_opcode_instr(
+                        &mut sl_lexer,
+                        || hhbc::Opcode::GetClsRGProp,
+                        "GetClsRGProp",
+                    ),
                     _ => todo!("assembling instrs: {}", tok),
                 }
             } else {
@@ -2424,7 +2596,7 @@ fn assemble_async_eager_target(token_iter: &mut Lexer<'_>) -> Result<Option<hhbc
 }
 
 /// Just a string literal
-fn assemble_fcall_context<'a, 'arena>(
+fn assemble_fcall_context<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
 ) -> Result<Str<'arena>> {
@@ -2492,14 +2664,6 @@ fn assemble_unescaped_unquoted_str<'arena>(
         token_iter.expect(Token::into_str_literal)?,
     ))?;
     Ok(Str::new_slice(alloc, &st))
-}
-
-fn assemble_unquoted_str<'arena>(
-    alloc: &'arena Bump,
-    token_iter: &mut Lexer<'_>,
-) -> Result<Str<'arena>> {
-    let st = escaper::unquote_slice(token_iter.expect(Token::into_str_literal)?);
-    Ok(Str::new_slice(alloc, st))
 }
 
 fn assemble_unescaped_unquoted_triple_str<'arena>(
@@ -2641,7 +2805,7 @@ fn assemble_iter_init_iter_next<
     F: FnOnce(hhbc::IterArgs, hhbc::Label) -> hhbc::Opcode<'arena>,
 >(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
     op_con: F,
     op_str: &str,
 ) -> Result<hhbc::Instruct<'arena>> {
@@ -2655,7 +2819,7 @@ fn assemble_iter_init_iter_next<
 /// Ex: 0 NK V:$v
 fn assemble_iter_args(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::IterArgs> {
     let idx: u32 = token_iter.expect_and_get_number()?;
     let key_id: hhbc::Local = match token_iter.expect(Token::into_identifier)? {
@@ -2678,7 +2842,7 @@ fn assemble_iter_args(
 /// Ex: IsTypeL $a Obj
 fn assemble_is_type_l<'arena>(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "IsTypeL")?;
     let lcl = assemble_local(token_iter, decl_map)?;
@@ -2779,6 +2943,31 @@ fn assemble_await_all<'arena>(token_iter: &mut Lexer<'_>) -> Result<hhbc::Instru
 }
 
 /// Ex:
+/// MemoGetEager L0 L1 l:0+0
+fn assemble_memo_get_eager<'arena>(token_iter: &mut Lexer<'_>) -> Result<hhbc::Instruct<'arena>> {
+    token_iter.expect_is_str(Token::into_identifier, "MemoGetEager")?;
+    let lbl_slice = [
+        assemble_label(token_iter, false)?,
+        assemble_label(token_iter, false)?,
+    ];
+    let dum = hhbc::Dummy::DEFAULT;
+    let lcl_range = assemble_local_range(token_iter)?;
+    Ok(hhbc::Instruct::Opcode(hhbc::Opcode::MemoGetEager(
+        lbl_slice, dum, lcl_range,
+    )))
+}
+
+/// Ex:
+/// MemoSetEager L:0+0
+fn assemble_memo_set_eager<'arena>(token_iter: &mut Lexer<'_>) -> Result<hhbc::Instruct<'arena>> {
+    token_iter.expect_is_str(Token::into_identifier, "MemoSetEager")?;
+    let lcl_range = assemble_local_range(token_iter)?;
+    Ok(hhbc::Instruct::Opcode(hhbc::Opcode::MemoSetEager(
+        lcl_range,
+    )))
+}
+
+/// Ex:
 /// MemoGet L0 L:0+0
 fn assemble_memo_get<'arena>(token_iter: &mut Lexer<'_>) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "MemoGet")?;
@@ -2845,7 +3034,7 @@ fn assemble_readonly_op(token_iter: &mut Lexer<'_>) -> Result<hhbc::ReadonlyOp> 
 fn assemble_member_key<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::MemberKey<'arena>> {
     match token_iter.expect(Token::into_identifier)? {
         b"EC" => {
@@ -2921,7 +3110,7 @@ fn assemble_member_key<'arena>(
 fn assemble_dim<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "Dim")?;
     Ok(hhbc::Instruct::Opcode(hhbc::Opcode::Dim(
@@ -2945,7 +3134,7 @@ fn assemble_query_mop(token_iter: &mut Lexer<'_>) -> Result<hhbc::QueryMOp> {
 fn assemble_query_m<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "QueryM")?;
     Ok(hhbc::Instruct::Opcode(hhbc::Opcode::QueryM(
@@ -2959,7 +3148,7 @@ fn assemble_query_m<'arena>(
 fn assemble_inc_dec_m<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "IncDecM")?;
     Ok(hhbc::Instruct::Opcode(hhbc::Opcode::IncDecM(
@@ -2972,7 +3161,7 @@ fn assemble_inc_dec_m<'arena>(
 /// BaseGL $var MOpMode
 fn assemble_base_gl<'arena>(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "BaseGL")?;
     Ok(hhbc::Instruct::Opcode(hhbc::Opcode::BaseGL(
@@ -2995,7 +3184,7 @@ fn assemble_base_sc<'arena>(token_iter: &mut Lexer<'_>) -> Result<hhbc::Instruct
 /// BaseL $var MOpMode ReadOnlyOp
 fn assemble_base_l<'arena>(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "BaseL")?;
     Ok(hhbc::Instruct::Opcode(hhbc::Opcode::BaseL(
@@ -3036,7 +3225,7 @@ fn assemble_set_range_op(token_iter: &mut Lexer<'_>) -> Result<hhbc::SetRangeOp>
 fn assemble_cns<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     let op = match token_iter.expect(Token::into_identifier)? {
         b"CnsE" => hhbc::Opcode::CnsE(assemble_const_name_from_str(alloc, token_iter)?),
@@ -3062,7 +3251,7 @@ fn assemble_cns<'arena>(
 fn assemble_set_instruct<'arena>(
     alloc: &'arena Bump,
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     let op = match token_iter.expect(Token::into_identifier)? {
         b"SetL" => hhbc::Opcode::SetL(assemble_local(token_iter, decl_map)?),
@@ -3150,7 +3339,7 @@ fn assemble_silence_op(token_iter: &mut Lexer<'_>) -> Result<hhbc::SilenceOp> {
 /// Silence _2 End
 fn assemble_silence<'arena>(
     token_iter: &mut Lexer<'_>,
-    decl_map: &mut HashMap<&'_ [u8], u32>,
+    decl_map: &mut HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "Silence")?;
     let lcl = assemble_local(token_iter, decl_map)?;
@@ -3275,7 +3464,7 @@ fn assemble_new_col<'arena>(token_iter: &mut Lexer<'_>) -> Result<hhbc::Instruct
 /// CGetS Mutable
 fn assemble_cget<'arena>(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     let cg = match token_iter.expect(Token::into_identifier)? {
         b"CGetCUNop" => hhbc::Opcode::CGetCUNop,
@@ -3296,7 +3485,7 @@ fn assemble_cget<'arena>(
 /// IncDecL $var IncDecOp
 fn assemble_incdecl_opcode<'arena>(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Instruct<'arena>> {
     token_iter.expect_is_str(Token::into_identifier, "IncDecL")?;
     let lcl = token_iter.expect(Token::into_variable)?;
@@ -3332,7 +3521,7 @@ fn assemble_new_struct_dict<'arena>(
     token_iter.expect(Token::into_lt)?;
     let mut d = Vec::new();
     while !token_iter.peek_if(Token::is_gt) {
-        d.push(assemble_unquoted_str(alloc, token_iter)?);
+        d.push(assemble_unescaped_unquoted_str(alloc, token_iter)?);
     }
     token_iter.expect(Token::into_gt)?;
     Ok(hhbc::Instruct::Opcode(hhbc::Opcode::NewStructDict(
@@ -3346,7 +3535,7 @@ fn assemble_label(token_iter: &mut Lexer<'_>, needs_colon: bool) -> Result<hhbc:
     if needs_colon {
         token_iter.expect(Token::into_colon)?;
     }
-    let label_reg = regex!(r"^((DV|L)[0-9]+)$");
+    let label_reg = regex!(r"^((DV|L)[0-9]+)$").clone();
     if label_reg.is_match(lcl) {
         if lcl[0] == b'D' {
             lcl = &lcl[2..];
@@ -3438,7 +3627,7 @@ fn assemble_jump_opcode_instr<'arena, F: FnOnce(hhbc::Label) -> hhbc::Opcode<'ar
 /// _3 -> 3
 fn assemble_local(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
 ) -> Result<hhbc::Local> {
     match token_iter.next() {
         Some(Token::Variable(v, p)) => {
@@ -3472,7 +3661,7 @@ fn assemble_retm_opcode_instr<'arena>(
 /// Assembles one of CGetL/Push/SetL/etc...
 fn assemble_local_carrying_opcode_instr<'arena, F: FnOnce(hhbc::Local) -> hhbc::Opcode<'arena>>(
     token_iter: &mut Lexer<'_>,
-    decl_map: &HashMap<&'_ [u8], u32>,
+    decl_map: &HashMap<Vec<u8>, u32>,
     op_con: F,
     op_str: &str,
 ) -> Result<hhbc::Instruct<'arena>> {
@@ -3550,273 +3739,34 @@ fn assemble_double_opcode<'arena>(token_iter: &mut Lexer<'_>) -> Result<hhbc::In
     )))
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub enum TvToken<'a> {
-    // The TvLexer will just hold a line number; TV is kept to a line
-    Uninit,
-    Int(i64),               // i:#
-    Bool(bool),             // b:(0|1)
-    Float(hhbc::FloatBits), // TV Float carries FloatBits, f64 impl from. d:#
-    S,                      //String marker. s:#:. Doesn't carry its length b/c lexer
-    // guarantees that the following token is a str literal of the appropriate length, else error
-    String(&'a [u8]), //Str literal. ".."
-    LazyClass,        //l:#L
-    Null,             //N
-    Vec(usize),       // Carries its length. v:#:
-    Keyset(usize),    // k:#:
-    Dict(usize),      // D:#:
-    Error(&'a [u8]),
-    OpenCurly,
-    CloseCurly,
-    Semicolon,
-}
-
-impl<'a> TvToken<'a> {
-    fn into_string(self) -> Result<&'a [u8]> {
-        match self {
-            TvToken::String(s) => Ok(s),
-            _ => bail!("Expected a String, got: {:?}", self),
-        }
-    }
-
-    fn into_open_curly(self) -> Result<()> {
-        match self {
-            TvToken::OpenCurly => Ok(()),
-            _ => bail!("Expected a OpenCurly, got: {:?}", self),
-        }
-    }
-    fn into_close_curly(self) -> Result<()> {
-        match self {
-            TvToken::CloseCurly => Ok(()),
-            _ => bail!("Expected a CloseCurly, got: {:?}", self),
-        }
-    }
-    fn into_semicolon(self) -> Result<()> {
-        match self {
-            TvToken::Semicolon => Ok(()),
-            _ => bail!("Expected a Semicolon, got: {:?}", self),
-        }
-    }
-}
-
-pub struct TvLexer<'a> {
-    pub line: usize, // A TV should all stay on one line.
-    pending: Option<TvToken<'a>>,
-    tokens: VecDeque<TvToken<'a>>,
-}
-
-impl<'a> Iterator for TvLexer<'a> {
-    type Item = TvToken<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.fill();
-        self.pending.take()
-    }
-}
-
-impl<'a> TvLexer<'a> {
-    fn fill(&mut self) {
-        if self.pending.is_none() {
-            self.pending = self.tokens.pop_front();
-        }
-    }
-
-    fn expect<T, F>(&mut self, f: F) -> Result<T>
-    where
-        F: FnOnce(TvToken<'a>) -> Result<T>,
-    {
-        self.next()
-            .map_or_else(|| bail!("End of token stream sooner than expected"), f)
-    }
-
-    fn make_regex() -> Regex {
-        let v = [
-            "uninit",
-            "N",
-            ";",
-            r"d:[-+]?(NAN|INF|([0-9]+\.?[0-9]*([eE][-+]?[0-9]+\.?[0-9]*)?))", // Float
-            r"i:[-+]?[0-9]+([eE][-+]?[0-9]+\.?[0-9]*)?",                      // Int
-            "b:(0|1)",
-            r"D:\d+:",
-            r"v:\d+:",
-            r"\{",
-            r"\}",
-            ";",
-            r"k:\d+:",
-            r"s:\d+:",
-            r"l:\d+:",
-            // No regex for String -- that is manually parsed after s.
-        ];
-        let big_regex = format!("^(({}))", v.join(")|("));
-        Regex::new(&big_regex).unwrap()
-    }
-
-    /// Expects an unescaped source
-    pub fn from_slice(s: &'a [u8], start_line: usize) -> Self {
-        // According to
-        // https://github.com/rust-lang/regex/blob/master/PERFORMANCE.md (and
-        // directly observed) Regex keeps mutable internal state which needs to
-        // be synchronized - so using it from multiple threads will be a big
-        // performance regression.
-        static REGEX: OnceCell<Regex> = OnceCell::new();
-        let big_regex = REGEX.get_or_init(Self::make_regex).clone();
-
-        let mut tokens = VecDeque::new();
-        let mut source = s;
-        while !source.is_empty() {
-            source = tv_build_tokens_helper(source, &mut tokens, &big_regex);
-        }
-        TvLexer {
-            line: start_line,
-            pending: None,
-            tokens,
-        }
-    }
-}
-
-fn tv_build_tokens_helper<'a>(
-    s: &'a [u8],
-    tokens: &mut VecDeque<TvToken<'a>>,
-    big_regex: &Regex,
-) -> &'a [u8] {
-    fn create_tok<'a>(
-        s: &'a [u8],
-        tokens: &mut VecDeque<TvToken<'a>>,
-        end: usize,
-    ) -> Result<(TvToken<'a>, usize)> {
-        let tr = match &s[0] {
-            // Implicit assumption: matched to the start (^), so we iter from the start
-            // No whitespace expected in tv
-            b';' => (TvToken::Semicolon, end), // Semicolon
-            b'{' => (TvToken::OpenCurly, end), // Opencurly
-            b'}' => (TvToken::CloseCurly, end),
-            b'N' => (TvToken::Null, end),
-            b'u' => (TvToken::Uninit, end),
-            b'd' => {
-                // we know the rest is utf8, because it matched \d+
-                let num = std::str::from_utf8(&s[2..end])
-                    .map_err(|_| anyhow!("float TV not followed by valid utf8"))?;
-                let num = num
-                    .parse()
-                    .map_err(|_| anyhow!("float TV not followed by a number"))?;
-                (TvToken::Float(hhbc::FloatBits(num)), end)
-            }
-            b'i' => {
-                let num = std::str::from_utf8(&s[2..end])
-                    .map_err(|_| anyhow!("int TV not followed by valid utf8"))?
-                    .parse()
-                    .map_err(|_| anyhow!("int TV not followed by a number"))?;
-                (TvToken::Int(num), end)
-            }
-            b'b' => {
-                let b: &str = std::str::from_utf8(&s[2..end])
-                    .map_err(|_| anyhow!("boolean TV not followed by valid utf8"))?;
-                let b: usize = b
-                    .parse()
-                    .map_err(|_| anyhow!("boolean TV not followed by a number"))?;
-                if b != 1 && b != 0 {
-                    (TvToken::Error(s), end)
-                } else {
-                    (TvToken::Bool(b == 1), end)
-                }
-            }
-            b'D' => {
-                let num = std::str::from_utf8(&s[2..end - 1])
-                    .map_err(|_| anyhow!("Dict TV not followed by valid utf8"))?;
-                let num = num
-                    .parse()
-                    .map_err(|_| anyhow!("Dict TV not followed by a number"))?;
-                (TvToken::Dict(num), end)
-            }
-            b'v' => {
-                let num = std::str::from_utf8(&s[2..end - 1])
-                    .map_err(|_| anyhow!("Vec TV not followed by valid utf8"))?;
-                let num = num
-                    .parse()
-                    .map_err(|_| anyhow!("Vec TV not followed by a number"))?;
-                (TvToken::Vec(num), end)
-            }
-            b'k' => {
-                let num = std::str::from_utf8(&s[2..end - 1])
-                    .map_err(|_| anyhow!("Keyset TV not followed by valid utf8"))?;
-                let num = num
-                    .parse()
-                    .map_err(|_| anyhow!("Keyset TV not followed by a number"))?;
-                (TvToken::Keyset(num), end)
-            }
-            b's' => {
-                let num: &str = std::str::from_utf8(&s[2..end - 1])
-                    .map_err(|_| anyhow!("string TV not followed by valid utf8"))?;
-                let num: usize = num
-                    .parse()
-                    .map_err(|_| anyhow!("string TV not followed by a number"))?;
-                tokens.push_back(TvToken::S);
-                //parse the string
-                let st = &s[end + 1..end + num + 1]; // ""abc"" -> "abc"
-                (TvToken::String(st), end + num + 2)
-            }
-            b'l' => {
-                let num: &str = std::str::from_utf8(&s[2..end - 1])
-                    .map_err(|_| anyhow!("LazyClass TV not followed by valid utf8"))?;
-                let num: usize = num
-                    .parse()
-                    .map_err(|_| anyhow!("LazyClass TV not followed by a number"))?; // -1 for the ending :
-                tokens.push_back(TvToken::LazyClass);
-                //parse the string
-                let st = &s[end + 1..end + num + 1];
-                (TvToken::String(st), end + num + 2)
-            }
-            _ => bail!("Unknown tv: {:?}", s),
-        };
-        Ok(tr)
-    }
-    if let Some(mat) = big_regex.find(s) {
-        debug_assert!(mat.start() == 0);
-        let end = mat.end();
-        match create_tok(s, tokens, end) {
-            Err(_) => {
-                tokens.push_back(TvToken::Error(s));
-                &[]
-            }
-            Ok((tok, end)) => {
-                tokens.push_back(tok);
-                &s[end..]
-            }
-        }
-    } else {
-        // Couldn't tokenize the string, so add the rest of it as an error
-        tokens.push_back(TvToken::Error(s));
-        // Done advancing col and line cuz at end
-        &[]
-    }
-}
+type Line = usize;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub enum Token<'a> {
     // See below in Lexer::from_slice for regex definitions
-    Global(&'a [u8], Pos),
-    Variable(&'a [u8], Pos),
-    TripleStrLiteral(&'a [u8], Pos),
-    Decl(&'a [u8], Pos),
-    StrLiteral(&'a [u8], Pos),
-    Variadic(Pos),
-    Semicolon(Pos),
-    Dash(Pos),
-    OpenCurly(Pos),
-    OpenBracket(Pos),
-    OpenParen(Pos),
-    CloseParen(Pos),
-    CloseBracket(Pos),
-    CloseCurly(Pos),
-    Equal(Pos),
-    Number(&'a [u8], Pos),
-    Comma(Pos),
-    Lt(Pos),
-    Gt(Pos),
-    Colon(Pos),
-    Identifier(&'a [u8], Pos),
-    Newline(Pos),
-    Error(&'a [u8], Pos),
+    Global(&'a [u8], Line),
+    Variable(&'a [u8], Line),
+    TripleStrLiteral(&'a [u8], Line),
+    Decl(&'a [u8], Line),
+    StrLiteral(&'a [u8], Line),
+    Variadic(Line),
+    Semicolon(Line),
+    Dash(Line),
+    OpenCurly(Line),
+    OpenBracket(Line),
+    OpenParen(Line),
+    CloseParen(Line),
+    CloseBracket(Line),
+    CloseCurly(Line),
+    Equal(Line),
+    Number(&'a [u8], Line),
+    Comma(Line),
+    Lt(Line),
+    Gt(Line),
+    Colon(Line),
+    Identifier(&'a [u8], Line),
+    Newline(Line),
+    Error(&'a [u8], Line),
 }
 
 impl<'a> Token<'a> {
@@ -3853,7 +3803,8 @@ impl<'a> Token<'a> {
     /// So `into_str_literal_and_line` and `into_triple_str_literal_and_line` return a Result of bytes rep and line # or bail
     fn into_triple_str_literal_and_line(self) -> Result<(&'a [u8], usize)> {
         match self {
-            Token::TripleStrLiteral(vec_u8, pos) => Ok((vec_u8, pos.line)),
+            Token::TripleStrLiteral(vec_u8, pos) => Ok((vec_u8, pos)),
+
             _ => bail!("Expected a triple str literal, got: {}", self),
         }
     }
@@ -3861,7 +3812,7 @@ impl<'a> Token<'a> {
     #[allow(dead_code)]
     fn into_str_literal_and_line(self) -> Result<(&'a [u8], usize)> {
         match self {
-            Token::StrLiteral(vec_u8, pos) => Ok((vec_u8, pos.line)),
+            Token::StrLiteral(vec_u8, pos) => Ok((vec_u8, pos)),
             _ => bail!("Expected a str literal, got: {}", self),
         }
     }
@@ -4158,29 +4109,31 @@ impl<'a> fmt::Display for Token<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let text = std::str::from_utf8(self.as_bytes()).map_err(|_| fmt::Error)?;
         match self {
-            Token::Global(_, pos) => write!(f, "Global(\"{text}\", {pos:?})"),
-            Token::Variable(_, pos) => write!(f, "Variable(\"{text}\", {pos:?})"),
-            Token::TripleStrLiteral(_, pos) => write!(f, "TripleStrLiteral(\"{text}\", {pos:?})"),
-            Token::Decl(_, pos) => write!(f, "Decl(\"{text}\", {pos:?})"),
-            Token::StrLiteral(_, pos) => write!(f, "StrLiteral(\"{text}\", {pos:?})"),
-            Token::Number(_, pos) => write!(f, "Number(\"{text}\", {pos:?})"),
-            Token::Identifier(_, pos) => write!(f, "Identifier(\"{text}\", {pos:?})"),
-            Token::Error(_, pos) => write!(f, "Error(\"{text}\", {pos:?})"),
-            Token::Semicolon(pos) => write!(f, "Semicolon(\"{text}\", {pos:?})"),
-            Token::Dash(pos) => write!(f, "Dash(\"{text}\", {pos:?})"),
-            Token::OpenCurly(pos) => write!(f, "OpenCurly(\"{text}\", {pos:?})"),
-            Token::OpenBracket(pos) => write!(f, "OpenBracket(\"{text}\", {pos:?})"),
-            Token::OpenParen(pos) => write!(f, "OpenParen(\"{text}\", {pos:?})"),
-            Token::CloseParen(pos) => write!(f, "CloseParen(\"{text}\", {pos:?})"),
-            Token::CloseBracket(pos) => write!(f, "CloseBracket(\"{text}\", {pos:?})"),
-            Token::CloseCurly(pos) => write!(f, "CloseCurly(\"{text}\", {pos:?})"),
-            Token::Equal(pos) => write!(f, "Equal(\"{text}\", {pos:?})"),
-            Token::Comma(pos) => write!(f, "Comma(\"{text}\", {pos:?})"),
-            Token::Lt(pos) => write!(f, "Lt(\"{text}\", {pos:?})"),
-            Token::Gt(pos) => write!(f, "Gt(\"{text}\", {pos:?})"),
-            Token::Colon(pos) => write!(f, "Colon(\"{text}\", {pos:?})"),
-            Token::Variadic(pos) => write!(f, "Variadic(\"{text}\", {pos:?})"),
-            Token::Newline(pos) => write!(f, "Newline(\"{text}\", {pos:?})"),
+            Token::Global(_, pos) => write!(f, "Global(val: \"{text}\", line: {pos:?})"),
+            Token::Variable(_, pos) => write!(f, "Variable(val: \"{text}\", line: {pos:?})"),
+            Token::TripleStrLiteral(_, pos) => {
+                write!(f, "TripleStrLiteral(val: \"{text}\", line: {pos:?})")
+            }
+            Token::Decl(_, pos) => write!(f, "Decl(val: \"{text}\", line: {pos:?})"),
+            Token::StrLiteral(_, pos) => write!(f, "StrLiteral(val: \"{text}\", line: {pos:?})"),
+            Token::Number(_, pos) => write!(f, "Number(val: \"{text}\", line: {pos:?})"),
+            Token::Identifier(_, pos) => write!(f, "Identifier(val: \"{text}\", line: {pos:?})"),
+            Token::Error(_, pos) => write!(f, "Error(val: \"{text}\", line: {pos:?})"),
+            Token::Semicolon(pos) => write!(f, "Semicolon(val: \"{text}\", line: {pos:?})"),
+            Token::Dash(pos) => write!(f, "Dash(val: \"{text}\", line: {pos:?})"),
+            Token::OpenCurly(pos) => write!(f, "OpenCurly(val: \"{text}\", line: {pos:?})"),
+            Token::OpenBracket(pos) => write!(f, "OpenBracket(val: \"{text}\", line: {pos:?})"),
+            Token::OpenParen(pos) => write!(f, "OpenParen(val: \"{text}\", line: {pos:?})"),
+            Token::CloseParen(pos) => write!(f, "CloseParen(val: \"{text}\", line: {pos:?})"),
+            Token::CloseBracket(pos) => write!(f, "CloseBracket(val: \"{text}\", line: {pos:?})"),
+            Token::CloseCurly(pos) => write!(f, "CloseCurly(val: \"{text}\", line: {pos:?})"),
+            Token::Equal(pos) => write!(f, "Equal(val: \"{text}\", line: {pos:?})"),
+            Token::Comma(pos) => write!(f, "Comma(val: \"{text}\", line: {pos:?})"),
+            Token::Lt(pos) => write!(f, "Lt(val: \"{text}\", line: {pos:?})"),
+            Token::Gt(pos) => write!(f, "Gt(val: \"{text}\", line: {pos:?})"),
+            Token::Colon(pos) => write!(f, "Colon(val: \"{text}\", line: {pos:?})"),
+            Token::Variadic(pos) => write!(f, "Variadic(val: \"{text}\", line: {pos:?})"),
+            Token::Newline(pos) => write!(f, "Newline(val: \"{text}\", line: {pos:?})"),
         }
     }
 }
@@ -4361,6 +4314,12 @@ impl<'a> Lexer<'a> {
         Ok(Str::new_slice(alloc, st))
     }
 
+    /// Similar to `expect_and_get_number` but puts decl into a Str<'arena>
+    fn expect_decl_into_ffi_str<'arena>(&mut self, alloc: &'arena Bump) -> Result<Str<'arena>> {
+        let st = self.expect(Token::into_decl)?;
+        Ok(Str::new_slice(alloc, st))
+    }
+
     /// Similar to `expect` but instead of returning a Result that usually contains a slice of u8,
     /// applies f to the `from_utf8 str` of the top token, bailing if the top token is not a number.
     fn expect_and_get_number<T: FromStr>(&mut self) -> Result<T> {
@@ -4386,28 +4345,30 @@ impl<'a> Lexer<'a> {
     }
 
     /// A var can be written in HHAS as $abc or "$abc". Only valid if a $ preceeds
-    fn expect_var(&mut self) -> Result<&'a [u8]> {
+    fn expect_var(&mut self) -> Result<Vec<u8>> {
         if self.peek_if(Token::is_str_literal) {
             let s = self.expect(Token::into_str_literal)?;
             if s.starts_with(b"\"$") {
                 // Remove the "" b/c that's not part of the var name
-                Ok(&s[1..s.len() - 1])
+                // also unescape ("$\340\260" etc is literal bytes)
+                let s = escaper::unquote_slice(s);
+                let s = escaper::unescape_literal_bytes_into_vec_bytes(s)?;
+                Ok(s)
             } else {
                 bail!("Var does not start with $: {:?}", s)
             }
         } else {
-            self.expect(Token::into_variable)
+            Ok(self.expect(Token::into_variable)?.to_vec())
         }
     }
 
     /// Bails if lexer is not empty, message contains the next token
     fn expect_end(&mut self) -> Result<()> {
-        if !self.is_empty() {
-            bail!(
-                "Expected end of token stream, see: {}",
-                self.next().unwrap()
-            )
-        }
+        ensure!(
+            self.is_empty(),
+            "Expected end of token stream, see: {}",
+            self.next().unwrap()
+        );
         Ok(())
     }
 
@@ -4417,10 +4378,10 @@ impl<'a> Lexer<'a> {
         let v = [
             r#""""([^"\\]|\\.)*?""""#, // Triple str literal
             "#.*",                     // Comment
-            r"(?-u)[\.@][_a-zA-Z\x80-\xff][_/a-zA-Z0-9\x80-\xff]*", // Decl, global. (?-u) turns off utf8 check
-            r"(?-u)\$[_a-zA-Z0-9\x80-\xff][_/a-zA-Z0-9\x80-\xff]*", // Var. See /home/almathaler/fbsource/fbcode/hphp/test/quick/reified-and-variadic.php's assembly for a var w/ a digit at front
-            r#""((\\.)|[^\\"])*""#,                                 // Str literal
-            r"[-+]?[0-9]+\.?[0-9]*([eE][-+]?[0-9]+\.?[0-9]*)?",     // Number
+            r"(?-u)[\.@][_a-z/A-Z\x80-\xff][_/a-zA-Z/0-9\x80-\xff\-\.]*", // Decl, global. (?-u) turns off utf8 check
+            r"(?-u)\$[_a-zA-Z0-9$\x80-\xff][_/a-zA-Z0-9$\x80-\xff]*",     // Var.
+            r#""((\\.)|[^\\"])*""#,                                       // Str literal
+            r"[-+]?[0-9]+\.?[0-9]*([eE][-+]?[0-9]+\.?[0-9]*)?",           // Number
             r"(?-u)[_/a-zA-Z\x80-\xff]([_/\\a-zA-Z0-9\x80-\xff\.\$#\-]|::)*", // Identifier
             ";",
             "-",
@@ -4452,14 +4413,11 @@ impl<'a> Lexer<'a> {
         static REGEX: OnceCell<Regex> = OnceCell::new();
         let big_regex = REGEX.get_or_init(Self::make_regex).clone();
 
-        let mut cur_pos = Pos {
-            line: start_line, // When we spawn a new lexer it doesn't start at line 1
-            col: 1,
-        };
+        let mut cur_line = start_line;
         let mut tokens = VecDeque::new();
         let mut source = s;
         while !source.is_empty() {
-            source = build_tokens_helper(source, &mut cur_pos, &mut tokens, &big_regex);
+            source = build_tokens_helper(source, &mut cur_line, &mut tokens, &big_regex);
         }
         Lexer {
             pending: None,
@@ -4470,7 +4428,7 @@ impl<'a> Lexer<'a> {
 
 fn build_tokens_helper<'a>(
     s: &'a [u8],
-    cur_pos: &mut Pos,
+    cur_line: &mut usize,
     tokens: &mut VecDeque<Token<'a>>,
     big_regex: &Regex,
 ) -> &'a [u8] {
@@ -4482,70 +4440,61 @@ fn build_tokens_helper<'a>(
             // Note these don't match what prints out on a printer, but not sure how to generalize
             b'\x0C' => {
                 // form feed
-                cur_pos.col += 1;
+
                 &s[mat.end()..]
             }
-            b'\r' => {
-                cur_pos.col = 1;
-                &s[mat.end()..]
-            }
-            b'\t' => {
-                cur_pos.col += 1; // Column not currently used in error reporting, so keep this as 1
-                &s[mat.end()..]
-            }
+            b'\r' => &s[mat.end()..],
+            b'\t' => &s[mat.end()..],
             b'#' => {
                 &s[mat.end()..] // Don't advance the line; the newline at the end of the comment will advance the line
             }
-            b' ' => {
-                cur_pos.col += 1;
-                &s[mat.end()..]
-            } // Don't add whitespace as tokens, just increase line and col
+            b' ' => &s[mat.end()..], // Don't add whitespace as tokens, just increase line and col
             o => {
                 let end = mat.end();
                 let tok = match o {
                     b'\n' => {
-                        let old_pos = Pos { ..*cur_pos };
-                        cur_pos.line += 1;
-                        cur_pos.col = 1;
+                        let old_pos = *cur_line;
+                        *cur_line += 1;
+
                         Token::Newline(old_pos)
                     }
-                    b'@' => Token::Global(&s[..end], *cur_pos), // Global
-                    b'$' => Token::Variable(&s[..end], *cur_pos), // Var
+                    b'@' => Token::Global(&s[..end], *cur_line), // Global
+                    b'$' => Token::Variable(&s[..end], *cur_line), // Var
                     b'.' => {
                         if *(chars.next().unwrap()) == b'.' && *(chars.next().unwrap()) == b'.' {
                             // Variadic
-                            Token::Variadic(*cur_pos)
+                            Token::Variadic(*cur_line)
                         } else {
-                            Token::Decl(&s[..end], *cur_pos) // Decl
+                            Token::Decl(&s[..end], *cur_line) // Decl
                         }
                     }
-                    b';' => Token::Semicolon(*cur_pos), // Semicolon
-                    b'{' => Token::OpenCurly(*cur_pos), // Opencurly
-                    b'[' => Token::OpenBracket(*cur_pos),
-                    b'(' => Token::OpenParen(*cur_pos),
-                    b')' => Token::CloseParen(*cur_pos),
-                    b']' => Token::CloseBracket(*cur_pos),
-                    b'}' => Token::CloseCurly(*cur_pos),
-                    b',' => Token::Comma(*cur_pos),
-                    b'<' => Token::Lt(*cur_pos),    //<
-                    b'>' => Token::Gt(*cur_pos),    //>
-                    b'=' => Token::Equal(*cur_pos), //=
+                    b';' => Token::Semicolon(*cur_line), // Semicolon
+                    b'{' => Token::OpenCurly(*cur_line), // Opencurly
+                    b'[' => Token::OpenBracket(*cur_line),
+                    b'(' => Token::OpenParen(*cur_line),
+                    b')' => Token::CloseParen(*cur_line),
+                    b']' => Token::CloseBracket(*cur_line),
+                    b'}' => Token::CloseCurly(*cur_line),
+                    b',' => Token::Comma(*cur_line),
+                    b'<' => Token::Lt(*cur_line),    //<
+                    b'>' => Token::Gt(*cur_line),    //>
+                    b'=' => Token::Equal(*cur_line), //=
                     b'-' => {
                         if chars.next().unwrap().is_ascii_digit() {
                             // Negative number
-                            Token::Number(&s[..end], *cur_pos)
+                            Token::Number(&s[..end], *cur_line)
                         } else {
-                            Token::Dash(*cur_pos)
+                            Token::Dash(*cur_line)
                         }
                     }
-                    b':' => Token::Colon(*cur_pos),
+                    b':' => Token::Colon(*cur_line),
                     b'"' => {
                         if *(chars.next().unwrap()) == b'"' && *(chars.next().unwrap()) == b'"' {
                             // Triple string literal
-                            Token::TripleStrLiteral(&s[..end], *cur_pos)
+                            Token::TripleStrLiteral(&s[..end], *cur_line)
                         } else {
                             // Single string literal
-                            Token::StrLiteral(&s[..end], *cur_pos)
+                            Token::StrLiteral(&s[..end], *cur_line)
                         }
                     }
                     dig_or_id => {
@@ -4554,26 +4503,19 @@ fn build_tokens_helper<'a>(
                                 && (chars.next().unwrap()).is_ascii_digit())
                         // Positive numbers denoted with +
                         {
-                            Token::Number(&s[..end], *cur_pos)
+                            Token::Number(&s[..end], *cur_line)
                         } else {
-                            Token::Identifier(&s[..end], *cur_pos)
+                            Token::Identifier(&s[..end], *cur_line)
                         }
                     }
                 };
                 tokens.push_back(tok);
-                cur_pos.col += end - mat.start(); // Advance col by length of token
                 &s[end..]
             }
         }
     } else {
         // Couldn't tokenize the string, so add the rest of it as an error
-        tokens.push_back(Token::Error(
-            s,
-            Pos {
-                line: cur_pos.line,
-                col: cur_pos.col,
-            },
-        ));
+        tokens.push_back(Token::Error(s, *cur_line));
         // Done advancing col and line cuz at end
         &[]
     }

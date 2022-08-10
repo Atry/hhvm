@@ -29,9 +29,12 @@
 
 #include "hphp/util/compact-vector.h"
 #include "hphp/util/either.h"
+#include "hphp/util/tiny-vector.h"
 #include "hphp/util/tribool.h"
 
 #include "hphp/runtime/base/repo-auth-type.h"
+
+#include "hphp/runtime/vm/coeffects.h"
 #include "hphp/runtime/vm/type-constraint.h"
 
 #include "hphp/hhbbc/hhbbc.h"
@@ -117,13 +120,6 @@ enum class DependencyContextType : uint16_t {
 
 using DependencyContext = CompactTaggedPtr<const void, DependencyContextType>;
 
-struct DependencyContextLess {
-  bool operator()(const DependencyContext& a,
-                  const DependencyContext& b) const {
-    return a.getOpaque() < b.getOpaque();
-  }
-};
-
 struct DependencyContextEquals {
   bool operator()(const DependencyContext& a,
                   const DependencyContext& b) const {
@@ -144,14 +140,11 @@ struct DependencyContextHashCompare : DependencyContextHash {
   size_t hash(const DependencyContext& d) const { return (*this)(d); }
 };
 
-using DependencyContextSet = hphp_hash_set<DependencyContext,
+using DependencyContextSet = hphp_fast_set<DependencyContext,
                                            DependencyContextHash,
                                            DependencyContextEquals>;
-using ContextSet = hphp_hash_set<Context, ContextHash>;
 
 std::string show(Context);
-
-using ConstantMap = hphp_hash_map<SString, TypedValue>;
 
 /*
  * State of properties on a class.  Map from property name to its
@@ -624,16 +617,30 @@ std::string show(const Class&);
  * "update" step in between whole program analysis rounds).
  */
 struct Index {
+  struct Input {
+    template <typename T> using R = extern_worker::Ref<std::unique_ptr<T>>;
+
+    struct ClassMeta {
+      R<php::Class> cls;
+      SString name;
+      std::vector<SString> dependencies;
+    };
+
+    static std::vector<SString> makeDeps(const php::Class&);
+
+    std::vector<ClassMeta> classes;
+    std::vector<std::pair<SString, R<php::Unit>>> units;
+    std::vector<std::pair<SString, R<php::Func>>> funcs;
+  };
+
   /*
    * Create an Index for a php::Program.  Performs some initial
    * analysis of the program.
    */
-  explicit Index(php::Program*);
-
-  /*
-   * This class must not be destructed after its associated
-   * php::Program.
-   */
+  Index(Input,
+        std::unique_ptr<coro::TicketExecutor>,
+        std::unique_ptr<extern_worker::Client>,
+        DisposeCallback);
   ~Index();
 
   /*
@@ -682,7 +689,52 @@ struct Index {
    * Throw away data structures that won't be needed after the emit
    * stage.
    */
-  void cleanup_post_emit(php::ProgramPtr program);
+  void cleanup_post_emit();
+
+  /*
+   * Access the php::Program this Index is analyzing.
+   */
+  const php::Program& program() const;
+
+  /*
+   * Obtain a pointer to the unit which defined the given func.
+   */
+  const php::Unit* lookup_func_unit(const php::Func&) const;
+  const php::Unit* lookup_func_original_unit(const php::Func&) const;
+
+  /*
+   * Obtain a pointer to the unit which defined the given class.
+   */
+  const php::Unit* lookup_class_unit(const php::Class&) const;
+
+  /*
+   * Obtain a pointer to the class defined in the given unit with the
+   * given Id.
+   */
+  const php::Class* lookup_unit_class(const php::Unit&, Id) const;
+  php::Class* lookup_unit_class_mutable(php::Unit&, Id);
+
+  /*
+   * Obtain a pointer to the class which serves as the context for the
+   * given class. For non-closures, this is just the input, but may be
+   * different in closures.
+   */
+  const php::Class* lookup_closure_context(const php::Class&) const;
+
+  /*
+   * Call the given callback for each (top-level) func defined in the
+   * given Unit.
+   */
+  void for_each_unit_func(const php::Unit&,
+                          std::function<void(const php::Func&)>) const;
+  void for_each_unit_func_mutable(php::Unit&,
+                                  std::function<void(php::Func&)>);
+
+  /*
+   * Call the given callback for each class defined in the given Unit.
+   */
+  void for_each_unit_class(const php::Unit&,
+                           std::function<void(const php::Class&)>) const;
 
   /*
    * Find all the closures created inside the context of a given
@@ -753,7 +805,7 @@ struct Index {
    * Returns both a resolved Class, and the actual php::Class for the
    * closure.
    */
-  std::pair<res::Class,php::Class*>
+  std::pair<res::Class, const php::Class*>
     resolve_closure_class(Context ctx, int32_t idx) const;
 
   /*
@@ -1106,7 +1158,7 @@ struct Index {
    * Attempt to pre-resolve as many type-structures as possible in
    * type-constants and type-aliases.
    */
-  void preresolve_type_structures(php::Program&);
+  void preresolve_type_structures();
 
   /*
    * Refine the types of the class constants defined by an 86cinit,
@@ -1247,7 +1299,7 @@ struct Index {
    * This must be done before any analysis is done, as the initial values
    * affects the analysis.
    */
-  void rewrite_default_initial_values(php::Program&) const;
+  void rewrite_default_initial_values() const;
 
   /*
    * Return true if the resolved function supports async eager return.

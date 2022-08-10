@@ -1581,6 +1581,9 @@ void dce(Env& env, const bc::ChainFaults& op) { no_dce(env, op); }
 void dce(Env& env, const bc::CheckClsReifiedGenericMismatch& op) {
   no_dce(env, op);
 }
+void dce(Env& env, const bc::CheckClsRGSoft& op) {
+  no_dce(env, op);
+}
 void dce(Env& env, const bc::CheckThis& op) { no_dce(env, op); }
 void dce(Env& env, const bc::Clone& op) { no_dce(env, op); }
 void dce(Env& env, const bc::ClsCns& op) { no_dce(env, op); }
@@ -1609,6 +1612,7 @@ void dce(Env& env, const bc::FCallFuncD& op) { no_dce(env, op); }
 void dce(Env& env, const bc::FCallObjMethod& op) { no_dce(env, op); }
 void dce(Env& env, const bc::FCallObjMethodD& op) { no_dce(env, op); }
 void dce(Env& env, const bc::GetMemoKeyL& op) { no_dce(env, op); }
+void dce(Env& env, const bc::GetClsRGProp& op) { no_dce(env, op); }
 void dce(Env& env, const bc::IncDecG& op) { no_dce(env, op); }
 void dce(Env& env, const bc::IncDecS& op) { no_dce(env, op); }
 void dce(Env& env, const bc::Incl& op) { no_dce(env, op); }
@@ -2045,7 +2049,7 @@ dce_visit(VisitContext& visit, BlockId bid, const State& stateIn,
   for (uint32_t idx = blk->hhbcs.size(); idx-- > 0;) {
     auto const& op = blk->hhbcs[idx];
 
-    FTRACE(2, "  == #{} {}\n", idx, show(func, op));
+    FTRACE(2, "  == #{} {}\n", idx, show(*func, op));
 
     if ((idx + 1) < blk->hhbcs.size()) states.next();
 
@@ -2448,7 +2452,6 @@ optimize_dce(VisitContext& visit, BlockId bid, const State& stateIn,
 void remove_unused_local_names(
     php::WideFunc& func,
     const std::bitset<kMaxTrackedLocals>& usedLocalNames) {
-  if (!options.RemoveUnusedLocalNames) return;
   /*
    * Closures currently rely on name information being available.
    */
@@ -2601,7 +2604,6 @@ void apply_remapping(const FuncAnalysis& ainfo, php::WideFunc& func,
 
 void remap_locals(const FuncAnalysis& ainfo, php::WideFunc& func,
                   LocalRemappingIndex&& remappingIndex) {
-  if (!options.CompactLocalSlots) return;
   /*
    * Remapping locals in closures requires checking which ones
    * are captured variables so we can remove the relevant properties,

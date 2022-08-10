@@ -51,6 +51,7 @@ type mode =
   | Dump_inheritance
   | Errors
   | Lint
+  | Lint_json
   | Dump_deps
   | Dump_dep_hashes
   | Identify_symbol of int * int
@@ -73,7 +74,7 @@ type mode =
   | Hover of (int * int) option
   | Apply_quickfixes
   | Shape_analysis of string
-  | Refactor_sound_dynamic of string * string
+  | Refactor_sound_dynamic of string * string * string
 
 type options = {
   files: string list;
@@ -309,6 +310,7 @@ let parse_options () =
   let meth_caller_only_public_visibility = ref true in
   let require_extends_implements_ancestors = ref false in
   let strict_value_equality = ref false in
+  let expression_tree_virtualize_functions = ref false in
   let naming_table = ref None in
   let root = ref None in
   let sharedmem_config = ref SharedMem.default_config in
@@ -330,6 +332,7 @@ let parse_options () =
   let enable_global_write_check = ref [] in
   let enable_global_write_check_functions = ref SSet.empty in
   let refactor_mode = ref "" in
+  let refactor_analysis_mode = ref "" in
   let set_enable_global_write_check_functions s =
     let json_obj = Hh_json.json_of_file s in
     let add_function f =
@@ -371,13 +374,15 @@ let parse_options () =
       ( "--refactor-sound-dynamic",
         Arg.Tuple
           [
-            Arg.Symbol
-              ( ["flag"; "dump"; "simplify"; "solve"],
-                (fun x -> refactor_mode := x) );
+            Arg.String (fun mode -> refactor_analysis_mode := mode);
+            Arg.String (fun mode -> refactor_mode := mode);
             Arg.String
               (fun x ->
                 batch_mode := true;
-                set_mode (Refactor_sound_dynamic (!refactor_mode, x)) ());
+                set_mode
+                  (Refactor_sound_dynamic
+                     (!refactor_analysis_mode, !refactor_mode, x))
+                  ());
           ],
         " Run the flow analysis" );
       ( "--deregister-attributes",
@@ -422,6 +427,7 @@ let parse_options () =
             | _ -> print_string "Warning: unrecognized error format.\n"),
         "<raw|context|highlighted> Error formatting style" );
       ("--lint", Arg.Unit (set_mode Lint), " Produce lint errors");
+      ("--lint-json", Arg.Unit (set_mode Lint_json), " Produce json lint output");
       ( "--no-builtins",
         Arg.Set no_builtins,
         " Don't use builtins (e.g. ConstSet); implied by --root" );
@@ -557,7 +563,16 @@ let parse_options () =
         Arg.Set shallow_class_decl,
         " Look up class members lazily from shallow declarations" );
       ( "--rust-provider-backend",
-        Arg.Set rust_provider_backend,
+        Arg.Unit
+          (fun () ->
+            rust_provider_backend := true;
+            sharedmem_config :=
+              SharedMem.
+                {
+                  default_config with
+                  shm_use_sharded_hashtbl = true;
+                  shm_cache_size = 2 * 1024 * 1024 * 1024;
+                }),
         " Use the Rust implementation of Provider_backend (including decl-folding)"
       );
       ( "--skip-hierarchy-checks",
@@ -817,6 +832,9 @@ let parse_options () =
         Arg.Int (fun u -> loop_iteration_upper_bound := Some u),
         " Sets the maximum number of iterations that will be used to typecheck loops"
       );
+      ( "--expression-tree-virtualize-functions",
+        Arg.Set expression_tree_virtualize_functions,
+        " Enables function virtualization in Expression Trees" );
     ]
   in
 
@@ -980,6 +998,8 @@ let parse_options () =
       ~tco_allow_all_files_for_module_declarations:
         !allow_all_files_for_module_declarations
       ~tco_loop_iteration_upper_bound:!loop_iteration_upper_bound
+      ~tco_expression_tree_virtualize_functions:
+        !expression_tree_virtualize_functions
       ()
   in
   Errors.allowed_fixme_codes_strict :=
@@ -1809,14 +1829,19 @@ let handle_mode
   in
   let iter_over_files f : unit = List.iter filenames ~f in
   match mode with
-  | Refactor_sound_dynamic (mode, function_name) ->
+  | Refactor_sound_dynamic (analysis_mode, refactor_mode, element_name) ->
     let opts =
-      match Refactor_sd_options.parse mode with
-      | Some options -> options
-      | None -> die "invalid refactor sd analysis mode"
+      match
+        ( Refactor_sd_options.parse_analysis_mode analysis_mode,
+          Refactor_sd_options.parse_refactor_mode refactor_mode )
+      with
+      | (Some analysis_mode, Some refactor_mode) ->
+        Refactor_sd_options.mk ~analysis_mode ~refactor_mode
+      | (None, _) -> die "invalid refactor_sd analysis mode"
+      | (_, None) -> die "invalid refactor_sd refactor mode"
     in
     handle_constraint_mode
-      ~do_:(Refactor_sd.do_ function_name)
+      ~do_:(Refactor_sd.do_ element_name)
       "Sound Dynamic"
       opts
       ctx
@@ -1976,6 +2001,27 @@ let handle_mode
       exit 2
     ) else
       Printf.printf "No lint errors\n"
+  | Lint_json ->
+    let json_errors =
+      Relative_path.Map.fold
+        files_contents
+        ~init:[]
+        ~f:(fun fn content json_errors ->
+          json_errors
+          @ fst (Lints_core.do_ (fun () -> Linting_main.lint ctx fn content)))
+    in
+    let json_errors =
+      List.sort
+        ~compare:
+          begin
+            fun x y ->
+            Pos.compare (Lints_core.get_pos x) (Lints_core.get_pos y)
+          end
+        json_errors
+    in
+    let json_errors = List.map ~f:Lints_core.to_absolute json_errors in
+    ServerLintTypes.output_json ~pretty:true stdout json_errors;
+    exit 2
   | Dump_deps ->
     Relative_path.Map.iter files_info ~f:(fun fn fileinfo ->
         ignore @@ Typing_check_utils.check_defs ctx fn fileinfo);

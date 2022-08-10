@@ -7,11 +7,13 @@
 // unlike formal parameters and return types. We might consider fixing this.
 // Also interestingly, abstract constants are not emitted at all.
 
+use ffi::Maybe;
+use serde::Serialize;
+
 use crate::typed_value::TypedValue;
 use crate::ConstName;
-use ffi::Maybe;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[repr(C)]
 pub struct HhasConstant<'arena> {
     pub name: ConstName<'arena>,

@@ -3,6 +3,13 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use ffi::Maybe;
+use ffi::Pair;
+use ffi::Slice;
+use ffi::Str;
+use hhvm_types_ffi::ffi::Attr;
+use serde::Serialize;
+
 use crate::hhas_attribute::HhasAttribute;
 use crate::hhas_coeffects::HhasCtxConstant;
 use crate::hhas_constant::HhasConstant;
@@ -12,13 +19,8 @@ use crate::hhas_property::HhasProperty;
 use crate::hhas_type::HhasTypeInfo;
 use crate::hhas_type_const::HhasTypeConstant;
 use crate::ClassName;
-use ffi::Maybe;
-use ffi::Pair;
-use ffi::Slice;
-use ffi::Str;
-use hhvm_types_ffi::ffi::Attr;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize)]
 #[repr(C)]
 pub enum TraitReqKind {
     MustExtend,
@@ -26,7 +28,7 @@ pub enum TraitReqKind {
     MustBeClass,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[repr(C)]
 pub struct HhasClass<'arena> {
     pub attributes: Slice<'arena, HhasAttribute<'arena>>,

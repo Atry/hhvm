@@ -906,6 +906,13 @@ bool reflowTypes(IRUnit& unit) {
       for (auto& inst : *block) {
         if (!inst.is(DefLabel)) retypeDests(&inst, &unit);
 
+        for (auto const src : inst.srcs()) {
+          if (src->type() == TBottom) {
+            FTRACE(5, "reflowTypes: found bottom src {} (at rpo: {})\n",
+                   src->toString(), id);
+            firstBottom = std::min(firstBottom, id);
+          }
+        }
         // If this instruction reachable, but its next block unreachable it is
         // okay for it to def a Bottom tmp.  It would be better for such
         // instructions to have a better simplification option to an always

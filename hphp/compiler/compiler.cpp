@@ -32,8 +32,10 @@
 
 #include "hphp/runtime/vm/disas.h"
 #include "hphp/runtime/vm/preclass-emitter.h"
+#include "hphp/runtime/vm/repo-autoload-map-builder.h"
 #include "hphp/runtime/vm/repo-global-data.h"
 #include "hphp/runtime/vm/type-alias-emitter.h"
+#include "hphp/runtime/vm/unit-emitter.h"
 
 #include "hphp/util/async-func.h"
 #include "hphp/util/build-info.h"
@@ -74,6 +76,8 @@
 using namespace boost::program_options;
 
 namespace HPHP {
+
+using namespace extern_worker;
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -155,6 +159,28 @@ void applyBuildOverrides(IniSetting::Map& ini,
       // mark it visited, so the linter does not complain
       hdf["clear"].setVisited();
     }
+  }
+}
+
+bool addAutoloadQueryToPackage(Package& package, const std::string& queryStr) {
+  try {
+    auto query = folly::parseJson(queryStr);
+    if (!query.isObject()) {
+      Logger::FError("Autoload.Query is not a JSON Object");
+      return false;
+    }
+    auto expr = query["expression"];
+    for (auto& term : expr) {
+      if (term.isArray() && term[0] == "dirname") {
+        Logger::FInfo("adding autoload dir {}", term[1].asString());
+        package.addDirectory(term[1].asString());
+      }
+    }
+    return true;
+  } catch (const folly::json::parse_error& e) {
+    Logger::FError("Error JSON-parsing Autoload.Query = \"{}\": {}",
+                   queryStr, e.what());
+    return false;
   }
 }
 
@@ -255,9 +281,12 @@ struct SymbolSets {
     }
   }
 
+  // For local parses, where we have an UnitEmitter
   void add(UnitEmitter& ue) {
     // Verify uniqueness of symbols and set Attrs appropriately.
     auto const path = ue.m_filepath;
+
+    add(units, path, path, "unit");
 
     for (size_t n = 0; n < ue.numPreClasses(); ++n) {
       auto pce = ue.pce(n);
@@ -266,11 +295,14 @@ struct SymbolSets {
       add(classes, pce->name(), path, "class", typeAliases);
     }
     for (auto& fe : ue.fevec()) {
-      // Dedup meth_caller wrappers
-      if ((fe->attrs & AttrIsMethCaller) &&
-          funcs.find(fe->name) != funcs.end()) continue;
-      fe->attrs |= AttrUnique | AttrPersistent;
-      add(funcs, fe->name, path, "function");
+      if (fe->attrs & AttrIsMethCaller) {
+        if (addNoFail(funcs, fe->name, path, "function")) {
+          fe->attrs |= AttrUnique | AttrPersistent;
+        }
+      } else {
+        fe->attrs |= AttrUnique | AttrPersistent;
+        add(funcs, fe->name, path, "function");
+      }
     }
     for (auto& te : ue.typeAliases()) {
       te->setAttrs(te->attrs() | AttrUnique | AttrPersistent);
@@ -286,13 +318,32 @@ struct SymbolSets {
     }
   }
 
-  void clear() {
-    enums.clear();
-    classes.clear();
-    funcs.clear();
-    typeAliases.clear();
-    constants.clear();
-    modules.clear();
+  // For remote parses, where we don't have an UnitEmitter
+  void add(const Package::ParseMeta::Definitions& d, const StringData* path) {
+    add(units, path, path, "unit");
+
+    for (auto const& c : d.m_classes) {
+      add(classes, c, path, "class", typeAliases);
+    }
+    for (auto const& e : d.m_enums) {
+      add(enums, e, path, "enum");
+      add(classes, e, path, "class", typeAliases);
+    }
+    for (auto const& f : d.m_funcs) {
+      add(funcs, f, path, "function");
+    }
+    for (auto const& m : d.m_methCallers) {
+      addNoFail(funcs, m, path, "function");
+    }
+    for (auto const& a : d.m_typeAliases) {
+      add(typeAliases, a, path, "type alias", classes);
+    }
+    for (auto const& c : d.m_constants) {
+      add(constants, c, path, "constant");
+    }
+    for (auto const& m : d.m_modules) {
+      add(modules, m, path, "module");
+    }
   }
 
   struct NonUnique : std::runtime_error {
@@ -309,6 +360,16 @@ private:
     assertx(!unit || unit->isStatic());
     auto const ret = map.emplace(name, unit);
     if (!ret.second) return fail(name, unit, ret.first->second, type);
+  }
+
+  template <typename T>
+  bool addNoFail(T& map,
+                 const StringData* name,
+                 const StringData* unit,
+                 const char* type) {
+    assertx(name->isStatic());
+    assertx(!unit || unit->isStatic());
+    return map.emplace(name, unit).second;
   }
 
   template <typename T, typename E>
@@ -364,6 +425,7 @@ private:
   IMap typeAliases;
   Map constants;
   Map modules;
+  Map units;
 };
 
 RepoGlobalData getGlobalData() {
@@ -376,7 +438,6 @@ RepoGlobalData getGlobalData() {
   auto gd                        = RepoGlobalData{};
   gd.Signature                   = nanos.count();
   gd.CheckPropTypeHints          = RuntimeOption::EvalCheckPropTypeHints;
-  gd.HardPrivatePropInference    = true;
   gd.PHP7_NoHexNumerics          = RuntimeOption::PHP7_NoHexNumerics;
   gd.PHP7_Substr                 = RuntimeOption::PHP7_Substr;
   gd.PHP7_Builtins               = RuntimeOption::PHP7_Builtins;
@@ -417,6 +478,7 @@ RepoGlobalData getGlobalData() {
     RO::EvalBuildMayNoticeOnMethCallerHelperIsObject;
   gd.DiamondTraitMethods = RuntimeOption::EvalDiamondTraitMethods;
   gd.EvalCoeffectEnforcementLevels = RO::EvalCoeffectEnforcementLevels;
+  gd.EmitBespokeTypeStructures = RO::EvalEmitBespokeTypeStructures;
 
   if (Option::ConstFoldFileBC) {
     gd.SourceRootForFileBC.emplace(RO::SourceRoot);
@@ -426,6 +488,8 @@ RepoGlobalData getGlobalData() {
     auto const s = internal_serialize(tvAsCVarRef(elm.second));
     gd.ConstantFunctions.emplace_back(elm.first, s.toCppString());
   }
+  std::sort(gd.ConstantFunctions.begin(), gd.ConstantFunctions.end());
+
   return gd;
 }
 
@@ -719,6 +783,253 @@ int prepareOptions(CompilerOptions &po, int argc, char **argv) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+Options makeExternWorkerOptions() {
+  Options options;
+  options
+    .setUseCase(Option::ExternWorkerUseCase)
+    .setUseSubprocess(Option::ExternWorkerForceSubprocess
+                      ? Options::UseSubprocess::Always
+                      : Options::UseSubprocess::Fallback)
+    .setCacheExecs(Option::ExternWorkerUseExecCache)
+    .setCleanup(Option::ExternWorkerCleanup)
+    .setUseEdenFS(RO::EvalUseEdenFS)
+    .setUseRichClient(Option::ExternWorkerUseRichClient)
+    .setUseZippyRichClient(Option::ExternWorkerUseZippyRichClient)
+    .setUseP2P(Option::ExternWorkerUseP2P)
+    .setVerboseLogging(Option::ExternWorkerVerboseLogging);
+  if (Option::ExternWorkerTimeoutSecs > 0) {
+    options.setTimeout(std::chrono::seconds{Option::ExternWorkerTimeoutSecs});
+  }
+  if (!Option::ExternWorkerWorkingDir.empty()) {
+    options.setWorkingDir(Option::ExternWorkerWorkingDir);
+  }
+  if (Option::ExternWorkerThrottleRetries >= 0) {
+    options.setThrottleRetries(Option::ExternWorkerThrottleRetries);
+  }
+  if (Option::ExternWorkerThrottleBaseWaitMSecs >= 0) {
+    options.setThrottleBaseWait(
+      std::chrono::milliseconds{Option::ExternWorkerThrottleBaseWaitMSecs}
+    );
+  }
+  return options;
+}
+
+void logPhaseStats(const std::string& phase, const Package& package,
+    extern_worker::Client& client, StructuredLogEntry& sample, int64_t micros)
+{
+  auto const& stats = client.getStats();
+  Logger::FInfo(
+    "  {}: total package files {:,}\n"
+    "  Execs: {:,} total, {:,} cache-hits, {:,} optimistically, {:,} fallback\n"
+    "  Files: {:,} total, {:,} read, {:,} queried, {:,} uploaded ({:,} bytes), {:,} fallback\n"
+    "  Blobs: {:,} total, {:,} queried, {:,} uploaded ({:,} bytes), {:,} fallback\n"
+    "  Cpu: {:,} usec usage, {:,} allocated cores\n"
+    "  Mem: {:,} max used, {:,} reserved\n"
+    "  {:,} downloads ({:,} bytes), {:,} throttles",
+    phase,
+    package.getTotalFiles(),
+    stats.execs.load(),
+    stats.execCacheHits.load(),
+    stats.optimisticExecs.load(),
+    stats.execFallbacks.load(),
+    stats.files.load(),
+    stats.filesRead.load(),
+    stats.filesQueried.load(),
+    stats.filesUploaded.load(),
+    stats.fileBytesUploaded.load(),
+    stats.fileFallbacks.load(),
+    stats.blobs.load(),
+    stats.blobsQueried.load(),
+    stats.blobsUploaded.load(),
+    stats.blobBytesUploaded.load(),
+    stats.blobFallbacks.load(),
+    stats.execCpuUsec.load(),
+    stats.execAllocatedCores.load(),
+    stats.execMaxUsedMem.load(),
+    stats.execReservedMem.load(),
+    stats.downloads.load(),
+    stats.bytesDownloaded.load(),
+    stats.throttles.load()
+  );
+  sample.setInt(phase + "_total_files", package.getTotalFiles());
+
+  sample.setInt(phase + "_micros", micros);
+  if (auto const t = package.parsingInputsTime()) {
+    sample.setInt(
+      phase + "_input_micros",
+      std::chrono::duration_cast<std::chrono::microseconds>(*t).count()
+    );
+  }
+  if (auto const t = package.parsingOndemandTime()) {
+    sample.setInt(
+      phase + "_ondemand_micros",
+      std::chrono::duration_cast<std::chrono::microseconds>(*t).count()
+    );
+  }
+
+  sample.setInt(phase + "_total_execs", stats.execs.load());
+  sample.setInt(phase + "_cache_hits", stats.execCacheHits.load());
+  sample.setInt(phase + "_optimistically", stats.optimisticExecs.load());
+  sample.setInt(phase + "_fallbacks", stats.execFallbacks.load());
+
+  sample.setInt(phase + "_total_files", stats.files.load());
+  sample.setInt(phase + "_file_reads", stats.filesRead.load());
+  sample.setInt(phase + "_file_queries", stats.filesQueried.load());
+  sample.setInt(phase + "_file_stores", stats.filesUploaded.load());
+  sample.setInt(phase + "_file_stores_bytes", stats.fileBytesUploaded.load());
+  sample.setInt(phase + "_file_fallbacks", stats.fileFallbacks.load());
+
+  sample.setInt(phase + "_total_blobs", stats.blobs.load());
+  sample.setInt(phase + "_blob_queries", stats.blobsQueried.load());
+  sample.setInt(phase + "_blob_stores", stats.blobsUploaded.load());
+  sample.setInt(phase + "_blob_stores_bytes", stats.blobBytesUploaded.load());
+  sample.setInt(phase + "_blob_fallbacks", stats.blobFallbacks.load());
+
+  sample.setInt(phase + "_total_loads", stats.downloads.load());
+  sample.setInt(phase + "_total_loads_bytes", stats.bytesDownloaded.load());
+  sample.setInt(phase + "_throttles", stats.throttles.load());
+
+  sample.setInt(phase + "_exec_cpu_usec", stats.execCpuUsec.load());
+  sample.setInt(phase + "_exec_allocated_cores", stats.execAllocatedCores.load());
+  sample.setInt(phase + "_exec_max_used_mem", stats.execMaxUsedMem.load());
+  sample.setInt(phase + "_exec_reserved_mem", stats.execReservedMem.load());
+
+  sample.setStr(phase + "_fellback",
+    client.fellback() ? "true" : "false"
+  );
+}
+
+// Compute a UnitIndex by parsing decls for all autoload-eligible files.
+// If no Autoload.Query is specified by RepoOptions, this just indexes
+// the input files.
+bool compute_index(
+    const CompilerOptions& po,
+    StructuredLogEntry& sample,
+    coro::TicketExecutor& executor,
+    extern_worker::Client& client,
+    UnitIndex& index
+) {
+  auto const onIndex = [&] (std::string&& rpath, Package::IndexMeta&& meta) {
+    auto const interned_rpath = makeStaticString(rpath);
+    for (auto& name : meta.types) {
+      auto const interned_name = makeStaticString(name);
+      auto const ret = index.types.emplace(interned_name, interned_rpath);
+      if (!ret.second) {
+        Logger::FWarning("Duplicate type {} in {} and {}",
+            interned_name, ret.first->first, interned_rpath
+        );
+      }
+    }
+    for (auto& name : meta.funcs) {
+      auto const interned_name = makeStaticString(name);
+      auto const ret = index.funcs.emplace(interned_name, interned_rpath);
+      if (!ret.second) {
+        Logger::FWarning("Duplicate func {} in {} and {}",
+            interned_name, ret.first->first, interned_rpath
+        );
+      }
+    }
+    for (auto& name : meta.constants) {
+      auto const interned_name = makeStaticString(name);
+      auto const ret = index.constants.emplace(interned_name, interned_rpath);
+      if (!ret.second) {
+        Logger::FWarning("Duplicate constant {} in {} and {}",
+            interned_name, ret.first->first, interned_rpath
+        );
+      }
+    }
+  };
+
+  Package index_package{po.inputDir, false, executor, client};
+  Timer indexTimer(Timer::WallTime, "indexing");
+
+  auto const& repoFlags = RepoOptions::forFile(po.inputDir.c_str()).flags();
+  auto const queryStr = repoFlags.autoloadQuery();
+  if (!queryStr.empty() && po.parseOnDemand) {
+    // Index the files specified by Autoload.Query
+    if (!addAutoloadQueryToPackage(index_package, queryStr)) return false;
+  } else {
+    // index just the input files
+    addInputsToPackage(index_package, po);
+  }
+
+  if (!coro::wait(index_package.index(onIndex))) return false;
+
+  logPhaseStats("index", index_package, client, sample,
+                indexTimer.getMicroSeconds());
+  Logger::FInfo("index size: types={:,} funcs={:,} constants={:,}",
+      index.types.size(),
+      index.funcs.size(),
+      index.constants.size()
+  );
+  client.resetStats();
+
+  return true;
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+// Parses a file and produces an UnitEmitter. Used when we're not
+// going to run HHBBC.
+struct ParseJob {
+  static std::string name() { return "hphpc-parse"; }
+
+  static void init(const Package::Config& config,
+                   Package::FileMetaVec meta) {
+    Package::parseInit(config, std::move(meta));
+  }
+  static Package::ParseMetaVec fini() {
+    return Package::parseFini();
+  }
+
+  static UnitEmitterSerdeWrapper run(const std::string& contents,
+                                     const RepoOptionsFlags& flags) {
+    return Package::parseRun(contents, flags);
+  }
+};
+
+using WPI = HHBBC::WholeProgramInput;
+
+// Parses a file (as ParseJob does), but then hands the UnitEmitter
+// off to HHBBC to produce a WholeProgramInput key and value. This is
+// for when we are going to run HHBBC.
+struct ParseForHHBBCJob {
+  static std::string name() { return "hphpc-parse-for-hhbbc"; }
+
+  static void init(const Package::Config& config,
+                   const HHBBC::Config& hhbbcConfig,
+                   Package::FileMetaVec meta) {
+    Package::parseInit(config, std::move(meta));
+    HHBBC::options = hhbbcConfig.o;
+    hhbbcConfig.gd.load(true);
+  }
+  static std::tuple<Package::ParseMetaVec, std::vector<WPI::Key>> fini() {
+    return std::make_tuple(Package::parseFini(), std::move(s_inputKeys));
+  }
+
+  static Variadic<WPI::Value> run(const std::string& contents,
+                                  const RepoOptionsFlags& flags) {
+    auto wrapper = Package::parseRun(contents, flags);
+    if (!wrapper.m_ue) return {};
+
+    std::vector<WPI::Value> values;
+    for (auto& [key, value] : WPI::make(std::move(wrapper.m_ue))) {
+      s_inputKeys.emplace_back(std::move(key));
+      values.emplace_back(std::move(value));
+    }
+    return Variadic<WPI::Value>{std::move(values)};
+  }
+
+  static std::vector<WPI::Key> s_inputKeys;
+};
+
+std::vector<WPI::Key> ParseForHHBBCJob::s_inputKeys;
+
+Job<ParseJob> s_parseJob;
+Job<ParseForHHBBCJob> s_parseForHHBBCJob;
+
+///////////////////////////////////////////////////////////////////////////////
+
 bool process(const CompilerOptions &po) {
 #ifndef _MSC_VER
   LightProcess::Initialize(RuntimeOption::LightProcessFilePrefix,
@@ -743,7 +1054,8 @@ bool process(const CompilerOptions &po) {
   sample.setInt("timeout_secs", Option::ExternWorkerTimeoutSecs);
   sample.setInt("cleanup", Option::ExternWorkerCleanup);
   sample.setInt("throttle_retries", Option::ExternWorkerThrottleRetries);
-  sample.setInt("throttle_base_wait_ms", Option::ExternWorkerThrottleBaseWaitMSecs);
+  sample.setInt("throttle_base_wait_ms",
+                Option::ExternWorkerThrottleBaseWaitMSecs);
   sample.setStr("working_dir", Option::ExternWorkerWorkingDir);
   sample.setInt("parser_group_size", Option::ParserGroupSize);
   sample.setInt("parser_dir_group_size_limit", Option::ParserDirGroupSizeLimit);
@@ -752,6 +1064,7 @@ bool process(const CompilerOptions &po) {
   sample.setInt("parser_async_cleanup", Option::ParserAsyncCleanup);
   sample.setStr("push_phases", po.push_phases);
   sample.setStr("matched_overrides", po.matched_overrides);
+  sample.setStr("use_hhbbc", RO::EvalUseHHBBC ? "true" : "false");
 
   // Track the unit-emitters created for system during
   // hphp_process_init().
@@ -763,31 +1076,65 @@ bool process(const CompilerOptions &po) {
   auto const outputFile = po.outputDir + "/hhvm.hhbc";
   unlink(outputFile.c_str());
 
-  Package package{po.inputDir, po.parseOnDemand};
-  sample.setStr("extern_worker_impl", package.externWorkerImpl());
+  auto executor = std::make_unique<coro::TicketExecutor>(
+    "HPHPcWorker",
+    0,
+    size_t(Option::ParserThreadCount <= 0 ? 1 : Option::ParserThreadCount),
+    [] {
+      hphp_thread_init();
+      hphp_session_init(Treadmill::SessionKind::CompilerEmit);
+    },
+    [] {
+      hphp_context_exit();
+      hphp_session_exit();
+      hphp_thread_exit();
+    },
+    std::chrono::minutes{15}
+  );
+  auto client =
+    std::make_unique<Client>(executor->sticky(), makeExternWorkerOptions());
 
-  HHBBC::php::ProgramPtr program;
-  if (RO::EvalUseHHBBC) program = HHBBC::make_program();
+  sample.setStr("extern_worker_impl", client->implName());
+
+  UnitIndex index;
+  if (!compute_index(po, sample, *executor, *client, index)) return false;
+
+  auto package = std::make_unique<Package>(
+    po.inputDir,
+    po.parseOnDemand,
+    *executor,
+    *client
+  );
+
+  // Always used, but we can clear it early to save memory.
+  Optional<SymbolSets> unique;
+  unique.emplace();
 
   Optional<RepoAutoloadMapBuilder> autoload;
   Optional<RepoFileBuilder> repo;
-  std::mutex repoLock;
   std::atomic<uint32_t> nextSn{0};
+  std::mutex repoLock;
 
-  SymbolSets unique;
+  // HHBBC specific state (if we're going to run it).
+  Optional<WPI> hhbbcInputs;
+  Optional<coro::AsyncValue<Ref<HHBBC::Config>>> hhbbcConfig;
+  if (RO::EvalUseHHBBC) {
+    hhbbcInputs.emplace();
+    // We want to do this as early as possible
+    hhbbcConfig.emplace(
+      [&client] () {
+        return client->store(HHBBC::Config::get(getGlobalData()));
+      },
+      executor->sticky()
+    );
+  }
 
-  auto const onUE = [&] (std::unique_ptr<UnitEmitter> ue) {
+  // Emit a fully processed unit (either processed by HHBBC or not).
+  auto const emit = [&] (std::unique_ptr<UnitEmitter> ue) {
     assertx(ue);
     assertx(Option::GenerateBinaryHHBC ||
             Option::GenerateTextHHBC ||
             Option::GenerateHhasHHBC);
-
-    if (program.get()) {
-      assertx(RO::EvalUseHHBBC);
-      unique.add(*ue);
-      HHBBC::add_unit_to_program(ue.get(), *program);
-      return;
-    }
 
     if (Option::GenerateTextHHBC || Option::GenerateHhasHHBC) {
       genText(*ue, po.outputDir);
@@ -796,119 +1143,154 @@ bool process(const CompilerOptions &po) {
     if (!Option::GenerateBinaryHHBC) return;
 
     if (!RO::EvalUseHHBBC) {
+      // HHBBC assigns m_sn and the SHA1, but we have to do it ourself
+      // if we're not running it.
       auto const sn = nextSn++;
       ue->m_symbol_refs.clear();
       ue->m_sn = sn;
       ue->setSha1(SHA1 { sn });
-      unique.add(*ue);
+      unique->add(*ue);
     }
 
     autoload->addUnit(*ue);
     RepoFileBuilder::EncodedUE encoded{*ue};
-    {
-      std::scoped_lock<std::mutex> _{repoLock};
-      repo->add(encoded);
+    std::scoped_lock<std::mutex> _{repoLock};
+    repo->add(encoded);
+  };
+
+  // Process unit-emitters produced locally (usually systemlib stuff).
+  auto const local = [&] (Package::UEVec ues) -> coro::Task<void> {
+    if (RO::EvalUseHHBBC) {
+      // If we're using HHBBC, turn them into WholeProgramInput
+      // key/values (after checking uniqueness), upload the values,
+      // and store them in the WholeProgramInput.
+      std::vector<WPI::Key> keys;
+      std::vector<WPI::Value> values;
+
+      for (auto& ue : ues) {
+        unique->add(*ue);
+        for (auto& [key, value] : WPI::make(std::move(ue))) {
+          keys.emplace_back(std::move(key));
+          values.emplace_back(std::move(value));
+        }
+      }
+
+      if (keys.empty()) HPHP_CORO_RETURN_VOID;
+      auto valueRefs = HPHP_CORO_AWAIT(client->storeMulti(std::move(values)));
+
+      auto const numKeys = keys.size();
+      assertx(valueRefs.size() == numKeys);
+
+      for (size_t i = 0; i < numKeys; ++i) {
+        hhbbcInputs->add(std::move(keys[i]), std::move(valueRefs[i]));
+      }
+      HPHP_CORO_RETURN_VOID;
     }
+
+    // Otherwise just emit it
+    for (auto& ue : ues) emit(std::move(ue));
+    HPHP_CORO_RETURN_VOID;
+  };
+
+  // Parse a group of files remotely
+  auto const remote = [&] (const Ref<Package::Config>& config,
+                           Ref<Package::FileMetaVec> fileMetas,
+                           std::vector<Package::FileData> files,
+                           bool opportunistic)
+    -> coro::Task<Package::ParseMetaVec> {
+    if (RO::EvalUseHHBBC) {
+      // Run the HHBBC parse job, which produces WholeProgramInput
+      // key/values.
+      auto hhbbcConfigRef = HPHP_CORO_AWAIT(hhbbcConfig->getCopy());
+      auto [inputValueRefs, metaRefs] = HPHP_CORO_AWAIT(
+        client->exec(
+          s_parseForHHBBCJob,
+          std::make_tuple(
+            config,
+            std::move(hhbbcConfigRef),
+            std::move(fileMetas)
+          ),
+          std::move(files),
+          opportunistic
+        )
+      );
+
+      // The parse metadata and the keys are loaded, but the values
+      // are kept as Refs.
+      auto [parseMetas, inputKeys] =
+        HPHP_CORO_AWAIT(client->load(std::move(metaRefs)));
+
+      // We don't have unit-emitters to do uniqueness checking, but
+      // the parse metadata has the definitions we can use instead.
+      for (auto const& p : parseMetas) {
+        if (!p.m_filepath) continue;
+        unique->add(p.m_definitions, p.m_filepath);
+      }
+
+      auto const numKeys = inputKeys.size();
+      size_t keyIdx = 0;
+      for (auto& v : inputValueRefs) {
+        for (auto& r : v) {
+          always_assert(keyIdx < numKeys);
+          hhbbcInputs->add(std::move(inputKeys[keyIdx]), std::move(r));
+          ++keyIdx;
+        }
+      }
+      always_assert(keyIdx == numKeys);
+
+      HPHP_CORO_MOVE_RETURN(parseMetas);
+    }
+
+    // Otherwise, do a "normal" (non-HHBBC parse job), load the
+    // unit-emitters and parse metadata, and emit the unit-emitters.
+    auto [wrapperRefs, metaRefs] = HPHP_CORO_AWAIT(
+      client->exec(
+        s_parseJob,
+        std::make_tuple(
+          config,
+          std::move(fileMetas)
+        ),
+        std::move(files),
+        opportunistic
+      )
+    );
+
+    auto [wrappers, parseMetas] = HPHP_CORO_AWAIT(coro::collect(
+      client->load(std::move(wrapperRefs)),
+      client->load(std::move(metaRefs))
+    ));
+
+    for (auto& wrapper : wrappers) {
+      if (!wrapper.m_ue) continue;
+      emit(std::move(wrapper.m_ue));
+    }
+    HPHP_CORO_MOVE_RETURN(parseMetas);
   };
 
   {
     Timer parseTimer(Timer::WallTime, "parsing");
-    addInputsToPackage(package, po);
+    addInputsToPackage(*package, po);
 
-    if (!program.get() && Option::GenerateBinaryHHBC) {
+    if (!RO::EvalUseHHBBC && Option::GenerateBinaryHHBC) {
       autoload.emplace();
       repo.emplace(outputFile);
     }
-    if (!package.parse(onUE)) return false;
+    if (!coro::wait(package->parse(index, remote, local))) return false;
 
-    auto const& stats = package.stats();
-    Logger::FInfo(
-      "{:,} files parsed\n"
-      "  Execs: {:,} total, {:,} cache-hits, {:,} optimistically, {:,} fallback\n"
-      "  Files: {:,} total, {:,} read, {:,} queried, {:,} uploaded, {:,} fallback\n"
-      "  Blobs: {:,} total, {:,} queried, {:,} uploaded, {:,} fallback\n"
-      "  {:,} downloads, {:,} throttles\n"
-      "  Cpu: {:,} usec usage, {:,} allocated cores\n"
-      "  Mem: {:,} max used, {:,} reserved",
-      package.getTotalFiles(),
-      stats.execs.load(),
-      stats.execCacheHits.load(),
-      stats.optimisticExecs.load(),
-      stats.execFallbacks.load(),
-      stats.files.load(),
-      stats.filesRead.load(),
-      stats.filesQueried.load(),
-      stats.filesUploaded.load(),
-      stats.fileFallbacks.load(),
-      stats.blobs.load(),
-      stats.blobsQueried.load(),
-      stats.blobsUploaded.load(),
-      stats.blobFallbacks.load(),
-      stats.downloads.load(),
-      stats.throttles.load(),
-      stats.execCpuUsec.load(),
-      stats.execAllocatedCores.load(),
-      stats.execMaxUsedMem.load(),
-      stats.execReservedMem.load()
-    );
-    sample.setInt("total_parses", package.getTotalFiles());
-
-    sample.setInt("parsing_micros", parseTimer.getMicroSeconds());
-    if (auto const t = package.parsingInputsTime()) {
-      sample.setInt(
-        "parsing_input_micros",
-        std::chrono::duration_cast<std::chrono::microseconds>(*t).count()
-      );
-    }
-    if (auto const t = package.parsingOndemandTime()) {
-      sample.setInt(
-        "parsing_ondemand_micros",
-        std::chrono::duration_cast<std::chrono::microseconds>(*t).count()
-      );
-    }
-
-    sample.setInt("parse_total_execs", stats.execs.load());
-    sample.setInt("parse_cache_hits", stats.execCacheHits.load());
-    sample.setInt("parse_optimistically", stats.optimisticExecs.load());
-    sample.setInt("parse_fallbacks", stats.execFallbacks.load());
-
-    sample.setInt("parse_total_files", stats.files.load());
-    sample.setInt("parse_file_reads", stats.filesRead.load());
-    sample.setInt("parse_file_queries", stats.filesQueried.load());
-    sample.setInt("parse_file_stores", stats.filesUploaded.load());
-    sample.setInt("parse_file_fallbacks", stats.fileFallbacks.load());
-
-    sample.setInt("parse_total_blobs", stats.blobs.load());
-    sample.setInt("parse_blob_queries", stats.blobsQueried.load());
-    sample.setInt("parse_blob_stores", stats.blobsUploaded.load());
-    sample.setInt("parse_blob_fallbacks", stats.blobFallbacks.load());
-
-    sample.setInt("parse_total_loads", stats.downloads.load());
-    sample.setInt("parse_throttles", stats.throttles.load());
-
-    sample.setInt("parse_exec_cpu_usec", stats.execCpuUsec.load());
-    sample.setInt("parse_exec_allocated_cores", stats.execAllocatedCores.load());
-    sample.setInt("parse_exec_max_used_mem", stats.execMaxUsedMem.load());
-    sample.setInt("parse_exec_reserved_mem", stats.execReservedMem.load());
-
-    sample.setStr(
-      "parse_fellback",
-      package.externWorkerFellback() ? "true" : "false"
-    );
+    logPhaseStats("parse", *package, *client, sample,
+                  parseTimer.getMicroSeconds());
   }
 
-  // Start asynchronously destroying the package state, since it may
-  // take a long time. We'll do it in the background while the rest of
-  // the compile pipeline runs.
-  auto clearer = package.asyncClear();
-  SCOPE_EXIT { if (clearer) clearer->join(); };
+  // We don't need the ondemand/autoload index after this point.
+  index.clear();
 
   std::thread fileCache{
-    [&] {
+    [&, package = std::move(package)] () mutable {
+      SCOPE_EXIT { package.reset(); };
       if (po.filecache.empty()) return;
-      HphpSessionAndThread session{Treadmill::SessionKind::CompilerEmit};
       Timer _{Timer::WallTime, "saving file cache..."};
-      package.getFileCache()->save(po.filecache.c_str());
+      HphpSessionAndThread session{Treadmill::SessionKind::CompilerEmit};
+      package->getFileCache()->save(po.filecache.c_str());
       struct stat sb;
       stat(po.filecache.c_str(), &sb);
       Logger::Info("%" PRId64" MB %s saved",
@@ -917,22 +1299,40 @@ bool process(const CompilerOptions &po) {
   };
   SCOPE_EXIT { fileCache.join(); };
 
+  std::thread asyncDispose;
+  SCOPE_EXIT { if (asyncDispose.joinable()) asyncDispose.join(); };
+  auto const dispose = [&] (std::unique_ptr<coro::TicketExecutor> e,
+                            std::unique_ptr<Client> c) {
+    if (!Option::ParserAsyncCleanup) {
+      // If we don't want to cleanup asynchronously, do so now.
+      c.reset();
+      e.reset();
+      return;
+    }
+    // All the thread does is reset the unique_ptr to run the dtor.
+    asyncDispose = std::thread{
+      [e = std::move(e), c = std::move(c)] () mutable {
+        c.reset();
+        e.reset();
+      }
+    };
+  };
+
   auto const finish = [&] {
     if (!Option::GenerateBinaryHHBC) return true;
     Timer _{Timer::WallTime, "finalizing repo"};
     repo->finish(getGlobalData(), *autoload);
     return true;
   };
-  if (!program.get()) return finish();
-  assertx(RO::EvalUseHHBBC);
+  if (!RO::EvalUseHHBBC) {
+    dispose(std::move(executor), std::move(client));
+    return finish();
+  }
 
   // We don't need these anymore, and since they can consume a lot of
   // memory, free them before doing anything else.
-  decltype(Option::AutoloadClassMap){}.swap(Option::AutoloadClassMap);
-  decltype(Option::AutoloadFuncMap){}.swap(Option::AutoloadFuncMap);
-  decltype(Option::AutoloadConstMap){}.swap(Option::AutoloadConstMap);
-
-  unique.clear();
+  unique.reset();
+  hhbbcConfig.reset();
 
   assertx(!autoload.has_value());
   assertx(!repo.has_value());
@@ -946,10 +1346,13 @@ bool process(const CompilerOptions &po) {
   }
 
   Timer timer{Timer::WallTime, "running HHBBC"};
-  HphpSession session{Treadmill::SessionKind::CompilerEmit};
+  HphpSession session{Treadmill::SessionKind::HHBBC};
   HHBBC::whole_program(
-    std::move(program),
-    onUE,
+    std::move(*hhbbcInputs),
+    std::move(executor),
+    std::move(client),
+    emit,
+    dispose,
     sample,
     Option::ParserThreadCount > 0 ? Option::ParserThreadCount : 0
   );

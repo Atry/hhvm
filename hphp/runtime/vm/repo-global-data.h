@@ -58,11 +58,6 @@ struct RepoGlobalData {
   bool HardGenericsUB = false;
 
   /*
-   * Indicates whether a repo was compiled with HardPrivatePropInference.
-   */
-  bool HardPrivatePropInference = false;
-
-  /*
    * Indicates whether hex strings (e.g. "0x20") can be used for numeric
    * operations, e.g. ("0x20" + 1)
    */
@@ -167,6 +162,9 @@ struct RepoGlobalData {
    */
   bool DiamondTraitMethods = false;
 
+  /* Whether bespoke type structures should be used */
+  bool EmitBespokeTypeStructures = false;
+
   /*
    * If set, const fold the File and Dir bytecodes, using this as the
    * SourceRoot.
@@ -187,7 +185,6 @@ struct RepoGlobalData {
       (InitialStaticStringTableSize)
       (HardGenericsUB)
       (CheckPropTypeHints)
-      (HardPrivatePropInference)
       (PHP7_NoHexNumerics)
       (PHP7_Substr)
       (PHP7_Builtins)
@@ -218,6 +215,7 @@ struct RepoGlobalData {
       (DiamondTraitMethods)
       (EvalCoeffectEnforcementLevels)
       (SourceRootForFileBC)
+      (EmitBespokeTypeStructures)
       ;
   }
 };

@@ -6,11 +6,13 @@
 // LICENSE file in the "hack" directory of this source tree.
 //
 
-use crate::token_kind::TokenKind;
-use ocamlrep_derive::FromOcamlRep;
-use ocamlrep_derive::ToOcamlRep;
 use std::borrow::Cow;
 use std::cmp::Ordering;
+
+use ocamlrep_derive::FromOcamlRep;
+use ocamlrep_derive::ToOcamlRep;
+
+use crate::token_kind::TokenKind;
 
 // many errors are static strings, but not all of them
 pub type Error = Cow<'static, str>;
@@ -174,9 +176,12 @@ pub const error1055: Error = Cow::Borrowed(concat!(
     "A fallthrough directive can only appear at the end of",
     " a `switch` section."
 ));
-// TODO(20052790): use the specific token's text in the message body.
-pub const error1056: Error =
-    Cow::Borrowed("This token is not valid as part of a function declaration.");
+pub fn error1056(text: &str) -> Error {
+    Cow::Owned(format!(
+        "This token `{}` is not valid as part of a function declaration.",
+        text
+    ))
+}
 pub fn error1057(text: &str) -> Error {
     // TODO (kasper): T52404885: why does removing to_string() here segfaults
     Cow::Owned(format!("Encountered unexpected token `{}`.", text))
@@ -1009,6 +1014,17 @@ pub fn policy_sharded_memoized_without_policied(kind: &str) -> Error {
     ))
 }
 
+pub fn memoize_make_ic_inaccessible_without_defaults(kind: &str) -> Error {
+    Cow::Owned(format!(
+        "This {} requires the defaults context to be memoized using #MakeICInaccessible or #SoftMakeICInaccessible",
+        kind
+    ))
+}
+
+pub fn memoize_too_many_arguments(attr: &String) -> Error {
+    Cow::Owned(format!("The attribute {} takes at most one argument", attr))
+}
+
 pub fn lambda_effect_polymorphic(kind: &str) -> Error {
     Cow::Owned(format!("{} cannot have a polymorphic context", kind))
 }
@@ -1069,6 +1085,10 @@ pub const inout_readonly_parameter: Error =
 
 pub const inout_readonly_argument: Error = Cow::Borrowed(
     "This expression is readonly. We currently do not support passing readonly values to an inout parameter.",
+);
+
+pub const yield_readonly: Error = Cow::Borrowed(
+    "This expression is readonly. We currently do not support yielding readonly values.",
 );
 
 pub const enum_class_constant_missing_initializer: Error =

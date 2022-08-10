@@ -12,37 +12,39 @@
 //! `print_thing(thing: &Thing)`.
 //!
 
-use crate::formatters::*;
-use crate::util::FmtSep;
-use core::class::Property;
-use core::class::TraitReqKind;
-use core::instr::BaseOp;
-use core::instr::ContCheckOp;
-use core::instr::FCallArgsFlags;
-use core::instr::FinalOp;
-use core::instr::HasLoc;
-use core::instr::Hhbc;
-use core::instr::IncDecOp;
-use core::instr::IncludeKind;
-use core::instr::IrToBc;
-use core::instr::IsLogAsDynamicCallOp;
-use core::instr::MOpMode;
-use core::instr::MemberKey;
-use core::instr::OODeclExistsOp;
-use core::instr::QueryMOp;
-use core::instr::ReadonlyOp;
-use core::instr::SetRangeOp;
-use core::instr::Special;
-use core::instr::SwitchKind;
-use core::instr::Terminator;
-use core::instr::Tmp;
-use core::string_intern::StringInterner;
-use core::*;
-use itertools::Itertools;
 use std::fmt::Display;
 use std::fmt::Error;
 use std::fmt::Result;
 use std::fmt::Write;
+
+use ir_core::class::Property;
+use ir_core::class::TraitReqKind;
+use ir_core::instr::BaseOp;
+use ir_core::instr::ContCheckOp;
+use ir_core::instr::FCallArgsFlags;
+use ir_core::instr::FinalOp;
+use ir_core::instr::HasLoc;
+use ir_core::instr::Hhbc;
+use ir_core::instr::IncDecOp;
+use ir_core::instr::IncludeKind;
+use ir_core::instr::IrToBc;
+use ir_core::instr::IsLogAsDynamicCallOp;
+use ir_core::instr::MOpMode;
+use ir_core::instr::MemberKey;
+use ir_core::instr::OODeclExistsOp;
+use ir_core::instr::QueryMOp;
+use ir_core::instr::ReadonlyOp;
+use ir_core::instr::SetRangeOp;
+use ir_core::instr::Special;
+use ir_core::instr::SwitchKind;
+use ir_core::instr::Terminator;
+use ir_core::instr::Tmp;
+use ir_core::string_intern::StringInterner;
+use ir_core::*;
+use itertools::Itertools;
+
+use crate::formatters::*;
+use crate::util::FmtSep;
 
 pub(crate) struct FuncContext<'a, 'b> {
     pub(crate) cur_loc_id: LocId,
@@ -663,6 +665,9 @@ fn print_hhbc(
                 FmtVid(func, vid, verbose)
             )?;
         }
+        Hhbc::CheckClsRGSoft(vid, _) => {
+            write!(w, "check_cls_rg_soft {}", FmtVid(func, vid, verbose))?;
+        }
         Hhbc::CheckProp(prop, _) => {
             write!(w, "check_prop {}", FmtIdentifierId(prop.id, ctx.strings))?
         }
@@ -772,6 +777,9 @@ fn print_hhbc(
             )?;
         }
         Hhbc::CreateCont(_) => write!(w, "create_cont")?,
+        Hhbc::GetClsRGProp(vid, _) => {
+            write!(w, "get_class_rg_prop {}", FmtVid(func, vid, verbose))?
+        }
         Hhbc::GetMemoKeyL(lid, _) => {
             write!(w, "get_memo_key {}", FmtLid(lid, ctx.strings))?;
         }
@@ -973,6 +981,11 @@ fn print_hhbc(
             w,
             "record_reified_generic {}",
             FmtVid(func, vid, ctx.verbose)
+        )?,
+        Hhbc::ResolveClass(clsid, _) => write!(
+            w,
+            "resolve_class {}",
+            FmtIdentifierId(clsid.id, ctx.strings)
         )?,
         Hhbc::ResolveClsMethod(vid, method, _) => {
             write!(

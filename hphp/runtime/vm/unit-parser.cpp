@@ -174,7 +174,8 @@ CompilerResult hackc_compile(
     isSystemLib,                    // is_systemlib
     false,                          // is_evaled
     forDebuggerEval,                // for_debugger_eval
-    false                           // disable_toplevel_elaboration
+    false,                          // disable_toplevel_elaboration
+    false                           // enable_ir
   );
 
   NativeEnv const native_env{
@@ -216,6 +217,7 @@ CompilerResult hackc_compile(
     rust::Box<HackCUnitWrapper> unit_wrapped =
       hackc_compile_unit_from_text_cpp_ffi(native_env, code);
 
+    auto const bcSha1 = SHA1(hash_unit(*unit_wrapped));
     auto const assemblerOut = [&]() -> std::string {
       if (auto ue = boost::get<std::unique_ptr<UnitEmitter>>(&res)) {
         (*ue)->finish();
@@ -228,8 +230,8 @@ CompilerResult hackc_compile(
       auto const ue = unitEmitterFromHackCUnit(*unit,
                                                filename,
                                                sha1,
-                                               nativeFuncs,
-                                               hhas);
+                                               bcSha1,
+                                               nativeFuncs);
       auto const hackCTranslatorOut = disassemble(ue->create().get(), true);
 
       if (hackCTranslatorOut.length() != assemblerOut.length()) {

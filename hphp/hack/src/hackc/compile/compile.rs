@@ -5,6 +5,8 @@
 
 pub mod dump_expr_tree;
 
+use std::fmt;
+
 use aast_parser::rust_aast_parser_types::Env as AastEnv;
 use aast_parser::rust_aast_parser_types::ParserResult;
 use aast_parser::AastParser;
@@ -40,6 +42,8 @@ use parser_core_types::indexed_source_text::IndexedSourceText;
 use parser_core_types::source_text::SourceText;
 use parser_core_types::syntax_error::ErrorType;
 use thiserror::Error;
+use types::readonly_check;
+use types::type_check;
 
 /// Common input needed for compilation.
 #[derive(Debug)]
@@ -76,6 +80,9 @@ bitflags! {
         const FOR_DEBUGGER_EVAL = 1 << 2;
         const UNUSED_PLACEHOLDER = 1 << 3;
         const DISABLE_TOPLEVEL_ELABORATION = 1 << 4;
+        const DUMP_IR = 1 << 5;
+        const ENABLE_IR = 1 << 6;
+        const TYPES_IN_COMPILATION = 1 << 7;
     }
 }
 
@@ -429,17 +436,14 @@ pub fn from_text<'decl>(
     profile: &mut Profile,
 ) -> Result<()> {
     let mut emitter = create_emitter(native_env.flags, native_env, decl_provider, alloc);
-    let unit = emit_unit_from_text(&mut emitter, native_env.flags, source_text, profile)?;
-    let opts = emitter.into_options();
-    let (print_result, printing_t) = time(|| {
-        bytecode_printer::print_unit(
-            &Context::new(&opts, Some(&native_env.filepath), opts.array_provenance()),
-            writer,
-            &unit,
-        )
-    });
-    print_result?;
-    profile.printing_t = printing_t;
+    let mut unit = emit_unit_from_text(&mut emitter, native_env.flags, source_text, profile)?;
+
+    if native_env.flags.contains(EnvFlags::ENABLE_IR) {
+        let ir = bc_to_ir::bc_to_ir(&unit);
+        unit = ir_to_bc::ir_to_bc(alloc, ir);
+    }
+
+    unit_to_string(native_env, writer, &unit, profile)?;
     profile.codegen_bytes = alloc.allocated_bytes() as i64;
     Ok(())
 }
@@ -482,20 +486,39 @@ pub fn unit_from_text<'arena, 'decl>(
     emit_unit_from_text(&mut emitter, native_env.flags, source_text, profile)
 }
 
-pub fn unit_to_string<W: std::io::Write>(
+pub fn unit_to_string(
     native_env: &NativeEnv<'_>,
-    writer: &mut W,
+    writer: &mut dyn std::io::Write,
     program: &HackCUnit<'_>,
+    profile: &mut Profile,
 ) -> Result<()> {
-    let opts = NativeEnv::to_options(native_env);
-    let (print_result, _) = time(|| {
-        bytecode_printer::print_unit(
-            &Context::new(&opts, Some(&native_env.filepath), opts.array_provenance()),
-            writer,
-            program,
-        )
-    });
-    print_result.map_err(|e| anyhow!("{}", e))
+    if native_env.flags.contains(EnvFlags::DUMP_IR) {
+        let ir = bc_to_ir::bc_to_ir(program);
+        struct FmtFromIo<'a>(&'a mut dyn std::io::Write);
+        impl fmt::Write for FmtFromIo<'_> {
+            fn write_str(&mut self, s: &str) -> fmt::Result {
+                self.0.write_all(s.as_bytes()).map_err(|_| fmt::Error)
+            }
+        }
+        let print_result;
+        (print_result, profile.printing_t) = time(|| {
+            let verbose = false;
+            ir::print_unit(&mut FmtFromIo(writer), &ir, verbose)
+        });
+        print_result?;
+    } else {
+        let print_result;
+        (print_result, profile.printing_t) = time(|| {
+            let opts = NativeEnv::to_options(native_env);
+            bytecode_printer::print_unit(
+                &Context::new(&opts, Some(&native_env.filepath), opts.array_provenance()),
+                writer,
+                program,
+            )
+        });
+        print_result?;
+    }
+    Ok(())
 }
 
 fn emit_unit_from_ast<'arena, 'decl>(
@@ -504,6 +527,25 @@ fn emit_unit_from_ast<'arena, 'decl>(
     ast: &mut ast::Program,
 ) -> Result<HackCUnit<'arena>, Error> {
     emit_unit(emitter, namespace, ast)
+}
+
+fn check_readonly_and_emit<'arena, 'decl>(
+    emitter: &mut Emitter<'arena, 'decl>,
+    flags: EnvFlags,
+    namespace_env: RcOc<NamespaceEnv>,
+    ast: &mut ast::Program,
+    profile: &mut Profile,
+) -> Result<HackCUnit<'arena>, Error> {
+    if flags.contains(EnvFlags::TYPES_IN_COMPILATION) {
+        let mut new_ast = type_check::type_program(ast);
+        let res = readonly_check::check_program(&mut new_ast, false);
+        // Ignores all errors after the first...
+        if let Some(readonly_check::ReadOnlyError(pos, msg)) = res.into_iter().next() {
+            return emit_fatal(emitter.alloc, FatalOp::Parse, pos, msg);
+        }
+        let _old_ast = std::mem::replace(ast, new_ast);
+    };
+    rewrite_and_emit(emitter, namespace_env, ast, profile)
 }
 
 fn emit_unit_from_text<'arena, 'decl>(
@@ -532,6 +574,7 @@ fn emit_unit_from_text<'arena, 'decl>(
             !flags.contains(EnvFlags::DISABLE_TOPLEVEL_ELABORATION),
             RcOc::clone(&namespace_env),
             flags.contains(EnvFlags::IS_SYSTEMLIB),
+            flags.contains(EnvFlags::TYPES_IN_COMPILATION),
             profile,
         )
     });
@@ -541,8 +584,10 @@ fn emit_unit_from_text<'arena, 'decl>(
         Ok(mut ast) => {
             elaborate_namespaces_visitor::elaborate_program(RcOc::clone(&namespace_env), &mut ast);
             time(move || {
-                let u = rewrite_and_emit(emitter, namespace_env, &mut ast, profile);
-                (u, profile)
+                (
+                    check_readonly_and_emit(emitter, flags, namespace_env, &mut ast, profile),
+                    profile,
+                )
             })
         }
         Err(ParseError(pos, msg, fatal_op)) => {
@@ -580,7 +625,7 @@ fn create_emitter<'arena, 'decl>(
     )
 }
 
-fn create_parser_options(opts: &Options) -> ParserOptions {
+fn create_parser_options(opts: &Options, types_in_compilation: bool) -> ParserOptions {
     let hack_lang_flags = |flag| opts.hhvm.hack_lang.flags.contains(flag);
     ParserOptions {
         po_auto_namespace_map: opts.hhvm.aliased_namespaces_cloned().collect(),
@@ -610,6 +655,7 @@ fn create_parser_options(opts: &Options) -> ParserOptions {
             LangFlags::DISALLOW_FUN_AND_CLS_METH_PSEUDO_FUNCS,
         ),
         po_disallow_inst_meth: hack_lang_flags(LangFlags::DISALLOW_INST_METH),
+        tco_no_parser_readonly_check: types_in_compilation,
         ..Default::default()
     }
 }
@@ -624,6 +670,7 @@ fn parse_file(
     elaborate_namespaces: bool,
     namespace_env: RcOc<NamespaceEnv>,
     is_systemlib: bool,
+    types_in_compilation: bool,
     profile: &mut Profile,
 ) -> Result<ast::Program, ParseError> {
     let aast_env = AastEnv {
@@ -633,7 +680,7 @@ fn parse_file(
         keep_errors: false,
         is_systemlib,
         elaborate_namespaces,
-        parser_options: create_parser_options(opts),
+        parser_options: create_parser_options(opts, types_in_compilation),
         ..AastEnv::default()
     };
 

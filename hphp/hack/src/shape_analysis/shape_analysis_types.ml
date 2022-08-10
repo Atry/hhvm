@@ -6,6 +6,7 @@
  *
  *)
 
+module A = Ast_defs
 module T = Typing_defs
 module LMap = Local_id.Map
 module KMap = Typing_continuations.Map
@@ -42,7 +43,7 @@ type marker_kind =
   | Allocation
   | Parameter
   | Return
-  | Argument
+  | Debug
 [@@deriving show { with_path = false }]
 
 module Codemod = struct
@@ -55,6 +56,7 @@ end
 type constraint_ =
   | Marks of marker_kind * Pos.t
   | Has_static_key of entity_ * T.TShapeMap.key * T.locl_ty
+  | Has_optional_key of entity_ * T.TShapeMap.key
   | Has_dynamic_key of entity_
   | Subsets of entity_ * entity_
   | Joins of {
@@ -63,20 +65,26 @@ type constraint_ =
       join: entity_;
     }
 
+type inter_constraint_ = Arg of A.id_ * int * entity_
+
 type shape_result =
   | Shape_like_dict of Pos.t * marker_kind * shape_keys
   | Dynamically_accessed_dict of entity_
 
 type lenv = entity LMap.t KMap.t
 
-type decorated_constraint = {
+type 'constraint_ decorated = {
   hack_pos: Pos.t;
   origin: int;
-  constraint_: constraint_;
+  constraint_: 'constraint_;
 }
 
+type decorated_constraints =
+  constraint_ decorated list * inter_constraint_ decorated list
+
 type env = {
-  constraints: decorated_constraint list;
+  constraints: constraint_ decorated list;
+  inter_constraints: inter_constraint_ decorated list;
   lenv: lenv;
   return: entity;
   tast_env: Tast_env.t;

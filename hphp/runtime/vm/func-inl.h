@@ -558,8 +558,25 @@ inline bool Func::isMemoizeWrapperLSB() const {
   return shared()->m_allFlags.m_isMemoizeWrapperLSB;
 }
 
+inline Func::MemoizeICType Func::memoizeICType() const {
+  assertx(isMemoizeWrapper());
+  return shared()->m_allFlags.m_memoizeICType;
+}
+
+inline bool Func::isNoICMemoize() const {
+  return memoizeICType() == MemoizeICType::NoIC;
+}
+
 inline bool Func::isKeyedByImplicitContextMemoize() const {
-  return shared()->m_allFlags.m_isKeyedByImplicitContextMemoize;
+  return memoizeICType() == MemoizeICType::KeyedByIC;
+}
+
+inline bool Func::isMakeICInaccessibleMemoize() const {
+  return memoizeICType() == MemoizeICType::MakeICInaccessible;
+}
+
+inline bool Func::isSoftMakeICInaccessibleMemoize() const {
+  return memoizeICType() == MemoizeICType::SoftMakeICInaccessible;
 }
 
 inline bool Func::isMemoizeImpl() const {

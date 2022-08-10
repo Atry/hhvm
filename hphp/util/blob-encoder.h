@@ -21,6 +21,8 @@
 
 #include <folly/sorted_vector_types.h>
 #include <folly/Varint.h>
+#include <folly/container/F14Map.h>
+#include <folly/container/F14Set.h>
 
 #include <filesystem>
 #include <set>
@@ -132,8 +134,6 @@ struct BlobEncoder {
    * Currently the most basic encoder/decode only works for integral
    * types.  (We don't want this to accidentally get used for things
    * like pointers or aggregates.)
-   *
-   * Floating point support could be added later if we need it ...
    */
    template<class T>
    typename std::enable_if<
@@ -186,6 +186,10 @@ struct BlobEncoder {
     encode(b ? 1 : 0);
   }
 
+  void encode(double d) {
+    writeRaw(reinterpret_cast<const char*>(&d), sizeof(double));
+  }
+
   void encode(const std::string& s) {
     uint32_t sz = s.size();
     encode(sz);
@@ -223,33 +227,39 @@ struct BlobEncoder {
     encode(kv.second);
   }
 
-  template<class T, typename FDeltaEncode>
-  void encode(const std::vector<T>& cont, FDeltaEncode deltaEncode) {
-    if (cont.size() >= 0xffffffffu) {
-      throw std::runtime_error("maximum vector size exceeded in BlobEncoder");
-    }
-
-    auto prev = T{};
-    encode(uint32_t(cont.size()));
-    for (auto it = cont.begin(); it != cont.end(); ++it) {
-      encode(deltaEncode(prev, *it));
-      prev = *it;
-    }
+  template<typename T, typename A, typename... Extra>
+  void encode(const std::vector<T, A>& vec, Extra... extra) {
+    encodeOrderedContainer(vec, extra...);
   }
 
-  template<typename T, typename A>
-  void encode(const std::vector<T, A>& vec) {
-    encodeOrderedContainer(vec);
-  }
-
-  template<typename T, typename A>
-  void encode(const CompactVector<T, A>& vec) {
-    encodeOrderedContainer(vec);
+  template<typename T, typename A, typename... Extra>
+  void encode(const CompactVector<T, A>& vec, Extra... extra) {
+    encodeOrderedContainer(vec, extra...);
   }
 
   template<typename K, typename C, typename A>
   void encode(const std::set<K, C, A>& set) {
     encodeOrderedContainer(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void encode(const folly::F14NodeSet<T, H, E, A>& set) {
+    encodeUnorderedSet(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void encode(const folly::F14VectorSet<T, H, E, A>& set) {
+    encodeUnorderedSet(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void encode(const folly::F14ValueSet<T, H, E, A>& set) {
+    encodeUnorderedSet(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void encode(const folly::F14FastSet<T, H, E, A>& set) {
+    encodeUnorderedSet(set);
   }
 
   template<typename K, typename V,
@@ -266,12 +276,61 @@ struct BlobEncoder {
 
   template<typename K, typename V, typename H, typename E, typename A>
   void encode(const std::unordered_map<K, V, H, E, A>& map) {
-    encodeUnorderedContainer(map);
+    encodeUnorderedMap(map);
+  }
+
+  template<typename K, typename V, typename H, typename E, typename A>
+  void encode(const folly::F14NodeMap<K, V, H, E, A>& map) {
+    encodeUnorderedMap(map);
+  }
+
+  template<typename K, typename V, typename H, typename E, typename A>
+  void encode(const folly::F14VectorMap<K, V, H, E, A>& map) {
+    encodeUnorderedMap(map);
+  }
+
+  template<typename K, typename V, typename H, typename E, typename A>
+  void encode(const folly::F14ValueMap<K, V, H, E, A>& map) {
+    encodeUnorderedMap(map);
+  }
+
+  template<typename K, typename V, typename H, typename E, typename A>
+  void encode(const folly::F14FastMap<K, V, H, E, A>& map) {
+    encodeUnorderedMap(map);
   }
 
   template<class T, class... F>
   BlobEncoder& operator()(const T& t, F... lambdas) {
     encode(t, lambdas...);
+    return *this;
+  }
+
+  template<typename T, typename FDeltaEncode>
+  BlobEncoder& delta(const std::vector<T>& cont, FDeltaEncode deltaEncode) {
+    if (cont.size() >= 0xffffffffu) {
+      throw std::runtime_error("maximum vector size exceeded in BlobEncoder");
+    }
+
+    auto prev = T{};
+    encode(uint32_t(cont.size()));
+    for (auto it = cont.begin(); it != cont.end(); ++it) {
+      encode(deltaEncode(prev, *it));
+      prev = *it;
+    }
+    return *this;
+  }
+
+  // Encode a type which has a conversion to nullptr, skipping the
+  // encoding if it is nullptr. This is mainly meant for smart pointer
+  // types where the pointer may not be set.
+  template <typename T>
+  BlobEncoder& nullable(const T& t) {
+    if (t) {
+      (*this)(true);
+      (*this)(t);
+    } else {
+      (*this)(false);
+    }
     return *this;
   }
 
@@ -313,19 +372,19 @@ struct BlobEncoder {
   std::vector<char>&& take() { return std::move(m_blob); }
 
 private:
-  template<typename Cont>
-  void encodeOrderedContainer(const Cont& cont) {
+  template<typename Cont, typename... Extra>
+  void encodeOrderedContainer(const Cont& cont, Extra... extra) {
     if (cont.size() >= 0xffffffffu) {
       throw std::runtime_error("maximum size exceeded in BlobEncoder");
     }
     encode(uint32_t(cont.size()));
-    for (auto const& e : cont) encode(e);
+    for (auto const& e : cont) encode(e, extra...);
   }
 
   // Unordered containers need to be sorted first, to ensure
   // deterministic output.
   template<typename Cont>
-  void encodeUnorderedContainer(const Cont& cont) {
+  void encodeUnorderedMap(const Cont& cont) {
     if (cont.size() >= 0xffffffffu) {
       throw std::runtime_error("maximum size exceeded in BlobEncoder");
     }
@@ -341,6 +400,21 @@ private:
       assertx(it != cont.end());
       encode(*it);
     }
+  }
+
+  template<typename Cont>
+  void encodeUnorderedSet(const Cont& cont) {
+    if (cont.size() >= 0xffffffffu) {
+      throw std::runtime_error("maximum size exceeded in BlobEncoder");
+    }
+
+    std::vector<typename Cont::key_type> keys;
+    keys.reserve(cont.size());
+    for (auto const& e : cont) keys.emplace_back(e);
+    std::sort(keys.begin(), keys.end());
+
+    encode(uint32_t(keys.size()));
+    for (auto const& k : keys) encode(k);
   }
 
   std::vector<char> m_blob;
@@ -451,6 +525,12 @@ struct BlobDecoder {
     std::is_pointer<T>::value
   >::type decode(T&, F...) = delete;
 
+  void decode(double& d) {
+    assertx(remaining() >= sizeof(double));
+    std::memcpy(&d, data(), sizeof(double));
+    advance(sizeof(double));
+  }
+
   void decode(std::string& s) {
     uint32_t sz;
     decode(sz);
@@ -505,44 +585,40 @@ struct BlobDecoder {
     decode(val.second);
   }
 
-  template<typename Cont>
-  auto decode(Cont& vec) -> decltype(vec.emplace_back(), void()) {
-    uint32_t size;
-    decode(size);
-    if (size) vec.reserve(vec.size() + size);
-    for (uint32_t i = 0; i < size; ++i) {
-      vec.emplace_back();
-      decode(vec.back());
-    }
+  template<typename T, typename A, typename... Extra>
+  void decode(std::vector<T, A>& vec, Extra... extra) {
+    decodeVecContainer(vec, extra...);
+    vec.shrink_to_fit();
   }
 
-  template<class T, typename FDeltaDecode>
-  void decode(std::vector<T>& vec, FDeltaDecode deltaDecode) {
-    uint32_t size;
-    decode(size);
-    vec.reserve(size);
-
-    auto prev = T{};
-    auto delta = T{};
-    for (uint32_t i = 0; i < size; ++i) {
-      decode(delta);
-      prev = deltaDecode(prev, delta);
-      vec.push_back(prev);
-    }
-  }
-
-  template<typename T, typename A>
-  void decode(std::vector<T, A>& vec) {
-    decodeVecContainer(vec);
-  }
-
-  template<typename T, typename A>
-  void decode(CompactVector<T, A>& vec) {
-    decodeVecContainer(vec);
+  template<typename T, typename A, typename... Extra>
+  void decode(CompactVector<T, A>& vec, Extra... extra) {
+    decodeVecContainer(vec, extra...);
+    vec.shrink_to_fit();
   }
 
   template<typename K, typename C, typename A>
   void decode(std::set<K, C, A>& set) {
+    decodeSetContainer(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void decode(folly::F14NodeSet<T, H, E, A>& set) {
+    decodeSetContainer(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void decode(folly::F14VectorSet<T, H, E, A>& set) {
+    decodeSetContainer(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void decode(folly::F14ValueSet<T, H, E, A>& set) {
+    decodeSetContainer(set);
+  }
+
+  template<typename T, typename H, typename E, typename A>
+  void decode(folly::F14FastSet<T, H, E, A>& set) {
     decodeSetContainer(set);
   }
 
@@ -563,9 +639,60 @@ struct BlobDecoder {
     decodeMapContainer(map);
   }
 
+  template<typename K, typename V, typename H, typename E, typename A>
+  void decode(folly::F14NodeMap<K, V, H, E, A>& map) {
+    decodeMapContainer(map);
+  }
+
+  template<typename K, typename V, typename H, typename E, typename A>
+  void decode(folly::F14VectorMap<K, V, H, E, A>& map) {
+    decodeMapContainer(map);
+  }
+
+  template<typename K, typename V, typename H, typename E, typename A>
+  void decode(folly::F14ValueMap<K, V, H, E, A>& map) {
+    decodeMapContainer(map);
+  }
+
+  template<typename K, typename V, typename H, typename E, typename A>
+  void decode(folly::F14FastMap<K, V, H, E, A>& map) {
+    decodeMapContainer(map);
+  }
+
   template<class T, class... F>
   BlobDecoder& operator()(T& t, F... lambdas) {
     decode(t, lambdas...);
+    return *this;
+  }
+
+  template<class T, typename FDeltaDecode>
+  BlobDecoder& delta(std::vector<T>& vec, FDeltaDecode deltaDecode) {
+    uint32_t size;
+    decode(size);
+    vec.reserve(size);
+
+    auto prev = T{};
+    auto delta = T{};
+    for (uint32_t i = 0; i < size; ++i) {
+      decode(delta);
+      prev = deltaDecode(prev, delta);
+      vec.push_back(prev);
+    }
+    vec.shrink_to_fit();
+    return *this;
+  }
+
+  // Decode a type encoded by BlobEncoder::nullable. If the value was
+  // not encoded, it will be set to nullptr.
+  template <typename T>
+  BlobDecoder& nullable(T& t) {
+    bool present;
+    (*this)(present);
+    if (present) {
+      (*this)(t);
+    } else {
+      t = nullptr;
+    }
     return *this;
   }
 
@@ -670,6 +797,7 @@ private:
     cont.clear();
     uint32_t size;
     decode(size);
+    cont.reserve(size);
     for (uint32_t i = 0; i < size; ++i) {
       typename Cont::value_type val;
       decode(val);
@@ -677,14 +805,15 @@ private:
     }
   }
 
-  template<typename Cont>
-  void decodeVecContainer(Cont& cont) {
+  template<typename Cont, typename... Extra>
+  void decodeVecContainer(Cont& cont, Extra... extra) {
     cont.clear();
     uint32_t size;
     decode(size);
+    cont.reserve(size);
     for (uint32_t i = 0; i < size; ++i) {
       typename Cont::value_type val;
-      decode(val);
+      decode(val, extra...);
       cont.emplace_back(std::move(val));
     }
   }

@@ -1628,8 +1628,16 @@ void iopClassHasReifiedGenerics() {
   iopUnhandled("ClassHasReifiedGenerics")
 }
 
+void iopGetClsRGProp() {
+  iopUnhandled("GetClsRGProp");
+}
+
 void iopHasReifiedParent() {
   iopUnhandled("HasReifiedParent")
+}
+
+void iopCheckClsRGSoft() {
+  iopUnhandled("CheckClsRGSoft");
 }
 
 void iopNativeImpl(PC& /* pc */) {

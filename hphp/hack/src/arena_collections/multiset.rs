@@ -23,12 +23,11 @@
 use std::borrow::Borrow;
 use std::fmt::Debug;
 
-use bumpalo::Bump;
-use serde::Serialize;
-
 use arena_trait::TrivialDrop;
+use bumpalo::Bump;
 use ocamlrep::FromOcamlRepIn;
 use ocamlrep::ToOcamlRep;
+use serde::Serialize;
 
 use crate::AssocList;
 use crate::AssocListMut;
@@ -578,7 +577,7 @@ impl<T: ToOcamlRep + Ord> ToOcamlRep for SortedSet<'_, T> {
         alloc: &'a A,
     ) -> ocamlrep::OpaqueValue<'a> {
         let len = self.len();
-        let mut iter = self.iter();
+        let mut iter = self.iter().map(|x| x.to_ocamlrep(alloc));
         let (value, _) = ocamlrep::sorted_iter_to_ocaml_set(&mut iter, alloc, len);
         value
     }

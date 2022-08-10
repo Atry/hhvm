@@ -3,18 +3,19 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use bitflags::bitflags;
+use ffi::Slice;
+use hhvm_types_ffi::ffi::Attr;
+use serde::Serialize;
+
 use crate::hhas_attribute::HhasAttribute;
 use crate::hhas_body::HhasBody;
 use crate::hhas_coeffects::HhasCoeffects;
 use crate::hhas_param::HhasParam;
 use crate::hhas_pos::HhasSpan;
 use crate::FunctionName;
-use ffi::Slice;
-use hhvm_types_ffi::ffi::Attr;
 
-use bitflags::bitflags;
-
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[repr(C)]
 pub struct HhasFunction<'arena> {
     pub attributes: Slice<'arena, HhasAttribute<'arena>>,
@@ -28,6 +29,7 @@ pub struct HhasFunction<'arena> {
 }
 
 bitflags! {
+    #[derive(Serialize)]
     #[repr(C)]
     pub struct HhasFunctionFlags: u8 {
         const ASYNC =          1 << 0;

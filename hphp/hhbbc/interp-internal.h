@@ -68,7 +68,7 @@ struct ISS {
     , state(bag.state)
     , undo(bag.undo)
     , propagate(propagate)
-    , analyzeDepth(options.StrengthReduce ? 0 : 1)
+    , analyzeDepth(0)
   {}
 
   const Index& index;
@@ -396,7 +396,6 @@ bool shouldAttemptToFold(ISS& env, const php::Func* func, const FCallArgs& fca,
       fca.hasUnpack() ||
       fca.hasGenerics() ||
       fca.numRets() != 1 ||
-      !options.ConstantFoldBuiltins ||
       !will_reduce(env) ||
       any(env.collect.opts & CollectionOpts::Speculating) ||
       any(env.collect.opts & CollectionOpts::Optimizing)) {
@@ -432,7 +431,8 @@ bool shouldAttemptToFold(ISS& env, const php::Func* func, const FCallArgs& fca,
 
   // Internal functions may raise module boundary violations
   if ((func->attrs & AttrInternal) &&
-      env.ctx.func->unit->moduleName != func->unit->moduleName) {
+      env.index.lookup_func_unit(*env.ctx.func)->moduleName !=
+      env.index.lookup_func_unit(*func)->moduleName) {
     return false;
   }
 

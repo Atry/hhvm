@@ -1460,7 +1460,7 @@ static bool do_chown(const String& filename,
     }
     uid = pw->pw_uid;
   } else {
-    uid = user.toInt32();
+    uid = (int)user.toInt64();
   }
 
   if (islChown) {
@@ -1541,7 +1541,7 @@ static bool do_chgrp(const String& filename,
     }
     gid = gr->gr_gid;
   } else {
-    gid = group.toInt32();
+    gid = (int)group.toInt64();
   }
 
   if (islChgrp) {
@@ -1678,7 +1678,7 @@ int64_t HHVM_FUNCTION(umask,
   if (mask.isNull()) {
     umask(oldumask);
   } else {
-    umask(mask.toInt32());
+    umask((int)mask.toInt64());
   }
   return oldumask;
 }
@@ -2020,8 +2020,9 @@ Variant HHVM_FUNCTION(dir,
     return false;
   }
   auto d = SystemLib::AllocDirectoryObject();
-  d->setProp(nullptr, s_path.get(), directory.asTypedValue());
-  d->setProp(nullptr, s_handle.get(), *dir.asTypedValue());
+  // public properties
+  d->setProp(nullctx, s_path.get(), directory.asTypedValue());
+  d->setProp(nullctx, s_handle.get(), *dir.asTypedValue());
   return d;
 }
 

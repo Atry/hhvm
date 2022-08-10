@@ -25,6 +25,7 @@
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/array-iterator.h"
 #include "hphp/runtime/base/autoload-handler.h"
+#include "hphp/runtime/base/bespoke/type-structure.h"
 #include "hphp/runtime/base/collections.h"
 #include "hphp/runtime/base/comparisons.h"
 #include "hphp/runtime/base/dummy-resource.h"
@@ -546,7 +547,10 @@ void VariableUnserializer::unserializeProp(ObjectData* obj,
                                            int nProp) {
 
   auto const cls = obj->getVMClass();
-  auto const lookup = cls->getDeclPropSlot(ctx, key.get());
+
+  // TODO(T126821336): unserializing variable may require module name
+  auto const propCtx = MemberLookupContext(ctx);
+  auto const lookup = cls->getDeclPropSlot(propCtx, key.get());
   auto const slot = lookup.slot;
   tv_lval t;
 
@@ -559,12 +563,11 @@ void VariableUnserializer::unserializeProp(ObjectData* obj,
   } else {
     // We'll check if this doesn't violate the type-hint once we're done
     // unserializing all the props.
-    t = obj->getPropLval(ctx, key.get());
+    t = obj->getPropLval(propCtx, key.get());
   }
 
   unserializePropertyValue(t, nProp);
   if (!RuntimeOption::RepoAuthoritative) return;
-  if (!RepoFile::globalData().HardPrivatePropInference) return;
 
   /*
    * We assume for performance reasons in repo authoriative mode that
@@ -623,7 +626,10 @@ void VariableUnserializer::unserializeRemainingProps(
         }
       }
       String k(kdata + subLen, ksize - subLen, CopyString);
-      Class* ctx = (Class*)-1;
+      // We use (Class*)-8 as the sentinel value during deserialization to represent
+      // that we are allowed to look up protected properties. -8 allows 3 extra
+      // bits to be used for other purposes.
+      Class* ctx = (Class*)-8;
       if (kdata[1] != '*') {
         ctx = Class::lookup(
           String(kdata + 1, subLen - 2, CopyString).get());
@@ -916,6 +922,14 @@ void VariableUnserializer::unserializeVariant(
       tvMove(make_tv<KindOfKeyset>(a.detach()), self);
     }
     return; // array has '}' terminating
+  case 'T': // BespokeTypeStructure
+    {
+      // Check stack depth to avoid overflow.
+      check_recursion_throw();
+      auto a = unserializeBespokeTypeStructure();
+      tvMove(make_array_like_tv(a.detach()), self);
+    }
+    return; // array has '}' terminating
   case 'L':
     {
       int64_t id = readInt();
@@ -1019,7 +1033,7 @@ void VariableUnserializer::unserializeVariant(
       } else {
         warnOrThrowUnknownClass(clsName);
         obj = Object{SystemLib::s___PHP_Incomplete_ClassClass};
-        obj->setProp(nullptr, s_PHP_Incomplete_Class_Name.get(),
+        obj->setProp(nullctx, s_PHP_Incomplete_Class_Name.get(),
                      clsName.asTypedValue());
       }
       assertx(!obj.isNull());
@@ -1037,9 +1051,7 @@ void VariableUnserializer::unserializeVariant(
 
           Variant serializedNativeData = init_null();
           bool hasSerializedNativeData = false;
-          bool checkRepoAuthType =
-            RuntimeOption::RepoAuthoritative &&
-            RepoFile::globalData().HardPrivatePropInference;
+          bool checkRepoAuthType = RO::RepoAuthoritative;
           Class* objCls = obj->getVMClass();
           // Try fast case.
           if (remainingProps >= objCls->numDeclProperties() -
@@ -1185,9 +1197,9 @@ void VariableUnserializer::unserializeVariant(
         }
         warnOrThrowUnknownClass(clsName);
         Object ret = create_object_only(s_PHP_Incomplete_Class);
-        ret->setProp(nullptr, s_PHP_Incomplete_Class_Name.get(),
+        ret->setProp(nullctx, s_PHP_Incomplete_Class_Name.get(),
                      clsName.asTypedValue());
-        ret->setProp(nullptr, s_serialized.get(), serialized.asTypedValue());
+        ret->setProp(nullctx, s_serialized.get(), serialized.asTypedValue());
         return ret;
       }();
 
@@ -1504,6 +1516,14 @@ Array VariableUnserializer::unserializeKeyset() {
   return init.toArray();
 }
 
+Array VariableUnserializer::unserializeBespokeTypeStructure() {
+  assertx(RO::EvalEmitBespokeTypeStructures);
+
+  auto arr = unserializeDict();
+  auto const ts = bespoke::TypeStructure::MakeFromVanilla(arr.get());
+  if (ts) arr.reset(ts);
+  return arr;
+}
 
 folly::StringPiece
 VariableUnserializer::unserializeStringPiece(char delimiter0, char delimiter1) {

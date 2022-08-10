@@ -295,7 +295,7 @@ const Func* vm_decode_func_from_name(
   CallType lookupType = this_ ? CallType::ObjMethod : CallType::ClsMethod;
   auto const moduleName =
     ar ? ar->func()->unit()->moduleName() : (const StringData*)nullptr;
-  auto const callCtx = MethodLookupCallContext(ctx, moduleName);
+  auto const callCtx = MemberLookupContext(ctx, moduleName);
   auto f = lookupMethodCtx(cc, funcName.get(), callCtx, lookupType,
                            MethodLookupErrorOptions::NoErrorOnModule);
   if (f && (f->attrs() & AttrStatic)) {
@@ -762,6 +762,10 @@ void throw_call_reified_func_without_generics(const Func* f) {
 
 void throw_implicit_context_exception(std::string s) {
   SystemLib::throwInvalidOperationExceptionObject(s);
+}
+
+void raise_implicit_context_warning(std::string s) {
+  raise_warning(s);
 }
 
 void throw_iterator_not_valid() {

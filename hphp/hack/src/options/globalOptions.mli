@@ -269,8 +269,8 @@ type t = {
   tco_enable_strict_string_concat_interp: bool;
   (* Ignores unsafe_cast and retains the original type of the expression *)
   tco_ignore_unsafe_cast: bool;
-  (* Enable Unstable feature readonly tast check *)
-  tco_readonly: bool;
+  (* Disable parser-based readonly checking *)
+  tco_no_parser_readonly_check: bool;
   (* Enable expression trees via unstable features flag *)
   tco_enable_expression_trees: bool;
   (* Enable unstable feature: modules *)
@@ -328,6 +328,8 @@ type t = {
   tco_record_fine_grained_dependencies: bool;
   (* When set, uses the given number of iterations while typechecking loops *)
   tco_loop_iteration_upper_bound: int option;
+  (* When enabled, wrap function types in Expression Trees in user defined virtual function types *)
+  tco_expression_tree_virtualize_functions: bool;
 }
 [@@deriving eq, show]
 
@@ -437,7 +439,7 @@ val make :
   ?po_interpret_soft_types_as_like_types:bool ->
   ?tco_enable_strict_string_concat_interp:bool ->
   ?tco_ignore_unsafe_cast:bool ->
-  ?tco_readonly:bool ->
+  ?tco_no_parser_readonly_check:bool ->
   ?tco_enable_expression_trees:bool ->
   ?tco_enable_modules:bool ->
   ?tco_allowed_expression_tree_visitors:string list ->
@@ -464,6 +466,7 @@ val make :
   ?tco_use_manifold_cython_client:bool ->
   ?tco_record_fine_grained_dependencies:bool ->
   ?tco_loop_iteration_upper_bound:int option ->
+  ?tco_expression_tree_virtualize_functions:bool ->
   unit ->
   t
 
@@ -705,9 +708,9 @@ val tco_enable_strict_string_concat_interp : t -> bool
 
 val tco_ignore_unsafe_cast : t -> bool
 
-val tco_readonly : t -> bool
+val tco_no_parser_readonly_check : t -> bool
 
-val set_tco_readonly : t -> bool -> t
+val set_tco_no_parser_readonly_check : t -> bool -> t
 
 val set_tco_enable_expression_trees : t -> bool -> t
 
@@ -764,3 +767,5 @@ val tco_use_manifold_cython_client : t -> bool
 val tco_record_fine_grained_dependencies : t -> bool
 
 val tco_loop_iteration_upper_bound : t -> int option
+
+val tco_expression_tree_virtualize_functions : t -> bool

@@ -15,22 +15,21 @@ pub use formatters::FmtLocId;
 pub use formatters::FmtRawBid;
 pub use formatters::FmtRawVid;
 pub use formatters::FmtVid;
+use ir_core::Func;
+use ir_core::InstrId;
+use ir_core::InstrIdSet;
 pub use print::print_unit;
 pub use util::FmtEscapedString;
 pub use util::FmtOption;
 pub use util::FmtOptionOr;
 pub use util::FmtSep;
 
-use core::Func;
-use core::InstrId;
-use core::InstrIdSet;
-
 // This isn't used by the print crate but is useful for code that wants to print
 // a Func for debugging purposes.
 pub struct DisplayFunc<'a, 'b>(
     pub &'b Func<'a>,
     /* verbose */ pub bool,
-    pub &'b core::string_intern::StringInterner<'a>,
+    pub &'b ir_core::string_intern::StringInterner<'a>,
 );
 
 impl std::fmt::Display for DisplayFunc<'_, '_> {

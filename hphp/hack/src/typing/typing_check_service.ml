@@ -170,21 +170,23 @@ let process_file
           ~memory_mb_threshold_opt:decl_cap_mb
         @@ fun () ->
         Errors.do_with_context fn Errors.Typing @@ fun () ->
-        let snd (_, x, _) = x in
         let (fun_tasts, fun_global_tvenvs) =
-          List.map funs ~f:snd
+          List.map funs ~f:FileInfo.id_name
           |> List.filter_map ~f:(type_fun ctx fn)
           |> List.unzip
         in
         let (class_tasts, class_global_tvenvs) =
-          List.map classes ~f:snd
+          List.map classes ~f:FileInfo.id_name
           |> List.filter_map ~f:(type_class ctx fn)
           |> List.unzip
         in
         let class_global_tvenvs = List.concat class_global_tvenvs in
-        List.map typedefs ~f:snd |> List.iter ~f:(ignore_check_typedef ctx fn);
-        List.map gconsts ~f:snd |> List.iter ~f:(ignore_check_const ctx fn);
-        List.map modules ~f:snd |> List.iter ~f:(ignore_check_module ctx fn);
+        List.map typedefs ~f:FileInfo.id_name
+        |> List.iter ~f:(ignore_check_typedef ctx fn);
+        List.map gconsts ~f:FileInfo.id_name
+        |> List.iter ~f:(ignore_check_const ctx fn);
+        List.map modules ~f:FileInfo.id_name
+        |> List.iter ~f:(ignore_check_module ctx fn);
         (fun_tasts @ class_tasts, fun_global_tvenvs @ class_global_tvenvs)
       in
       match result with
@@ -284,8 +286,6 @@ let get_stats ~include_slightly_costly_stats tally :
     ~shmem_heap_size:(SharedMem.SMTelemetry.heap_size ())
     telemetry
 
-let get_heap_size () = Gc.((quick_stat ()).Stat.heap_words) * 8 / 1024 / 1024
-
 external hh_malloc_trim : unit -> unit = "hh_malloc_trim"
 
 let process_one_workitem
@@ -355,7 +355,7 @@ let process_one_workitem
         ProcessFilesTally.incr_prefetches tally )
   in
   let errors = Errors.merge file_errors errors in
-  let workitem_ends_under_cap = get_heap_size () <= workitem_cap_mb in
+  let workitem_ends_under_cap = Gc_utils.get_heap_size () <= workitem_cap_mb in
   let final_stats =
     get_stats
       ~include_slightly_costly_stats:
@@ -373,7 +373,7 @@ let process_one_workitem
   (* If the major heap has exceeded the bounds, we (1) first try and bring the size back down
      by flushing the parser cache and doing a major GC; (2) if this fails, we decline to typecheck
      the remaining files.
-     We use [quick_stat] instead of [stat] in get_heap_size in order to avoid walking the major heap,
+     We use [quick_stat] instead of [stat] in Gc_utils.get_heap_size in order to avoid walking the major heap,
      and we don't change the minor heap because it's small and fixed-size.
      This test is performed after we've processed at least one item, to ensure we make at least some progress. *)
   let tally = ProcessFilesTally.record_caps ~workitem_ends_under_cap tally in
@@ -385,7 +385,7 @@ let process_one_workitem
       HackEventLogger.flush ();
       Gc.compact ();
       hh_malloc_trim ();
-      get_heap_size () <= workitem_cap_mb
+      Gc_utils.get_heap_size () <= workitem_cap_mb
     end
   in
 
@@ -702,7 +702,7 @@ let next
     | Some w -> List.length w
     | None -> 1
   in
-  let return_bucket_job kind ~current_bucket ~remaining_jobs =
+  let return_bucket_job (kind : progress_kind) ~current_bucket ~remaining_jobs =
     (* Update our shared mutable state, because hey: it's not like we're
        writing OCaml or anything. *)
     workitems_to_process := remaining_jobs;
@@ -723,11 +723,11 @@ let next
     let delegate_job =
       if should_run_hulk_v2 then (
         (*
-        This is the "reduce" part of the mapreduce paradigm. We activate this when workitems_to_check is empty,
-        or in other words the local typechecker is done with its work. We'll try and download all the remote
-        worker outputs in once go. For any payloads that aren't available we'll simply stop waiting on the
-        remote worker and have the local worker "steal" the work.
-       *)
+          This is the "reduce" part of the mapreduce paradigm. We activate this when workitems_to_check is empty,
+          or in other words the local typechecker is done with its work. We'll try and download all the remote
+          worker outputs in once go. For any payloads that aren't available we'll simply stop waiting on the
+          remote worker and have the local worker "steal" the work.
+        *)
         let remote_workitems_to_process_length =
           List.fold ~init:0 !remote_payloads ~f:(fun acc payload ->
               acc + BigList.length payload.payload)
@@ -944,7 +944,8 @@ let process_in_parallel
   in
   (* The [job] lambda is marshalled, sent to the worker process, unmarshalled there, and executed.
      It is marshalled immediately before being executed. *)
-  let job (typing_result : typing_result) (progress : job_progress) =
+  let job (typing_result : typing_result) (progress : job_progress) :
+      string * typing_result * job_progress =
     let worker_id = Option.value ~default:"main" (Hh_logger.get_id ()) in
     let (typing_result, computation_progress) =
       match progress.kind with

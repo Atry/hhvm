@@ -301,6 +301,9 @@ let main (args : client_check_env) (local_config : ServerLocalConfig.t) :
     | MODE_GEN_SHALLOW_DECLS_DIR dir ->
       let%lwt (_, telemetry) = rpc args @@ Rpc.GEN_SHALLOW_DECLS_DIR dir in
       Lwt.return (Exit_status.No_error, telemetry)
+    | MODE_GEN_REMOTE_FILES ->
+      let%lwt (_, telemetry) = rpc args @@ Rpc.GEN_REMOTE_FILES in
+      Lwt.return (Exit_status.No_error, telemetry)
     | MODE_GO_TO_IMPL_CLASS class_name ->
       let%lwt results =
         rpc_with_retry args
@@ -360,7 +363,7 @@ let main (args : client_check_env) (local_config : ServerLocalConfig.t) :
       let%lwt conn = connect args in
       let%lwt () = ClientSymbolInfo.go conn ~desc:args.desc files expand_path in
       Lwt.return (Exit_status.No_error, Telemetry.create ())
-    | MODE_REFACTOR_CHECK_SOUND_DYNAMIC (ref_mode, name) ->
+    | MODE_REFACTOR_SOUND_DYNAMIC (ref_mode, name) ->
       let conn () = connect args in
       let%lwt result =
         ClientRefactor.go_sound_dynamic conn args ref_mode name

@@ -503,7 +503,8 @@ Variant HHVM_FUNCTION(hphp_get_static_property, const String& cls,
   CoeffectsAutoGuard _2;
 
   auto const lookup = class_->getSPropIgnoreLateInit(
-    force ? class_ : arGetContextClass(vmfp()),
+    force ? MemberLookupContext(class_) // class is always nonnull here
+    : MemberLookupContext(arGetContextClass(vmfp()), vmfp()->func()),
     prop.get()
   );
   if (!lookup.val) {
@@ -532,9 +533,11 @@ void HHVM_FUNCTION(hphp_set_static_property, const String& cls,
 
   VMRegAnchor _;
   CoeffectsAutoGuard _2;
-
+  // class_ is always nonnull here so we don't need to pass in the module name
+  auto const ctx = force ? MemberLookupContext(class_)
+  : MemberLookupContext(arGetContextClass(vmfp()), vmfp()->func());
   auto const lookup = class_->getSPropIgnoreLateInit(
-    force ? class_ : arGetContextClass(vmfp()),
+    ctx,
     prop.get()
   );
   if (!lookup.val) {
@@ -945,13 +948,48 @@ static bool HHVM_METHOD(ReflectionFunctionAbstract, returnsReadonly) {
   return func->attrs() & AttrReadonlyReturn;
 }
 
+const StaticString
+  s_systemlib_create_opaque_value("__SystemLib\\create_opaque_value"),
+  s_KeyedByIC("KeyedByIC"),
+  s_MakeICInaccessible("MakeICInaccessible"),
+  s_SoftMakeICInaccessible("SoftMakeICInaccessible");
+
 ALWAYS_INLINE
 static Array get_function_user_attributes(const Func* func) {
   auto userAttrs = func->userAttributes();
 
   DictInit ai(userAttrs.size());
   for (auto it = userAttrs.begin(); it != userAttrs.end(); ++it) {
-    ai.set(StrNR(it->first).asString(), it->second);
+    if (!func->isMemoizeWrapper() ||
+        func->memoizeICType() == Func::MemoizeICType::NoIC) {
+      ai.set(StrNR(it->first).asString(), it->second);
+    } else {
+      assertx(tvIsVec(it->second));
+      auto const ad = it->second.m_data.parr;
+      VecInit args(ad->size());
+      IterateV(ad, [&] (TypedValue tv) {
+        if (!tvIsString(tv)) {
+          args.append(tv);
+        } else {
+          auto const sd = tv.m_data.pstr;
+          if (sd->same(s_KeyedByIC.get()) ||
+              sd->same(s_MakeICInaccessible.get()) ||
+              sd->same(s_SoftMakeICInaccessible.get())) {
+            auto const func = Func::load(s_systemlib_create_opaque_value.get());
+            assertx(func);
+            VecInit v(2);
+            // From ext_hh.php: __SystemLib\OpaqueValueId::EnumClassLabel
+            v.append(make_tv<KindOfInt64>(0));
+            v.append(tv);
+            args.append(g_context->invokeFunc(
+              func, v.toArray(), nullptr, nullptr,
+              RuntimeCoeffects::pure(), false /* dynamic */
+            ));
+          }
+        }
+      });
+      ai.set(StrNR(it->first).asString(), args.toArray());
+    }
   }
   return ai.toArray();
 }
@@ -1738,13 +1776,13 @@ void ReflectionClassHandle::wakeup(const Variant& content, ObjectData* obj) {
   // It is possible that $name does not get serialized. If a class derives
   // from ReflectionClass and the return value of its __sleep() function does
   // not contain 'name', $name gets ignored. So, we restore $name here.
-  obj->setProp(nullptr, s_name.get(), result.asTypedValue());
+  obj->setProp(nullctx, s_name.get(), result.asTypedValue());
 }
 
 static Variant reflection_extension_name_get(const Object& this_) {
   assertx(Reflection::s_ReflectionExtensionClass);
   auto const name = this_->getProp(
-    Reflection::s_ReflectionExtensionClass,
+    MemberLookupContext(Reflection::s_ReflectionExtensionClass),
     s___name.get()
   );
   return tvCastToString(name.tv());
@@ -1877,29 +1915,31 @@ static void HHVM_METHOD(ReflectionProperty, __construct,
   }
 
   auto data = Native::data<ReflectionPropHandle>(this_);
-
+  assertx(cls);
+  // cls is always nonnull, no need to pass in module name
+  auto const ctx = MemberLookupContext(cls);
   // is there a declared instance property?
-  auto lookup = cls->getDeclPropSlot(cls, prop_name.get());
+  auto lookup = cls->getDeclPropSlot(ctx, prop_name.get());
   auto propIdx = lookup.slot;
   if (propIdx != kInvalidSlot) {
     auto const prop = &cls->declProperties()[propIdx];
     data->setInstanceProp(prop);
-    this_->setProp(nullptr, s_class.get(),
+    this_->setProp(nullctx, s_class.get(),
                    make_tv<KindOfPersistentString>(prop->cls->name()));
-    this_->setProp(nullptr, s_name.get(),
+    this_->setProp(nullctx, s_name.get(),
                    make_tv<KindOfPersistentString>(prop->name));
     return;
   }
 
   // is there a declared static property?
-  lookup = cls->findSProp(cls, prop_name.get());
+  lookup = cls->findSProp(ctx, prop_name.get());
   propIdx = lookup.slot;
   if (propIdx != kInvalidSlot) {
     auto const prop = &cls->staticProperties()[propIdx];
     data->setStaticProp(prop);
-    this_->setProp(nullptr, s_class.get(),
+    this_->setProp(nullctx, s_class.get(),
                    make_tv<KindOfPersistentString>(prop->cls->name()));
-    this_->setProp(nullptr, s_name.get(),
+    this_->setProp(nullctx, s_name.get(),
                    make_tv<KindOfPersistentString>(prop->name));
     return;
   }
@@ -1916,9 +1956,9 @@ static void HHVM_METHOD(ReflectionProperty, __construct,
         obj->raiseReadDynamicProp(prop_name.get());
       }
       data->setDynamicProp();
-      this_->setProp(nullptr, s_class.get(),
+      this_->setProp(nullctx, s_class.get(),
                      make_tv<KindOfPersistentString>(cls->name()));
-      this_->setProp(nullptr, s_name.get(), prop_name.asTypedValue());
+      this_->setProp(nullctx, s_name.get(), prop_name.asTypedValue());
       return;
     }
   }
@@ -2090,7 +2130,9 @@ static TypedValue HHVM_METHOD(ReflectionProperty, getDefaultValue) {
       // it was declared in); so if we don't want to store propIdx we have to
       // look it up by name.
       auto cls = prop->cls;
-      auto lookup = cls->getDeclPropSlot(cls, prop->name);
+      // cls is never null here
+      auto const propCtx = MemberLookupContext(cls);
+      auto lookup = cls->getDeclPropSlot(propCtx, prop->name);
       auto propSlot = lookup.slot;
       assertx(propSlot != kInvalidSlot);
       auto propIndex = cls->propSlotToIndex(propSlot);

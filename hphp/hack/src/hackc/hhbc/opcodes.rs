@@ -3,6 +3,11 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use emit_opcodes_macro::Targets;
+use ffi::Slice;
+use ffi::Str;
+use serde::Serialize;
+
 use crate::hhbc_ast::NUM_ACT_REC_CELLS;
 use crate::AdataId;
 use crate::BareThisOp;
@@ -43,12 +48,9 @@ use crate::StackIndex;
 use crate::SwitchKind;
 use crate::Targets;
 use crate::TypeStructResolveOp;
-use emit_opcodes_macro::Targets;
-use ffi::Slice;
-use ffi::Str;
 
 #[emit_opcodes_macro::emit_opcodes]
-#[derive(Clone, Debug, Targets, Hash, Eq, PartialEq)]
+#[derive(Clone, Debug, Targets, Hash, Eq, PartialEq, Serialize)]
 #[repr(C)]
 pub enum Opcode<'arena> {
     // This is filled in by the emit_opcodes macro.  It can be printed using the

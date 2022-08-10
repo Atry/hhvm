@@ -17,7 +17,6 @@
 
 #include "hphp/runtime/base/array-init.h"
 #include "hphp/runtime/base/coeffects-config.h"
-#include "hphp/runtime/base/memory-manager-defs.h"
 #include "hphp/runtime/vm/as.h"
 #include "hphp/runtime/vm/as-shared.h"
 #include "hphp/runtime/vm/disas.h"
@@ -692,11 +691,24 @@ void handleKA(TranslationState& ts, const hhbc::MemberKey& mkey) {
   encode_member_key(mkey_, *ts.fe);
 }
 
+inline bool operator==(const hhbc::Local& a, const hhbc::Local& b) {
+  return a.idx == b.idx;
+}
+
+inline bool operator==(const hhbc::LocalRange& a, const hhbc::LocalRange& b) {
+  return a.start == b.start && a.len == b.len;
+}
+
 void handleLAR(TranslationState& ts, const hhbc::LocalRange& lar) {
-  auto const firstLoc = lar.start.idx;
-  auto const len = lar.len;
-  auto const lar_ = HPHP::LocalRange{firstLoc, len};
-  ts.trackMaxUnnamed(firstLoc + len - 1);
+  auto const lar_ = [&]() {
+    if (lar == LocalRange_EMPTY) {
+      return HPHP::LocalRange{0, 0};
+    }
+    auto const firstLoc = lar.start.idx;
+    auto const len = lar.len;
+    ts.trackMaxUnnamed(firstLoc + len - 1);
+    return HPHP::LocalRange{firstLoc, len};
+  }();
   encodeLocalRange(*ts.fe, lar_);
 }
 
@@ -1359,10 +1371,9 @@ std::unique_ptr<UnitEmitter> unitEmitterFromHackCUnit(
   const HackCUnit& unit,
   const char* filename,
 	const SHA1& sha1,
-  const Native::FuncTable& nativeFuncs,
-  const std::string& hhasString
+	const SHA1& bcSha1,
+  const Native::FuncTable& nativeFuncs
 ) {
-  auto const bcSha1 = SHA1{string_sha1(hhasString)};
   auto ue = std::make_unique<UnitEmitter>(sha1, bcSha1, nativeFuncs);
   StringData* sd = makeStaticString(filename);
   ue->m_filepath = sd;

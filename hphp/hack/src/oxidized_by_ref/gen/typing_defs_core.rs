@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<01c0138a686a44288d066579219363d1>>
+// @generated SignedSource<<891621c517b4aac1458a676065a75bcc>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -14,16 +14,14 @@ use eq_modulo_pos::EqModuloPosAndReason;
 use no_pos_hash::NoPosHash;
 use ocamlrep_derive::FromOcamlRepIn;
 use ocamlrep_derive::ToOcamlRep;
+pub use reason::PosId;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[allow(unused_imports)]
-use crate::*;
-
 pub use crate::t_shape_map;
 pub use crate::typing_reason as reason;
-
-pub use reason::PosId;
+#[allow(unused_imports)]
+use crate::*;
 
 #[derive(
     Clone,
@@ -81,11 +79,9 @@ pub enum IfcFunDecl<'a> {
 impl<'a> TrivialDrop for IfcFunDecl<'a> {}
 arena_deserializer::impl_deserialize_in_arena!(IfcFunDecl<'arena>);
 
-pub use oxidized::typing_defs_core::ValKind;
-
 pub use oxidized::typing_defs_core::FunTparamsKind;
-
 pub use oxidized::typing_defs_core::ShapeKind;
+pub use oxidized::typing_defs_core::ValKind;
 
 #[derive(
     Clone,
@@ -216,6 +212,7 @@ arena_deserializer::impl_deserialize_in_arena!(DependentType);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ua_")]
 #[repr(C)]
 pub struct UserAttribute<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -242,6 +239,7 @@ arena_deserializer::impl_deserialize_in_arena!(UserAttribute<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "tp_")]
 #[repr(C)]
 pub struct Tparam<'a> {
     pub variance: oxidized::ast_defs::Variance,
@@ -357,6 +355,7 @@ arena_deserializer::impl_deserialize_in_arena!(NegType<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "sft_")]
 #[repr(C)]
 pub struct ShapeFieldType<'a> {
     pub optional: bool,
@@ -648,6 +647,7 @@ arena_deserializer::impl_deserialize_in_arena!(ClassTypeRefinement<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "tr_")]
 #[repr(C)]
 pub struct ClassTypeRefinementBounds<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -728,6 +728,7 @@ arena_deserializer::impl_deserialize_in_arena!(FunImplicitParams<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ft_")]
 #[repr(C)]
 pub struct FunType<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -764,6 +765,7 @@ arena_deserializer::impl_deserialize_in_arena!(FunType<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "et_")]
 #[repr(C)]
 pub struct PossiblyEnforcedTy<'a> {
     /// True if consumer of this type enforces it at runtime
@@ -790,6 +792,7 @@ arena_deserializer::impl_deserialize_in_arena!(PossiblyEnforcedTy<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "fp_")]
 #[repr(C)]
 pub struct FunParam<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -821,6 +824,7 @@ pub use oxidized::typing_defs_core::DestructureKind;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "d_")]
 #[repr(C)]
 pub struct Destructure<'a> {
     /// This represents the standard parameters of a function or the fields in a list
@@ -863,6 +867,7 @@ arena_deserializer::impl_deserialize_in_arena!(Destructure<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "hm_")]
 #[repr(C)]
 pub struct HasMember<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -896,6 +901,7 @@ arena_deserializer::impl_deserialize_in_arena!(HasMember<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ci_")]
 #[repr(C)]
 pub struct CanIndex<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -928,6 +934,7 @@ arena_deserializer::impl_deserialize_in_arena!(CanIndex<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ct_")]
 #[repr(C)]
 pub struct CanTraverse<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]

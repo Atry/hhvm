@@ -202,7 +202,9 @@ const StaticString
   s_DynamicallyCallable("__DynamicallyCallable"),
   s_Memoize("__Memoize"),
   s_MemoizeLSB("__MemoizeLSB"),
-  s_KeyedByIC("KeyedByIC");
+  s_KeyedByIC("KeyedByIC"),
+  s_MakeICInaccessible("MakeICInaccessible"),
+  s_SoftMakeICInaccessible("SoftMakeICInaccessible");
 
 Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
   bool isGenerated = isdigit(name->data()[0]);
@@ -298,7 +300,7 @@ Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
     ex->m_allFlags.m_returnByValue = false;
     ex->m_allFlags.m_isMemoizeWrapper = false;
     ex->m_allFlags.m_isMemoizeWrapperLSB = false;
-    ex->m_allFlags.m_isKeyedByImplicitContextMemoize = false;
+    ex->m_allFlags.m_memoizeICType = Func::MemoizeICType::NoIC;
 
     if (!coeffectRules.empty()) ex->m_coeffectRules = coeffectRules;
     ex->m_coeffectEscapes = coeffectsInfo.second;
@@ -356,18 +358,29 @@ Func* FuncEmitter::create(Unit& unit, PreClass* preClass /* = NULL */) const {
   f->shared()->m_allFlags.m_hasReifiedGenerics = hasReifiedGenerics;
 
   if (isMemoizeWrapper || isMemoizeWrapperLSB) {
-    auto const hasKeyedByIC = [&] (TypedValue tv) {
+    auto const getICType = [&] (TypedValue tv) {
       assertx(tvIsVec(tv));
-      bool found = false;
+      auto type = Func::MemoizeICType::NoIC;
       IterateV(tv.m_data.parr, [&](TypedValue elem) {
-        found |= tvIsString(elem) && elem.m_data.pstr->same(s_KeyedByIC.get());
+          if (tvIsString(elem)) {
+            if (elem.m_data.pstr->same(s_KeyedByIC.get())) {
+                type = Func::MemoizeICType::KeyedByIC;
+            } else if (elem.m_data.pstr->same(s_MakeICInaccessible.get())) {
+                type = Func::MemoizeICType::MakeICInaccessible;
+            } else if (elem.m_data.pstr->same(s_SoftMakeICInaccessible.get())) {
+                type = Func::MemoizeICType::SoftMakeICInaccessible;
+            }
+          }
       });
-      return found;
+      return type;
     };
     auto const attrName = isMemoizeWrapperLSB ? s_MemoizeLSB : s_Memoize;
     auto const it = userAttributes.find(attrName.get());
-    f->shared()->m_allFlags.m_isKeyedByImplicitContextMemoize =
-      it != userAttributes.end() && hasKeyedByIC(it->second);
+    if (it != userAttributes.end()) {
+      auto const ic_type = getICType(it->second);
+      assertx((ic_type & 0x3) == ic_type);
+      f->shared()->m_allFlags.m_memoizeICType = ic_type;
+    }
   }
 
   for (auto const& name : staticCoeffects) {
@@ -682,9 +695,10 @@ void FuncEmitter::serdeMetaData(SerDe& sd) {
 
     (params)
     (m_localNames, [](auto s) { return s; })
-    (ehtab,
+    .delta(
+      ehtab,
       [&](const EHEnt& prev, EHEnt cur) -> EHEnt {
-        if (!SerDe::deserializing) {
+        if constexpr (!SerDe::deserializing) {
           cur.m_handler -= cur.m_past;
           cur.m_past -= cur.m_base;
           cur.m_base -= prev.m_base;
@@ -736,7 +750,7 @@ void FuncEmitter::serde(SerDe& sd, bool lazy) {
       : createLineTable(m_sourceLocTab, m_bclen);
     sd.withSize(
       [&] {
-        sd(
+        sd.delta(
           lines,
           [&] (const LineEntry& prev, const LineEntry& curDelta) {
             return LineEntry {
@@ -776,7 +790,7 @@ void FuncEmitter::deserializeLineTable(BlobDecoder& decoder,
                                        LineTable& lineTable) {
   decoder.withSize(
     [&] {
-      decoder(
+      decoder.delta(
         lineTable,
         [&] (const LineEntry& prev, const LineEntry& curDelta) {
           return LineEntry {

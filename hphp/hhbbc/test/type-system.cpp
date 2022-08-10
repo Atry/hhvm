@@ -25,8 +25,6 @@
 
 #include <folly/Lazy.h>
 
-#include "hphp/runtime/base/array-init.h"
-
 #include "hphp/hhbbc/context.h"
 #include "hphp/hhbbc/hhbbc.h"
 #include "hphp/hhbbc/misc.h"
@@ -34,12 +32,20 @@
 #include "hphp/hhbbc/parse.h"
 #include "hphp/hhbbc/type-structure.h"
 #include "hphp/hhbbc/index.h"
+
+#include "hphp/runtime/base/array-init.h"
+
+#include "hphp/runtime/base/program-functions.h"
 #include "hphp/runtime/base/tv-comparisons.h"
+
 #include "hphp/runtime/vm/as.h"
-#include "hphp/runtime/vm/native.h"
 #include "hphp/runtime/vm/unit-emitter.h"
 
+#include "hphp/util/extern-worker.h"
+
 namespace HPHP::HHBBC {
+
+using namespace extern_worker;
 
 void PrintTo(const Type& t, ::std::ostream* os) { *os << show(t); }
 void PrintTo(Emptiness e, ::std::ostream* os) {
@@ -169,7 +175,7 @@ const StaticString s_Foo2("Foo2");
 
 // A test program so we can actually test things involving object or
 // class types.
-void add_test_unit(php::Program& program) {
+Index make_index() {
   assertx(SystemLib::s_inited);
   std::string const hhas = R"(
     # Technically this should be provided by systemlib, but it's the
@@ -414,19 +420,71 @@ void add_test_unit(php::Program& program) {
       RetC
     }
   )";
-  std::unique_ptr<UnitEmitter> ue(assemble_string(
+  std::unique_ptr<UnitEmitter> ue{assemble_string(
     hhas.c_str(), hhas.size(),
     "ignore.php",
     SHA1("1234543212345432123454321234543212345432"),
     Native::s_noNativeFuncs
-  ));
-  parse_unit(program, ue.get());
-}
+  )};
 
-php::ProgramPtr make_test_program() {
-  auto program = make_program();
-  add_test_unit(*program);
-  return program;
+  auto parse = parse_unit(*ue);
+
+  Index::Input indexInput;
+
+  auto executor = std::make_unique<coro::TicketExecutor>(
+    "HHBBCWorker",
+    0,
+    1,
+    [] {
+      hphp_thread_init();
+      hphp_session_init(Treadmill::SessionKind::HHBBC);
+    },
+    [] {
+      hphp_context_exit();
+      hphp_session_exit();
+      hphp_thread_exit();
+    },
+    std::chrono::minutes{15}
+  );
+
+  extern_worker::Options options;
+  options.setUseSubprocess(extern_worker::Options::UseSubprocess::Always);
+
+  auto client = std::make_unique<Client>(
+    executor->sticky(),
+    options
+  );
+
+  if (parse.unit) {
+    auto const name = parse.unit->filename;
+    auto stored = coro::wait(client->store(std::move(parse.unit)));
+    indexInput.units.emplace_back(name, std::move(stored));
+  }
+  for (auto& c : parse.classes) {
+    auto const name = c->name;
+    auto deps = Index::Input::makeDeps(*c);
+    auto stored = coro::wait(client->store(std::move(c)));
+    indexInput.classes.emplace_back(
+      Index::Input::ClassMeta{
+        std::move(stored),
+        name,
+        std::move(deps)
+      }
+    );
+  }
+  for (auto& f : parse.funcs) {
+    auto const name = f->name;
+    auto stored = coro::wait(client->store(std::move(f)));
+    indexInput.funcs.emplace_back(name, std::move(stored));
+  }
+
+  return Index{
+    std::move(indexInput),
+    std::move(executor),
+    std::move(client),
+    [] (std::unique_ptr<coro::TicketExecutor>,
+        std::unique_ptr<Client>) {}
+  };
 }
 
 //////////////////////////////////////////////////////////////////////
@@ -1227,8 +1285,7 @@ auto const allBits = folly::lazy([]{
 }
 
 TEST(Type, Bits) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   for (auto const& t : predefined()) {
     EXPECT_EQ(Type{t.first}, t.second);
@@ -1255,8 +1312,7 @@ TEST(Type, Bits) {
 }
 
 TEST(Type, Top) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   // Everything is a subtype of Top, couldBe Top, and the union of Top
   // with anything is Top.
@@ -1278,8 +1334,7 @@ TEST(Type, Top) {
 }
 
 TEST(Type, Bottom) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   // Bottom is a subtype of everything, nothing couldBe Bottom, and
   // the union_of anything with Bottom is itself.
@@ -1299,8 +1354,7 @@ TEST(Type, Bottom) {
 }
 
 TEST(Type, Prims) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   // All pairs of non-equivalent primitives are not related by either
   // subtypeOf or couldBe, except for wait-handles, which always could
@@ -1523,8 +1577,7 @@ void test_basic_operators(const std::vector<Type>& types) {
 }
 
 TEST(Type, BasicOperators) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
   test_basic_operators(withData(index));
 
   EXPECT_EQ(union_of(ival(0),TStr), TArrKey);
@@ -1532,8 +1585,7 @@ TEST(Type, BasicOperators) {
 }
 
 TEST(Type, SpecializedClasses) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   std::vector<Type> baseTypes;
 
@@ -1971,8 +2023,7 @@ TEST(Type, SpecializedArrays) {
 }
 
 TEST(Type, Split) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   auto const test = [] (auto f, trep bits, const Type& split,
                         const Type& rest, const Type& orig) {
@@ -2152,8 +2203,7 @@ TEST(Type, Split) {
 }
 
 TEST(Type, Remove) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   auto const test = [] (auto f, trep bits, const Type& removed,
                         const Type& orig) {
@@ -2419,8 +2469,7 @@ TEST(Type, DblNan) {
 }
 
 TEST(Type, ToObj) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -2464,9 +2513,7 @@ TEST(Type, ToObj) {
 }
 
 TEST(Type, Option) {
-  auto const program = make_test_program();
-  Index index { program.get() };
-
+  auto index = make_index();
   EXPECT_TRUE(TTrue.subtypeOf(BOptTrue));
   EXPECT_TRUE(TInitNull.subtypeOf(BOptTrue));
   EXPECT_TRUE(!TUninit.subtypeOf(BOptTrue));
@@ -2578,8 +2625,7 @@ TEST(Type, OptUnionOf) {
   EXPECT_EQ(TOptClsMeth, union_of(TInitNull, TClsMeth));
   EXPECT_EQ(TOptRClsMeth, union_of(TInitNull, TRClsMeth));
 
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
   auto const rcls = index.builtin_class(s_Awaitable.get());
 
   EXPECT_TRUE(union_of(TObj, opt(objExact(rcls))) == TOptObj);
@@ -2605,8 +2651,7 @@ TEST(Type, OptUnionOf) {
 }
 
 TEST(Type, TV) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -2892,8 +2937,7 @@ TEST(Type, OptCouldBe) {
 }
 
 TEST(Type, ArrayLikeElem) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   const std::vector<Type> keys{
     TInt,
@@ -3272,8 +3316,7 @@ TEST(Type, ArrayLikeElem) {
 }
 
 TEST(Type, ArrayLikeNewElem) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   const std::vector<Type> values{
     TInt,
@@ -3597,8 +3640,7 @@ TEST(Type, ArrayLikeNewElem) {
 }
 
 TEST(Type, ArrayLikeSetElem) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   const std::vector<Type> keys{
     TInt,
@@ -3993,10 +4035,11 @@ TEST(Type, SpecificExamples) {
 }
 
 TEST(Type, IndexBased) {
-  auto const program = make_test_program();
-  auto const unit = program->units.back().get();
+  auto idx = make_index();
+  auto const& program = idx.program();
+  auto const unit = program.units.back().get();
   auto const func = [&]() -> php::Func* {
-    for (auto& f : unit->funcs) {
+    for (auto& f : program.funcs) {
       if (f->name->isame(s_test.get())) return f.get();
     }
     return nullptr;
@@ -4004,7 +4047,6 @@ TEST(Type, IndexBased) {
   EXPECT_TRUE(func != nullptr);
 
   auto const ctx = Context { unit, func };
-  Index idx{program.get()};
 
   auto const cls = idx.resolve_class(ctx, s_TestClass.get());
   if (!cls) ADD_FAILURE();
@@ -4108,10 +4150,11 @@ TEST(Type, IndexBased) {
 }
 
 TEST(Type, Hierarchies) {
-  auto const program = make_test_program();
-  auto const unit = program->units.back().get();
+  auto idx = make_index();
+  auto const& program = idx.program();
+  auto const unit = program.units.back().get();
   auto const func = [&]() -> php::Func* {
-    for (auto& f : unit->funcs) {
+    for (auto& f : program.funcs) {
       if (f->name->isame(s_test.get())) return f.get();
     }
     return nullptr;
@@ -4119,7 +4162,6 @@ TEST(Type, Hierarchies) {
   EXPECT_TRUE(func != nullptr);
 
   auto const ctx = Context { unit, func };
-  Index idx{program.get()};
 
   // load classes in hierarchy
   auto const clsBase = idx.resolve_class(ctx, s_Base.get());
@@ -4431,10 +4473,11 @@ TEST(Type, Hierarchies) {
 }
 
 TEST(Type, Interface) {
-  auto const program = make_test_program();
-  auto const unit = program->units.back().get();
+  auto idx = make_index();
+  auto const& program = idx.program();
+  auto const unit = program.units.back().get();
   auto const func = [&]() -> php::Func* {
-    for (auto& f : unit->funcs) {
+    for (auto& f : program.funcs) {
       if (f->name->isame(s_test.get())) return f.get();
     }
     return nullptr;
@@ -4442,7 +4485,6 @@ TEST(Type, Interface) {
   EXPECT_TRUE(func != nullptr);
 
   auto const ctx = Context { unit, func };
-  Index idx{program.get()};
 
   // load classes in hierarchy
   auto const clsIA = idx.resolve_class(ctx, s_IA.get());
@@ -4496,10 +4538,11 @@ TEST(Type, Interface) {
 }
 
 TEST(Type, InterfaceCanonicalization) {
-  auto const program = make_test_program();
-  auto const unit = program->units.back().get();
+  auto idx = make_index();
+  auto const& program = idx.program();
+  auto const unit = program.units.back().get();
   auto const func = [&]() -> php::Func* {
-    for (auto& f : unit->funcs) {
+    for (auto& f : program.funcs) {
       if (f->name->isame(s_test.get())) return f.get();
     }
     return nullptr;
@@ -4507,7 +4550,6 @@ TEST(Type, InterfaceCanonicalization) {
   EXPECT_TRUE(func != nullptr);
 
   auto const ctx = Context { unit, func };
-  Index idx{program.get()};
 
   auto const clsICanon1 = idx.resolve_class(ctx, s_ICanon1.get());
   if (!clsICanon1) ADD_FAILURE();
@@ -4556,8 +4598,7 @@ TEST(Type, InterfaceCanonicalization) {
 }
 
 TEST(Type, WaitH) {
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   auto const rcls   = index.builtin_class(s_Awaitable.get());
   auto const twhobj = subObj(rcls);
@@ -5159,8 +5200,7 @@ TEST(Type, DictOfDict) {
 TEST(Type, WideningAlreadyStable) {
   // A widening union on types that are already stable should not move
   // the type anywhere.
-  auto const program = make_test_program();
-  Index index { program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -5248,8 +5288,7 @@ TEST(Type, ArrKey) {
 }
 
 TEST(Type, LoosenStaticness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
 
@@ -5373,8 +5412,7 @@ TEST(Type, LoosenStaticness) {
 }
 
 TEST(Type, LoosenStringStaticness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -5424,8 +5462,7 @@ TEST(Type, LoosenStringStaticness) {
 }
 
 TEST(Type, LoosenArrayStaticness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
 
@@ -5526,8 +5563,7 @@ TEST(Type, LoosenArrayStaticness) {
 }
 
 TEST(Type, Emptiness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   std::vector<std::pair<Type, Emptiness>> tests{
     { TInitNull, Emptiness::Empty },
@@ -5566,8 +5602,7 @@ TEST(Type, Emptiness) {
 }
 
 TEST(Type, AssertNonEmptiness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -5636,8 +5671,7 @@ TEST(Type, AssertNonEmptiness) {
 }
 
 TEST(Type, AssertEmptiness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -5707,8 +5741,7 @@ TEST(Type, AssertEmptiness) {
 }
 
 TEST(Type, LoosenEmptiness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const clsA = index.resolve_class(Context{}, s_A.get());
 
@@ -5772,10 +5805,11 @@ TEST(Type, LoosenEmptiness) {
 }
 
 TEST(Type, LoosenValues) {
-  auto const program = make_test_program();
-  auto const unit = program->units.back().get();
+  auto index = make_index();
+  auto const& program = index.program();
+  auto const unit = program.units.back().get();
     auto const func = [&]() -> php::Func* {
-    for (auto& f : unit->funcs) {
+    for (auto& f : program.funcs) {
       if (f->name->isame(s_test.get())) return f.get();
     }
     return nullptr;
@@ -5783,7 +5817,6 @@ TEST(Type, LoosenValues) {
   EXPECT_TRUE(func != nullptr);
 
   auto const ctx = Context { unit, func };
-  Index index{ program.get() };
 
   auto const& all = allCases(index);
 
@@ -5848,8 +5881,7 @@ TEST(Type, LoosenValues) {
 }
 
 TEST(Type, LoosenArrayValues) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -5864,8 +5896,7 @@ TEST(Type, LoosenArrayValues) {
 }
 
 TEST(Type, LoosenStringValues) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -5880,8 +5911,7 @@ TEST(Type, LoosenStringValues) {
 }
 
 TEST(Type, AddNonEmptiness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -5949,8 +5979,7 @@ TEST(Type, AddNonEmptiness) {
 }
 
 TEST(Type, LoosenVecOrDict) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -6019,8 +6048,7 @@ TEST(Type, LoosenVecOrDict) {
 }
 
 TEST(Type, Scalarize) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -6384,10 +6412,11 @@ TEST(Type, DictMapOptValues) {
 TEST(Type, ContextDependent) {
   // This only covers basic cases involving objects.  More testing should
   // be added for non object types, and nested types.
-  auto const program = make_test_program();
-  auto const unit = program->units.back().get();
+  auto idx = make_index();
+  auto const& program = idx.program();
+  auto const unit = program.units.back().get();
   auto const func = [&]() -> php::Func* {
-    for (auto& f : unit->funcs) {
+    for (auto& f : program.funcs) {
       if (f->name->isame(s_test.get())) return f.get();
     }
     return nullptr;
@@ -6395,7 +6424,6 @@ TEST(Type, ContextDependent) {
   EXPECT_TRUE(func != nullptr);
 
   auto const ctx = Context { unit, func };
-  Index idx{program.get()};
 
   // load classes in hierarchy  Base -> B -> BB
   auto const clsBase = idx.resolve_class(ctx, s_Base.get());
@@ -6810,8 +6838,7 @@ TEST(Type, ArrLike) {
 }
 
 TEST(Type, LoosenLikeness) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const& all = allCases(index);
   for (auto const& t : all) {
@@ -6839,8 +6866,7 @@ TEST(Type, LoosenLikeness) {
 }
 
 TEST(Type, LoosenLikenessRecursively) {
-  auto const program = make_test_program();
-  Index index{ program.get() };
+  auto index = make_index();
 
   auto const test = [&] (const Type& t) {
     if (!t.subtypeOf(BInitCell)) return;

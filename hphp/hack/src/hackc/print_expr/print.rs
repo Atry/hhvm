@@ -3,9 +3,11 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::context::Context;
-use crate::write::Error;
-use crate::write::{self};
+use std::borrow::Cow;
+use std::io::Result;
+use std::io::Write;
+use std::write;
+
 use bstr::BString;
 use bstr::ByteSlice;
 use core_utils_rust::add_ns;
@@ -26,15 +28,15 @@ use hhbc_string_utils::types;
 use lazy_static::lazy_static;
 use naming_special_names_rust::classes;
 use oxidized::ast;
+use oxidized::ast_defs;
 use oxidized::ast_defs::ParamKind;
-use oxidized::ast_defs::{self};
 use oxidized::local_id;
 use regex::Regex;
-use std::borrow::Cow;
-use std::io::Result;
-use std::io::Write;
-use std::write;
 use write_bytes::write_bytes;
+
+use crate::context::Context;
+use crate::write;
+use crate::write::Error;
 
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 #[repr(C)]
@@ -666,6 +668,11 @@ fn print_expr(
                 w.write_all(ecl.1.as_bytes())
             }
         },
+        Expr_::ReadonlyExpr(expr) => {
+            w.write_all(b"readonly(")?;
+            print_expr(ctx, w, env, expr)?;
+            w.write_all(b")")
+        }
         Expr_::Dollardollar(_)
         | Expr_::ExpressionTree(_)
         | Expr_::FunId(_)
@@ -675,7 +682,6 @@ fn print_expr(
         | Expr_::MethodCaller(_)
         | Expr_::MethodId(_)
         | Expr_::Pair(_)
-        | Expr_::ReadonlyExpr(_)
         | Expr_::SmethodId(_)
         | Expr_::This
         | Expr_::Upcast(_)

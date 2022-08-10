@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<623558bcf059a2debc8a6aa49f525e4d>>
+// @generated SignedSource<<3ea353b296afa2967c113eb7c55e6dba>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -16,13 +16,11 @@ use ocamlrep_derive::FromOcamlRepIn;
 use ocamlrep_derive::ToOcamlRep;
 use serde::Deserialize;
 use serde::Serialize;
+pub use typing_defs_core::*;
+pub use typing_defs_flags::*;
 
 #[allow(unused_imports)]
 use crate::*;
-
-pub use typing_defs_flags::*;
-
-pub use typing_defs_core::*;
 
 /// Origin of Class Constant References:
 /// In order to be able to detect cycle definitions like
@@ -107,6 +105,7 @@ pub struct ClassConstRef(pub ClassConstFrom, pub String);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "cd_")]
 #[repr(C)]
 pub struct ConstDecl {
     pub pos: pos_or_decl::PosOrDecl,
@@ -129,6 +128,7 @@ pub struct ConstDecl {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ce_")]
 #[repr(C)]
 pub struct ClassElt {
     pub visibility: CeVisibility,
@@ -157,6 +157,7 @@ pub struct ClassElt {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "fe_")]
 #[repr(C)]
 pub struct FunElt {
     pub deprecated: Option<String>,
@@ -209,6 +210,7 @@ pub enum ClassConstKind {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "cc_")]
 #[repr(C)]
 pub struct ClassConst {
     pub synthesized: bool,
@@ -290,6 +292,7 @@ pub struct Requirement(pub pos_or_decl::PosOrDecl, pub Ty);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "atc_")]
 #[repr(C)]
 pub struct AbstractTypeconst {
     pub as_constraint: Option<Ty>,
@@ -334,6 +337,7 @@ pub struct ConcreteTypeconst {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "patc_")]
 #[repr(C)]
 pub struct PartiallyAbstractTypeconst {
     pub constraint: Ty,
@@ -378,6 +382,7 @@ pub enum Typeconst {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "ttc_")]
 #[repr(C)]
 pub struct TypeconstType {
     pub synthesized: bool,
@@ -424,6 +429,7 @@ pub struct TypeconstType {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "te_")]
 #[repr(C)]
 pub struct EnumType {
     pub base: Ty,
@@ -447,6 +453,7 @@ pub struct EnumType {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(prefix = "td_")]
 #[repr(C)]
 pub struct TypedefType {
     pub module: Option<ast_defs::Id>,
@@ -458,6 +465,7 @@ pub struct TypedefType {
     pub is_ctx: bool,
     pub attributes: Vec<UserAttribute>,
     pub internal: bool,
+    pub docs_url: Option<String>,
 }
 
 #[derive(

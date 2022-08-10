@@ -325,10 +325,8 @@ SSATmp* simplifyCallViolatesModuleBoundary(State& env,
                                            const IRInstruction* inst) {
   if (!inst->src(0)->hasConstVal(TFunc)) return nullptr;
   auto const callee = inst->src(0)->funcVal();
-  auto const callerModule = inst->extra<FuncData>()->func->moduleName();
-  auto const result =
-    will_call_raise_module_boundary_violation(callee, callerModule);
-  return cns(env, result);
+  auto const caller = inst->extra<FuncData>()->func;
+  return cns(env, will_symbol_raise_module_boundary_violation(callee, caller));
 }
 
 
@@ -3412,7 +3410,7 @@ SSATmp* simplifyLdTypeStructureVal(State& env, const IRInstruction* inst) {
   }
 
   if (key->hasConstVal(TStr)) {
-    auto const dt = bespoke::TypeStructure::getKindOfField(key->strVal());
+    auto const dt = bespoke::TypeStructure::getFieldPair(key->strVal()).first;
 
     if (dt == KindOfUninit) {
       gen(env, Jmp, inst->taken());
@@ -4101,17 +4099,11 @@ SSATmp* simplifyWork(State& env, const IRInstruction* inst) {
       // The instruction has been simplified away, leaving only a bottom
       // constant. Mark it as unreachable.
       gen(env, Unreachable, ASSERT_REASON);
-    } else if (!res && !inst->isBlockEnd()) {
-      for (auto const dst : inst->dsts()) {
-        if (dst->type() == TBottom) {
-          // The instruction is passing through unchanged, but is known to have
-          // a bottom result. Replace it with the proper unreachable
-          // annotations.
-          res = cns(env, TBottom);
-          gen(env, Unreachable, ASSERT_REASON);
-          break;
-        }
-      }
+    } else if (!res && outputType(inst) == TBottom && !inst->isBlockEnd()) {
+      // The instruction is passing through unchanged, but is known to have a
+      // bottom result. Replace it with the proper unreachable annotations.
+      res = cns(env, TBottom);
+      gen(env, Unreachable, ASSERT_REASON);
     }
   }
 
@@ -4150,15 +4142,9 @@ SimplifyResult simplify(IRUnit& unit, const IRInstruction* origInst) {
 void simplifyInPlace(IRUnit& unit, IRInstruction* origInst) {
   assertx(!origInst->isTransient());
 
-  // Don't retype dests for a DefLabel since the presence of unreachable blocks
-  // during this pass may worsen its analyzed type.  We use reflow types to
-  // iterate the DefLabel input to a fixed point, which produces better
-  // results.
-  if (!origInst->is(DefLabel)) {
-    copyProp(origInst);
-    constProp(unit, origInst);
-    retypeDests(origInst, &unit);
-  }
+  copyProp(origInst);
+  constProp(unit, origInst);
+  retypeDests(origInst, &unit);
   auto res = simplify(unit, origInst);
 
   // No simplification occurred; nothing to do.
@@ -4297,28 +4283,23 @@ void simplifyPass(IRUnit& unit) {
 
   do {
     auto reachable = boost::dynamic_bitset<>(unit.numBlocks());
-    {
-      jit::stack<Block*> worklist;
-      worklist.push(unit.entry());
-      while (!worklist.empty()) {
-        auto const block = worklist.top();
-        worklist.pop();
 
-        if (reachable.test(block->id())) continue;
-        reachable.set(block->id());
-
-        if (!block->isUnreachable()) {
-          for (auto& inst : *block) simplifyInPlace(unit, &inst);
-        }
-
-        if (auto const b = block->next()) {
-          if (!b->isUnreachable()) worklist.push(b);
-        }
-        if (auto const b = block->taken()) {
-          if (!b->isUnreachable()) worklist.push(b);
+    auto const unreachableTypes = [&] (IRInstruction* inst) {
+      for (auto const src : inst->srcs()) {
+        if (src->type() == TBottom) return true;
+      }
+      for (auto const dst : inst->dsts()) {
+        if (dst->type() == TBottom) {
+          if (inst->isBlockEnd()) {
+            assertx(inst->nextEdge());
+            inst->setNext(unreachableBlock(unit, inst->bcctx()));
+            return false;
+          }
+          return true;
         }
       }
-    }
+      return false;
+    };
 
     auto const markUnreachable = [&] (Block* block) {
       // Any code that's postdominated by Unreachable is also unreachable, so
@@ -4330,7 +4311,37 @@ void simplifyPass(IRUnit& unit) {
         ++it;
         block->erase(toErase);
       }
+      reachable.reset(block->id());
     };
+
+    {
+      jit::stack<Block*> worklist;
+      worklist.push(unit.entry());
+      while (!worklist.empty()) {
+        auto const block = worklist.top();
+        worklist.pop();
+
+        if (reachable.test(block->id())) continue;
+        if (block->isUnreachable()) continue;
+        reachable.set(block->id());
+
+        for (auto& inst : *block) {
+          if (unreachableTypes(&inst)) {
+            markUnreachable(block);
+            break;
+          }
+          simplifyInPlace(unit, &inst);
+        }
+
+        if (!reachable.test(block->id())) continue;
+        if (auto const b = block->next()) {
+          if (!b->isUnreachable()) worklist.push(b);
+        }
+        if (auto const b = block->taken()) {
+          if (!b->isUnreachable()) worklist.push(b);
+        }
+      }
+    }
 
     // We may have introduced new unreachable blocks.
     if (unit.numBlocks() > reachable.size()) reachable.resize(unit.numBlocks());
@@ -4352,9 +4363,6 @@ void simplifyPass(IRUnit& unit) {
         markUnreachable(block);
       }
     }
-
-    // New unreachable blocks may improve our types, reflowTypes will return if
-    // it detects TBottoms in the reachable portion of the program.
   } while (reflowTypes(unit));
 }
 

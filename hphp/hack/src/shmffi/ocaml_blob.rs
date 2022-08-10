@@ -3,10 +3,10 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+use std::ptr::NonNull;
+
 use lz4::liblz4;
 use shmrs::chashmap::CMapValue;
-use std::convert::TryInto;
-use std::ptr::NonNull;
 
 extern "C" {
     fn caml_input_value_from_block(data: *const u8, size: usize) -> usize;
@@ -118,8 +118,8 @@ impl HeapValue {
         } else {
             let mut data: Vec<u8> = Vec::with_capacity(self.header.uncompressed_size());
             let uncompressed_size = liblz4::LZ4_decompress_safe(
-                self.data.as_ptr() as *const i8,
-                data.as_mut_ptr() as *mut i8,
+                self.data.as_ptr() as *const libc::c_char,
+                data.as_mut_ptr() as *mut libc::c_char,
                 self.header.buffer_size().try_into().unwrap(),
                 self.header.uncompressed_size().try_into().unwrap(),
             );
@@ -231,8 +231,8 @@ impl<'a> SerializedValue<'a> {
                 let mut compressed_data =
                     Vec::with_capacity(max_compression_size.try_into().unwrap());
                 let compressed_size = liblz4::LZ4_compress_default(
-                    buf.ptr as *const i8,
-                    compressed_data.as_mut_ptr() as *mut i8,
+                    buf.ptr as *const libc::c_char,
+                    compressed_data.as_mut_ptr() as *mut libc::c_char,
                     uncompressed_size,
                     max_compression_size,
                 );
@@ -310,9 +310,9 @@ impl<'a> SerializedValue<'a> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     use rand::prelude::*;
+
+    use super::*;
 
     #[test]
     fn test_heap_value_header() {

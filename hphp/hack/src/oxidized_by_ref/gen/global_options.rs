@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<ecfc727b7ebcae3206ead485ef749495>>
+// @generated SignedSource<<9d95b392e4d7fd40e46269b2ad8408af>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -161,7 +161,7 @@ pub struct GlobalOptions<'a> {
     pub po_interpret_soft_types_as_like_types: bool,
     pub tco_enable_strict_string_concat_interp: bool,
     pub tco_ignore_unsafe_cast: bool,
-    pub tco_readonly: bool,
+    pub tco_no_parser_readonly_check: bool,
     pub tco_enable_expression_trees: bool,
     pub tco_enable_modules: bool,
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -191,6 +191,7 @@ pub struct GlobalOptions<'a> {
     pub tco_use_manifold_cython_client: bool,
     pub tco_record_fine_grained_dependencies: bool,
     pub tco_loop_iteration_upper_bound: Option<isize>,
+    pub tco_expression_tree_virtualize_functions: bool,
 }
 impl<'a> TrivialDrop for GlobalOptions<'a> {}
 arena_deserializer::impl_deserialize_in_arena!(GlobalOptions<'arena>);

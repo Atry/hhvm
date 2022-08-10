@@ -30,7 +30,6 @@ function my_option_map(): OptionInfoMap {
                             'Which region selector to use (e.g \'method\')' },
 'no-pgo'          => Pair { '',  'Disable PGO' },
 'bespoke:'        => Pair { '',  'Bespoke array mode' },
-'lazyclass'       => Pair { '',  'Enable lazy classes' },
 'hadva'           => Pair { '',  'Enable HAM and automarking' },
 'pgo-threshold:'  => Pair { '',  'PGO threshold to use' },
 'no-obj-destruct' => Pair { '',
@@ -159,13 +158,6 @@ function determine_flags(OptionMap $opts): string {
         '';
   }
 
-  if ($opts->containsKey('lazyclass')) {
-    $flags .=
-        '-v Eval.EmitClassPointers=2 '.
-        '-v Eval.ClassPassesClassname=true '.
-        '';
-  }
-
   if ($opts->containsKey('region-mode')) {
     if ($opts['region-mode'] == 'method') {
       $flags .=
@@ -280,7 +272,7 @@ function compile_a_repo(bool $unoptimized, OptionMap $opts): string {
     '--hphp '.
     ($unoptimized ? '-v UseHHBBC=0 ' : '').
     ($opts->containsKey('php7') ? '-d hhvm.php7.all=1 ' : '').
-    '-t hhbc -k1 -l3 '.
+    '-k1 -l3 '.
     $hphpc_flags.
     argv_for_shell().
     " >$hphp_out 2>&1";

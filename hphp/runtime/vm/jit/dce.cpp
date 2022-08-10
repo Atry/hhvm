@@ -533,7 +533,7 @@ bool canDCE(const IRInstruction& inst) {
   case RaiseCoeffectsFunParamCoeffectRulesViolation:
   case RaiseStrToClassNotice:
   case RaiseModuleBoundaryViolation:
-  case RaiseImplicitContextStateInvalidException:
+  case RaiseImplicitContextStateInvalid:
   case CheckClsMethFunc:
   case CheckClsReifiedGenericMismatch:
   case CheckClsRGSoft:
@@ -737,6 +737,7 @@ bool canDCE(const IRInstruction& inst) {
   case StructDictTypeBoundCheck:
   case LdCoeffectFunParamNaive:
   case DeserializeLazyProp:
+  case GetClsRGProp:
     return false;
 
   case IsTypeStruct:

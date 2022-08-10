@@ -3,10 +3,9 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::context::Addr;
-use crate::context::Context;
-use crate::context::MemberOpBuilder;
-use crate::sequence::SequenceKind;
+use std::cmp::Ordering;
+use std::fmt::Display;
+
 use hhbc::Instruct;
 use hhbc::Opcode;
 use hhbc::Pseudo;
@@ -26,8 +25,11 @@ use ir::TryCatchId;
 use ir::UnitStringId;
 use ir::ValueId;
 use log::trace;
-use std::cmp::Ordering;
-use std::fmt::Display;
+
+use crate::context::Addr;
+use crate::context::Context;
+use crate::context::MemberOpBuilder;
+use crate::sequence::SequenceKind;
 
 /// Convert the sequence that starts with the offset `addr`.
 ///
@@ -803,7 +805,7 @@ fn convert_control_flow<'a, 'b>(ctx: &mut Context<'a, 'b>, opcode: &Opcode<'a>) 
     }
 }
 
-#[macros::bc_to_ir]
+#[b2i_macros::bc_to_ir]
 fn convert_opcode<'a, 'b>(ctx: &mut Context<'a, 'b>, opcode: &Opcode<'a>) -> bool {
     use instr::Hhbc;
     use ir::Literal;
@@ -978,6 +980,7 @@ fn convert_opcode<'a, 'b>(ctx: &mut Context<'a, 'b>, opcode: &Opcode<'a>) -> boo
         Opcode::ChainFaults => simple!(Hhbc::ChainFaults),
         Opcode::CheckProp => simple!(Hhbc::CheckProp),
         Opcode::CheckClsReifiedGenericMismatch => simple!(Hhbc::CheckClsReifiedGenericMismatch),
+        Opcode::CheckClsRGSoft => simple!(Hhbc::CheckClsRGSoft),
         Opcode::CheckThis => simple!(Hhbc::CheckThis),
         Opcode::ClassGetC => simple!(Hhbc::ClassGetC),
         Opcode::ClassHasReifiedGenerics => simple!(Hhbc::ClassHasReifiedGenerics),
@@ -1009,6 +1012,7 @@ fn convert_opcode<'a, 'b>(ctx: &mut Context<'a, 'b>, opcode: &Opcode<'a>) -> boo
         Opcode::False => simple!(Literal::Bool, false),
         Opcode::File => simple!(Literal::File),
         Opcode::FuncCred => simple!(Literal::FuncCred),
+        Opcode::GetClsRGProp => simple!(Hhbc::GetClsRGProp),
         Opcode::GetMemoKeyL => simple!(Hhbc::GetMemoKeyL),
         Opcode::Gt => simple!(Hhbc::CmpOp, CmpOp::Gt),
         Opcode::Gte => simple!(Hhbc::CmpOp, CmpOp::Gte),
@@ -1073,7 +1077,7 @@ fn convert_opcode<'a, 'b>(ctx: &mut Context<'a, 'b>, opcode: &Opcode<'a>) -> boo
         Opcode::PushL => simple!(Hhbc::ConsumeL),
         Opcode::RaiseClassStringConversionWarning => todo!(),
         Opcode::RecordReifiedGeneric => simple!(Hhbc::RecordReifiedGeneric),
-        Opcode::ResolveClass => todo!(),
+        Opcode::ResolveClass => simple!(Hhbc::ResolveClass),
         Opcode::ResolveClsMethod => simple!(Hhbc::ResolveClsMethod),
         Opcode::ResolveClsMethodD => simple!(Hhbc::ResolveClsMethodD),
         Opcode::ResolveClsMethodS => simple!(Hhbc::ResolveClsMethodS),

@@ -106,18 +106,26 @@ let add_key_constraint
     (origin : int)
     (env : env)
     entity
-    (((_, _, key), ty) : T.expr * Typing_defs.locl_ty) : env =
+    (((_, _, key), ty) : T.expr * Typing_defs.locl_ty)
+    ~is_optional : env =
   match entity with
   | Some entity ->
-    let constraint_ =
+    begin
       match key with
       | A.String str ->
+        let key = Typing_defs.TSFlit_str (Pos_or_decl.none, str) in
         let ty = Tast_env.fully_expand env.tast_env ty in
-        Has_static_key
-          (entity, Typing_defs.TSFlit_str (Pos_or_decl.none, str), ty)
-      | _ -> Has_dynamic_key entity
-    in
-    Env.add_constraint env { hack_pos; origin; constraint_ }
+        let constraint_ = Has_static_key (entity, key, ty) in
+        let env = Env.add_constraint env { hack_pos; origin; constraint_ } in
+        if is_optional then
+          let constraint_ = Has_optional_key (entity, key) in
+          Env.add_constraint env { hack_pos; origin; constraint_ }
+        else
+          env
+      | _ ->
+        let constraint_ = Has_dynamic_key entity in
+        Env.add_constraint env { hack_pos; origin; constraint_ }
+    end
   | None -> env
 
 let redirect ~pos ~origin (env : env) (entity_ : entity_) : env * entity_ =
@@ -141,15 +149,7 @@ let rec assign
     begin
       match entity with
       | Some entity_ ->
-        let current_assignment = Literal pos in
-        let decorated_constraint =
-          {
-            hack_pos = pos;
-            origin;
-            constraint_ = Subsets (entity_, current_assignment);
-          }
-        in
-        let env = Env.add_constraint env decorated_constraint in
+        let (env, current_assignment) = redirect ~pos ~origin env entity_ in
         let env =
           add_key_constraint
             pos
@@ -157,8 +157,8 @@ let rec assign
             env
             (Some current_assignment)
             (ix, ty_rhs)
+            ~is_optional:false
         in
-
         (* Handle copy-on-write by creating a variable indirection *)
         let (env, var) = redirect ~pos ~origin env current_assignment in
         Env.set_local env lid (Some var)
@@ -188,18 +188,16 @@ and expr_ (env : env) ((ty, pos, e) : T.expr) : env * entity =
     let add_key_constraint env (key, ((ty, _, _) as value)) : env =
       let (env, _key_entity) = expr_ env key in
       let (env, _val_entity) = expr_ env value in
-      let env = add_key_constraint pos __LINE__ env entity (key, ty) in
-      env
+      add_key_constraint pos __LINE__ env entity (key, ty) ~is_optional:false
     in
     let env = List.fold ~init:env ~f:add_key_constraint key_value_pairs in
-
-    (* Handle copy-on-write by creating a variable indirection *)
-    let (env, var) = redirect ~pos ~origin:__LINE__ env entity_ in
-    (env, Some var)
+    (env, entity)
   | A.Array_get (base, Some ix) ->
     let (env, entity_exp) = expr_ env base in
     let (env, _entity_ix) = expr_ env ix in
-    let env = add_key_constraint pos __LINE__ env entity_exp (ix, ty) in
+    let env =
+      add_key_constraint pos __LINE__ env entity_exp (ix, ty) ~is_optional:false
+    in
     (env, None)
   | A.Lvar (_, lid) ->
     let entity = Env.get_local env lid in
@@ -218,20 +216,34 @@ and expr_ (env : env) ((ty, pos, e) : T.expr) : env * entity =
       | [(_, base); (_, ix); _] ->
         let (env, entity_exp) = expr_ env base in
         let (env, _entity_ix) = expr_ env ix in
-        let env = add_key_constraint pos __LINE__ env entity_exp (ix, ty) in
+        let env =
+          add_key_constraint
+            pos
+            __LINE__
+            env
+            entity_exp
+            (ix, ty)
+            ~is_optional:true
+        in
         (env, None)
       | _ -> failwithpos pos ("Unsupported idx expression: " ^ Utils.expr_name e)
     end
-  | A.Call (_base, _targs, args, _unpacked) ->
-    (* TODO: This is obviously incomplete. It just adds a constraint to each
-       dict argument so that we know what shape type that reaches to the
-       given position is. *)
-    let expr_arg env (_param_kind, ((_ty, pos, _exp) as arg)) =
+  | A.Call ((_, _, A.Id (_, f_id)), _targs, args, _unpacked) ->
+    let expr_arg arg_idx env (_param_kind, ((_ty, pos, _exp) as arg)) =
       let (env, arg_entity) = expr_ env arg in
       match arg_entity with
       | Some arg_entity_ ->
-        let constraint_ = decorate ~origin:__LINE__ @@ Marks (Argument, pos) in
-        let env = Env.add_constraint env constraint_ in
+        let env =
+          if String.equal f_id SN.Hips.inspect then
+            let constraint_ = decorate ~origin:__LINE__ @@ Marks (Debug, pos) in
+            Env.add_constraint env constraint_
+          else
+            let inter_constraint_ =
+              decorate ~origin:__LINE__ @@ Arg (f_id, arg_idx, arg_entity_)
+            in
+            Env.add_inter_constraint env inter_constraint_
+        in
+        (* TODO(T128046165) Generate and add inter-procedural constraints *)
         let new_entity_ = Literal pos in
         let env =
           when_tast_check env.tast_env ~default:env @@ fun () ->
@@ -247,7 +259,7 @@ and expr_ (env : env) ((ty, pos, e) : T.expr) : env * entity =
         env
       | None -> env
     in
-    let env = List.fold ~f:expr_arg ~init:env args in
+    let env = List.foldi ~f:expr_arg ~init:env args in
     (env, None)
   | A.Eif (cond, Some then_expr, else_expr) ->
     let (parent_env, _cond_entity) = expr_ env cond in
@@ -433,7 +445,7 @@ and stmt (env : env) ((pos, stmt) : T.stmt) : env =
 and block (env : env) : T.block -> env = List.fold ~init:env ~f:stmt
 
 let decl_hint tast_env kind ((ty, hint) : T.type_hint) :
-    decorated_constraint list * entity =
+    constraint_ decorated list * entity =
   if is_suitable_target_ty tast_env ty then
     let hint_pos = dict_pos_of_hint hint in
     let decorate ~origin constraint_ =
@@ -456,7 +468,7 @@ let decl_hint tast_env kind ((ty, hint) : T.type_hint) :
     ([], None)
 
 let init_params tast_env (params : T.fun_param list) :
-    decorated_constraint list * entity LMap.t =
+    constraint_ decorated list * entity LMap.t =
   let add_param
       (constraints, lmap)
       A.{ param_name; param_type_hint; param_is_variadic; _ } =
@@ -474,17 +486,17 @@ let init_params tast_env (params : T.fun_param list) :
   in
   List.fold ~f:add_param ~init:([], LMap.empty) params
 
-let callable tast_env params ~return body : decorated_constraint list =
+let callable tast_env params ~return body : decorated_constraints =
   let (param_constraints, param_env) = init_params tast_env params in
   let (return_constraints, return) = decl_hint tast_env Return return in
   let constraints = return_constraints @ param_constraints in
-  let env = Env.init tast_env constraints param_env ~return in
+  let env = Env.init tast_env constraints [] param_env ~return in
   let env = block env body.A.fb_ast in
-  env.constraints
+  (env.constraints, env.inter_constraints)
 
 let program (ctx : Provider_context.t) (tast : Tast.program) :
-    decorated_constraint list SMap.t =
-  let def (def : T.def) : (string * decorated_constraint list) list =
+    decorated_constraints SMap.t =
+  let def (def : T.def) : (string * decorated_constraints) list =
     let tast_env = Tast_env.def_env ctx def in
     match def with
     | A.Fun fd ->

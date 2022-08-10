@@ -32,14 +32,16 @@
 #include <folly/portability/Unistd.h>
 
 #include "hphp/compiler/option.h"
+#include "hphp/hack/src/hackc/ffi_bridge/compiler_ffi.rs.h"
 #include "hphp/hhvm/process-init.h"
-#include "hphp/runtime/base/coeffects-config.h"
 #include "hphp/runtime/base/execution-context.h"
 #include "hphp/runtime/base/file-util-defs.h"
 #include "hphp/runtime/base/file-util.h"
 #include "hphp/runtime/base/program-functions.h"
 #include "hphp/runtime/vm/as.h"
 #include "hphp/runtime/vm/func-emitter.h"
+#include "hphp/runtime/vm/preclass-emitter.h"
+#include "hphp/runtime/vm/type-alias-emitter.h"
 #include "hphp/runtime/vm/unit-emitter.h"
 #include "hphp/runtime/vm/unit-parser.h"
 #include "hphp/util/exception.h"
@@ -59,131 +61,24 @@ const StaticString s_EntryPoint("__EntryPoint");
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// Configuration for parse workers. This should contain any runtime
-// options which can affect HackC (or the interface to it).
-struct Package::Config {
-  Config() = default;
-
-  static Config make() {
-    Config c;
-    #define R(Opt) c.Opt = RO::Opt;
-    UNITCACHEFLAGS()
-    #undef R
-    c.EvalAbortBuildOnCompilerError = RO::EvalAbortBuildOnCompilerError;
-    c.EvalAbortBuildOnVerifyError = RO::EvalAbortBuildOnVerifyError;
-    c.IncludeRoots = RO::IncludeRoots;
-    c.coeffects = CoeffectsConfig::exportForParse();
-    return c;
-  }
-
-  void apply() const {
-    #define R(Opt) RO::Opt = Opt;
-    UNITCACHEFLAGS()
-    #undef R
-    RO::EvalAbortBuildOnCompilerError = EvalAbortBuildOnCompilerError;
-    RO::EvalAbortBuildOnVerifyError = EvalAbortBuildOnVerifyError;
-    RO::IncludeRoots = IncludeRoots;
-    CoeffectsConfig::importForParse(coeffects);
-  }
-
-  template <typename SerDe> void serde(SerDe& sd) {
-    #define R(Opt) sd(Opt);
-    UNITCACHEFLAGS()
-    #undef R
-    sd(EvalAbortBuildOnCompilerError)
-      (EvalAbortBuildOnVerifyError)
-      (IncludeRoots)
-      (coeffects);
-  }
-
-private:
-  #define R(Opt) decltype(RuntimeOption::Opt) Opt;
-  UNITCACHEFLAGS()
-  #undef R
-  bool EvalAbortBuildOnCompilerError;
-  bool EvalAbortBuildOnVerifyError;
-  decltype(RO::IncludeRoots) IncludeRoots;
-  CoeffectsConfig coeffects;
-};
-
-///////////////////////////////////////////////////////////////////////////////
-
-Package::AsyncState::AsyncState()
-  : m_executor{
-      "HPHPcWorker",
-      0,
-      size_t(Option::ParserThreadCount <= 0 ? 1 : Option::ParserThreadCount),
-      [] {
-        hphp_thread_init();
-        g_context.getCheck();
-      },
-      [] { hphp_thread_exit(); },
-      std::chrono::minutes{15}
-    }
-  , m_client{m_executor.sticky(), makeOptions()}
-  , m_config{
-      [this] { return m_client.store(Config::make()); },
-      m_executor.sticky()
-    }
-  , m_repoOptions{m_client}
-{
-}
-
-Options Package::AsyncState::makeOptions() {
-  Options options;
-  options
-    .setUseCase(Option::ExternWorkerUseCase)
-    .setUseSubprocess(Option::ExternWorkerForceSubprocess
-                        ? Options::UseSubprocess::Always
-                        : Options::UseSubprocess::Fallback)
-    .setCacheExecs(Option::ExternWorkerUseExecCache)
-    .setCleanup(Option::ExternWorkerCleanup)
-    .setUseEdenFS(RuntimeOption::EvalUseEdenFS)
-    .setUseRichClient(Option::ExternWorkerUseRichClient)
-    .setUseZippyRichClient(Option::ExternWorkerUseZippyRichClient)
-    .setUseP2P(Option::ExternWorkerUseP2P)
-    .setVerboseLogging(Option::ExternWorkerVerboseLogging);
-  if (Option::ExternWorkerTimeoutSecs > 0) {
-    options.setTimeout(std::chrono::seconds{Option::ExternWorkerTimeoutSecs});
-  }
-  if (!Option::ExternWorkerWorkingDir.empty()) {
-    options.setWorkingDir(Option::ExternWorkerWorkingDir);
-  }
-  if (Option::ExternWorkerThrottleRetries >= 0) {
-    options.setThrottleRetries(Option::ExternWorkerThrottleRetries);
-  }
-  if (Option::ExternWorkerThrottleBaseWaitMSecs >= 0) {
-    options.setThrottleBaseWait(
-      std::chrono::milliseconds{Option::ExternWorkerThrottleBaseWaitMSecs}
-    );
-  }
-  return options;
-}
-
-///////////////////////////////////////////////////////////////////////////////
-
-Package::Package(const std::string& root, bool parseOnDemand)
+Package::Package(const std::string& root,
+                 bool parseOnDemand,
+                 coro::TicketExecutor& executor,
+                 extern_worker::Client& client)
   : m_root{root}
-  , m_parseFailed{false}
+  , m_failed{false}
   , m_parseOnDemand{parseOnDemand}
   , m_total{0}
   , m_callback{nullptr}
   , m_fileCache{std::make_shared<FileCache>()}
-  , m_async{std::make_unique<AsyncState>()}
+  , m_executor{executor}
+  , m_client{client}
+  , m_config{
+      [this] { return m_client.store(Config::make()); },
+      m_executor.sticky()
+    }
+  , m_repoOptions{client}
 {
-}
-
-Optional<std::thread> Package::asyncClear() {
-  if (!m_async) return std::nullopt;
-  if (!Option::ParserAsyncCleanup) {
-    // If we don't want to cleanup asynchronously, do so now.
-    m_async.reset();
-    return std::nullopt;
-  }
-  // All the thread does is reset the unique_ptr to run the dtor.
-  return std::thread{
-    [a = std::move(m_async)] () mutable { a.reset(); }
-  };
 }
 
 void Package::addInputList(const std::string& listFileName) {
@@ -283,6 +178,8 @@ std::shared_ptr<FileCache> Package::getFileCache() {
 
 namespace {
 
+///////////////////////////////////////////////////////////////////////////////
+
 std::unique_ptr<UnitEmitter>
 createSymlinkWrapper(const std::string& fileName,
                      const std::string& targetPath,
@@ -327,242 +224,196 @@ createSymlinkWrapper(const std::string& fileName,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-// Metadata for a parse job. Just filename things that we need to
-// resolve when we have the whole source tree available.
-struct FileMeta {
-  FileMeta() = default;
-  FileMeta(std::string f, Optional<std::string> o)
-    : m_filename{std::move(f)}, m_targetPath{std::move(o)} {}
+Package::FileMetaVec s_fileMetas;
+Package::ParseMetaVec s_parseMetas;
+Package::IndexMetaVec s_indexMetas;
 
-  // The (relative) filename of the file
-  std::string m_filename;
-  // If the file is a symlink, what its target is
-  Optional<std::string> m_targetPath;
+size_t s_fileMetasIdx{0};
 
-  template <typename SerDe> void serde(SerDe& sd) {
-    sd(m_filename)
-      (m_targetPath);
+// Construct parse metadata for the given unit-emitter
+UnitEmitterSerdeWrapper output(std::unique_ptr<UnitEmitter> ue) {
+  if (!ue) {
+    s_parseMetas.emplace_back();
+    return UnitEmitterSerdeWrapper{};
   }
-};
 
-// Wraps an unique_ptr<UnitEmitter> as a return value from a parse job
-// and its serialization logic.
-struct UnitEmitterWrapper {
-  UnitEmitterWrapper() = default;
-  /* implicit */ UnitEmitterWrapper(std::unique_ptr<UnitEmitter> ue)
-    : m_ue{std::move(ue)} {}
+  Package::ParseMeta meta;
+  meta.m_symbol_refs = std::move(ue->m_symbol_refs);
+  meta.m_filepath = ue->m_filepath;
 
-  std::unique_ptr<UnitEmitter> m_ue;
-
-  template <typename SerDe> void serde(SerDe& sd) {
-    if constexpr (SerDe::deserializing) {
-      assertx(!m_ue);
-
-      bool present;
-      sd(present);
-      if (present) {
-        SHA1 sha1;
-        const StringData* filepath;
-        sd(sha1);
-        sd(filepath);
-
-        auto ue = std::make_unique<UnitEmitter>(
-          sha1, SHA1{}, Native::s_noNativeFuncs
-        );
-        ue->m_filepath = makeStaticString(filepath);
-        ue->serde(sd, false);
-        m_ue = std::move(ue);
-      }
+  for (size_t n = 0; n < ue->numPreClasses(); ++n) {
+    auto pce = ue->pce(n);
+    if (pce->attrs() & AttrEnum) {
+      meta.m_definitions.m_enums.emplace_back(pce->name());
     } else {
-      if (m_ue) {
-        sd(true);
-        sd(m_ue->sha1());
-        sd(m_ue->m_filepath);
-        m_ue->serde(sd, false);
-      } else {
-        sd(false);
-      }
+      meta.m_definitions.m_classes.emplace_back(pce->name());
     }
   }
-};
-
-// Metadata about the UnitEmitter obtained during parsing. This is
-// returned separately from the UnitEmitter, since we need this to
-// find new files for parse on-demand, and we can avoid loading the
-// entire UnitEmitter just to get this.
-struct ParseMeta {
-  // Symbols present in the unit. This will be used to find new files
-  // for parse on-demand.
-  SymbolRefs m_symbol_refs;
-  // If not empty, parsing resulted in an ICE and configuration
-  // indicated that this should be fatal.
-  std::string m_abort;
-
-  template <typename SerDe> void serde(SerDe& sd) {
-    sd(m_symbol_refs)
-      (m_abort);
-  }
-};
-
-// Extern-worker job for parsing a source file into an UnitEmitter
-// (and some other metadata).
-struct ParseJob {
-  static std::string name() { return "hphpc-parse"; }
-
-  static void init(const Package::Config& config,
-                   std::vector<FileMeta> meta) {
-    rds::local::init();
-
-    Hdf hdf;
-    IniSetting::Map ini = IniSetting::Map::object;
-    RO::Load(ini, hdf);
-
-    config.apply();
-    Logger::LogLevel = Logger::LogError;
-
-    // Inhibit extensions and systemlib from being initialized. It
-    // takes a while and we don't need it.
-    register_process_init(true);
-    hphp_process_init(true);
-
-    // Don't use unit emitter's caching here, we're relying on
-    // extern-worker to do that for us.
-    g_unit_emitter_cache_hook = nullptr;
-
-    // This is a lie, but a lot of stuff breaks if you don't set it to
-    // true (when false, everything assumes you're parsing systemlib).
-    SystemLib::s_inited = true;
-
-    s_fileMetas = std::move(meta);
-    s_fileMetasIdx = 0;
-  }
-  static std::vector<ParseMeta> fini() {
-    assertx(s_fileMetasIdx == s_fileMetas.size());
-    assertx(s_parseMetas.size() == s_fileMetas.size());
-    hphp_process_exit();
-    rds::local::fini();
-    return std::move(s_parseMetas);
-  }
-
-  static UnitEmitterWrapper output(std::unique_ptr<UnitEmitter> ue) {
-    if (!ue) {
-      s_parseMetas.emplace_back();
-      return UnitEmitterWrapper{};
+  for (auto const& fe : ue->fevec()) {
+    if (fe->attrs & AttrIsMethCaller) {
+      meta.m_definitions.m_methCallers.emplace_back(fe->name);
+    } else {
+      meta.m_definitions.m_funcs.emplace_back(fe->name);
     }
-    s_parseMetas.emplace_back(ParseMeta{std::move(ue->m_symbol_refs)});
-    return std::move(ue);
+  }
+  for (auto const& t : ue->typeAliases()) {
+    meta.m_definitions.m_typeAliases.emplace_back(t->name());
+  }
+  for (auto const& c : ue->constants()) {
+    meta.m_definitions.m_constants.emplace_back(c.name);
+  }
+  for (auto const& m : ue->modules()) {
+    meta.m_definitions.m_modules.emplace_back(m.name);
   }
 
-  static UnitEmitterWrapper run(
-      const std::string& content,
-      const RepoOptionsFlags& repoOptions) {
-    if (s_fileMetasIdx >= s_fileMetas.size()) {
-      throw Error{
-        folly::sformat("Encountered {} inputs, but only {} file metas",
-                       s_fileMetasIdx+1, s_fileMetas.size())
-      };
-    }
-    auto const& meta = s_fileMetas[s_fileMetasIdx++];
-    auto const& fileName = meta.m_filename;
+  s_parseMetas.emplace_back(std::move(meta));
+  return std::move(ue);
+}
 
-    try {
-      if (RO::EvalAllowHhas) {
-        if (fileName.size() > 5 &&
-            !fileName.compare(fileName.size() - 5, std::string::npos, ".hhas")) {
-          auto ue = assemble_string(
-            content.data(),
-            content.size(),
-            fileName.c_str(),
-            SHA1{string_sha1(content)},
-            Native::s_noNativeFuncs
+// HHVM shutdown code shared by different Job types.
+void finishJob() {
+  hphp_process_exit();
+  rds::local::fini();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+void Package::parseInit(const Config& config, FileMetaVec meta) {
+  rds::local::init();
+
+  Hdf hdf;
+  IniSetting::Map ini = IniSetting::Map::object;
+  RO::Load(ini, hdf);
+
+  config.apply();
+  Logger::LogLevel = Logger::LogError;
+
+  // Inhibit extensions and systemlib from being initialized. It
+  // takes a while and we don't need it.
+  register_process_init(true);
+  hphp_process_init(true);
+
+  // Don't use unit emitter's caching here, we're relying on
+  // extern-worker to do that for us.
+  g_unit_emitter_cache_hook = nullptr;
+
+  // This is a lie, but a lot of stuff breaks if you don't set it to
+  // true (when false, everything assumes you're parsing systemlib).
+  SystemLib::s_inited = true;
+
+  s_fileMetas = std::move(meta);
+  s_fileMetasIdx = 0;
+}
+
+Package::ParseMetaVec Package::parseFini() {
+  assertx(s_fileMetasIdx == s_fileMetas.size());
+  assertx(s_parseMetas.size() == s_fileMetas.size());
+  finishJob();
+  return std::move(s_parseMetas);
+}
+
+UnitEmitterSerdeWrapper
+Package::parseRun(const std::string& content,
+                  const RepoOptionsFlags& repoOptions) {
+  if (s_fileMetasIdx >= s_fileMetas.size()) {
+    throw Error{
+      folly::sformat("Encountered {} inputs, but only {} file metas",
+                     s_fileMetasIdx+1, s_fileMetas.size())
+    };
+  }
+  auto const& meta = s_fileMetas[s_fileMetasIdx++];
+  auto const& fileName = meta.m_filename;
+
+  try {
+    if (RO::EvalAllowHhas) {
+      if (fileName.size() > 5 &&
+          !fileName.compare(fileName.size() - 5, std::string::npos, ".hhas")) {
+        auto ue = assemble_string(
+          content.data(),
+          content.size(),
+          fileName.c_str(),
+          SHA1{string_sha1(content)},
+          Native::s_noNativeFuncs
+        );
+        if (meta.m_targetPath) {
+          ue = createSymlinkWrapper(
+            fileName, *meta.m_targetPath, std::move(ue)
           );
-          if (meta.m_targetPath) {
-            ue = createSymlinkWrapper(
-              fileName, *meta.m_targetPath, std::move(ue)
-            );
-            if (!ue) {
-              // If the symlink contains no EntryPoint we don't do
-              // anything but it is still success
-              return output(nullptr);
-            }
-          }
-          return output(std::move(ue));
-        }
-      }
-
-      LazyUnitContentsLoader loader{
-        SHA1{mangleUnitSha1(string_sha1(content), fileName, repoOptions)},
-        content,
-        repoOptions,
-        {} // TODO: repo mode support for decl providers
-      };
-
-      auto const mode =
-        RO::EvalAbortBuildOnCompilerError ? CompileAbortMode::AllErrors :
-        RO::EvalAbortBuildOnVerifyError   ? CompileAbortMode::VerifyErrors :
-        CompileAbortMode::OnlyICE;
-
-      auto uc = UnitCompiler::create(
-        loader,
-        fileName.c_str(),
-        Native::s_noNativeFuncs,
-        nullptr, // TODO: repo mode support for decl providers
-        false,
-        false
-      );
-      assertx(uc);
-
-      std::unique_ptr<UnitEmitter> ue;
-      try {
-        auto cacheHit = false;
-        ue = uc->compile(cacheHit, mode);
-        // We disabled UnitCompiler caching, so we shouldn't have any
-        // hits.
-        assertx(!cacheHit);
-      } catch (const CompilerAbort& exn) {
-        s_parseMetas.emplace_back(ParseMeta{{}, exn.what()});
-        return UnitEmitterWrapper{};
-      }
-
-      if (ue) {
-        if (!ue->m_ICE && meta.m_targetPath) {
-          ue =
-            createSymlinkWrapper(fileName, *meta.m_targetPath, std::move(ue));
           if (!ue) {
-            // If the symlink contains no EntryPoint we don't do anything but it
-            // is still success
+            // If the symlink contains no EntryPoint we don't do
+            // anything but it is still success
             return output(nullptr);
           }
         }
         return output(std::move(ue));
-      } else {
-        throw Error{
-          folly::sformat(
-            "Unable to compile using {} compiler: {}",
-            uc->getName(),
-            fileName
-          )
-        };
       }
-    } catch (const std::exception& exn) {
+    }
+
+    LazyUnitContentsLoader loader{
+      SHA1{mangleUnitSha1(string_sha1(content), fileName, repoOptions)},
+      content,
+      repoOptions,
+      {} // TODO: repo mode support for decl providers
+    };
+
+    auto const mode =
+      RO::EvalAbortBuildOnCompilerError ? CompileAbortMode::AllErrors :
+      RO::EvalAbortBuildOnVerifyError   ? CompileAbortMode::VerifyErrors :
+      CompileAbortMode::OnlyICE;
+
+    auto uc = UnitCompiler::create(
+      loader,
+      fileName.c_str(),
+      Native::s_noNativeFuncs,
+      nullptr, // TODO: repo mode support for decl providers
+      false,
+      false
+    );
+    assertx(uc);
+
+    std::unique_ptr<UnitEmitter> ue;
+    try {
+      auto cacheHit = false;
+      ue = uc->compile(cacheHit, mode);
+      // We disabled UnitCompiler caching, so we shouldn't have any
+      // hits.
+      assertx(!cacheHit);
+    } catch (const CompilerAbort& exn) {
+      ParseMeta meta;
+      meta.m_abort = exn.what();
+      s_parseMetas.emplace_back(std::move(meta));
+      return UnitEmitterSerdeWrapper{};
+    }
+
+    if (ue) {
+      if (!ue->m_ICE && meta.m_targetPath) {
+        ue =
+          createSymlinkWrapper(fileName, *meta.m_targetPath, std::move(ue));
+        if (!ue) {
+          // If the symlink contains no EntryPoint we don't do anything but it
+          // is still success
+          return output(nullptr);
+        }
+      }
+      return output(std::move(ue));
+    } else {
       throw Error{
-        folly::sformat("While parsing `{}`: {}", fileName, exn.what())
+        folly::sformat(
+          "Unable to compile using {} compiler: {}",
+          uc->getName(),
+          fileName
+        )
       };
     }
+  } catch (const std::exception& exn) {
+    throw Error{
+      folly::sformat("While parsing `{}`: {}", fileName, exn.what())
+    };
   }
-
-  static std::vector<FileMeta> s_fileMetas;
-  static size_t s_fileMetasIdx;
-
-  static std::vector<ParseMeta> s_parseMetas;
-};
-Job<ParseJob> g_parseJob;
-
-std::vector<FileMeta> ParseJob::s_fileMetas;
-std::vector<ParseMeta> ParseJob::s_parseMetas;
-
-size_t ParseJob::s_fileMetasIdx{0};
-
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -631,7 +482,7 @@ size_t ParseJob::s_fileMetasIdx{0};
 // Given the path of a directory, find all (relevant) files in that
 // directory (and sub-directories), and attempt to group them.
 coro::Task<Package::GroupResult>
-Package::groupDirectories(std::string path) {
+Package::groupDirectories(std::string path, bool exclude_dirs) {
   // We're not going to be blocking on I/O here, so make sure we're
   // running on the thread pool.
   HPHP_CORO_RESCHEDULE_ON_CURRENT_EXECUTOR;
@@ -657,7 +508,10 @@ Package::groupDirectories(std::string path) {
         }
         return true;
       }
-      if (Option::PackageExcludeDirs.count(name)) return false;
+      if (exclude_dirs && Option::PackageExcludeDirs.count(name)) {
+        // Only skip excluded dirs when requested.
+        return false;
+      }
       if (path == name ||
           (name.size() == path.size() + 1 &&
            name.back() == FileUtil::getDirSeparator() &&
@@ -669,7 +523,7 @@ Package::groupDirectories(std::string path) {
       }
 
       // Process the directory as a new job
-      dirs.emplace_back(groupDirectories(name));
+      dirs.emplace_back(groupDirectories(name, exclude_dirs));
 
       // Don't iterate the directory in this job.
       return false;
@@ -699,8 +553,7 @@ Package::groupDirectories(std::string path) {
 }
 
 // Group sets of files together using consistent hashing
-void Package::groupFiles(ParseGroups& groups,
-                         FileAndSizeVec files) {
+void Package::groupFiles(Groups& groups, FileAndSizeVec files) {
   if (files.empty()) return;
 
   assertx(Option::ParserGroupSize > 0);
@@ -728,7 +581,7 @@ void Package::groupFiles(ParseGroups& groups,
     std::remove_if(
       groups.begin() + origSize,
       groups.end(),
-      [] (const ParseGroup& g) { return g.m_files.empty(); }
+      [] (const Group& g) { return g.m_files.empty(); }
     ),
     groups.end()
   );
@@ -741,31 +594,19 @@ void Package::groupFiles(ParseGroups& groups,
 
 // Parse all of the files in the given group, returning a vector of
 // "ondemand" files obtained from that parsing.
-coro::Task<Package::FileAndSizeVec> Package::parseGroups(ParseGroups groups) {
+coro::Task<Package::FileAndSizeVec> Package::parseGroups(
+  Groups groups,
+  const UnitIndex& index
+) {
   if (groups.empty()) HPHP_CORO_RETURN(FileAndSizeVec{});
-
-  // Parse the groups from highest combined file size to lowest. The
-  // larger groups will probably take longer to compile, so we want to
-  // start those earliest.
-  std::sort(
-    groups.begin(),
-    groups.end(),
-    [] (const ParseGroup& a, const ParseGroup& b) {
-      if (a.m_size != b.m_size) return b.m_size < a.m_size;
-      if (a.m_files.size() != b.m_files.size()) {
-        return b.m_files.size() < a.m_files.size();
-      }
-      return a.m_files < b.m_files;
-    }
-  );
 
   // Kick off the parsing. Each group gets its own sticky ticket (so
   // earlier groups will get scheduling priority over later ones).
   std::vector<coro::TaskWithExecutor<FileAndSizeVec>> tasks;
   for (auto& group : groups) {
     tasks.emplace_back(
-      parseGroup(std::move(group))
-        .scheduleOn(m_async->m_executor.sticky())
+      parseGroup(std::move(group), index)
+        .scheduleOn(m_executor.sticky())
     );
   }
 
@@ -782,90 +623,106 @@ coro::Task<Package::FileAndSizeVec> Package::parseGroups(ParseGroups groups) {
   HPHP_CORO_MOVE_RETURN(ondemand);
 }
 
+coro::Task<Package::Groups> Package::groupAll(bool exclude_dirs) {
+  Timer timer{
+    Timer::WallTime,
+    exclude_dirs ? "finding parse inputs" : "finding index inputs"
+  };
+  std::vector<coro::Task<GroupResult>> tasks;
+  for (auto& dir : m_directories) {
+    tasks.emplace_back(groupDirectories(std::move(dir), exclude_dirs));
+  }
+
+  // Gather together all top level files
+  GroupResult top;
+  for (auto& result :
+         HPHP_CORO_AWAIT(coro::collectRange(std::move(tasks)))) {
+    top.m_grouped.insert(
+      top.m_grouped.end(),
+      std::make_move_iterator(result.m_grouped.begin()),
+      std::make_move_iterator(result.m_grouped.end())
+    );
+    top.m_ungrouped.insert(
+      top.m_ungrouped.end(),
+      std::make_move_iterator(result.m_ungrouped.begin()),
+      std::make_move_iterator(result.m_ungrouped.end())
+    );
+  }
+
+  // If there's any ungrouped files left over, group those now
+  groupFiles(top.m_grouped, std::move(top.m_ungrouped));
+  assertx(top.m_ungrouped.empty());
+
+  // Finally add in any files explicitly added via configuration
+  // and group them.
+  FileAndSizeVec extraFiles;
+  for (auto& file : m_filesToParse) {
+    if (!m_parsedFiles.insert(file).second) continue;
+    extraFiles.emplace_back(FileAndSize{std::move(file.first), 0});
+  }
+  groupFiles(top.m_grouped, std::move(extraFiles));
+
+  // Sort the groups from highest combined file size to lowest.
+  // Larger groups will probably take longer to process, so we want to
+  // start those earliest.
+  std::sort(
+    top.m_grouped.begin(),
+    top.m_grouped.end(),
+    [] (const Group& a, const Group& b) {
+      if (a.m_size != b.m_size) return b.m_size < a.m_size;
+      if (a.m_files.size() != b.m_files.size()) {
+        return b.m_files.size() < a.m_files.size();
+      }
+      return a.m_files < b.m_files;
+    }
+  );
+
+  HPHP_CORO_RETURN(std::move(top.m_grouped));
+}
+
 // The actual parse loop. Find the initial set of inputs (from
 // configuration), parse them, gather on-demand files, then repeat the
 // process until we have no new files to parse. Everything "under"
 // this call works asynchronously.
-void Package::parseAll() {
-  auto work = coro::invoke(
-    [this] () -> coro::Task<void> {
-      // Find the initial set of groups
-      auto groups = HPHP_CORO_AWAIT(coro::invoke(
-        [&] () -> coro::Task<ParseGroups> {
+coro::Task<void> Package::parseAll(const UnitIndex& index) {
+  // Find the initial set of groups
+  auto groups = HPHP_CORO_AWAIT(groupAll(true));
 
-        Timer timer{Timer::WallTime, "finding inputs"};
+  // Parse the "main" round and get any ondemand files
+  FileAndSizeVec ondemand;
+  {
+    Timer timer{Timer::WallTime, "parsing inputs"};
+    ondemand = HPHP_CORO_AWAIT(parseGroups(std::move(groups), index));
+    m_parsingInputs = std::chrono::microseconds{timer.getMicroSeconds()};
+  }
 
-        std::vector<coro::Task<GroupResult>> tasks;
-        for (auto& dir : m_directories) {
-          tasks.emplace_back(groupDirectories(std::move(dir)));
-        }
+  if (ondemand.empty()) {
+    HPHP_CORO_RETURN_VOID;
+  }
 
-        // Gather together all top level files
-        GroupResult top;
-        for (auto& result :
-               HPHP_CORO_AWAIT(coro::collectRange(std::move(tasks)))) {
-          top.m_grouped.insert(
-            top.m_grouped.end(),
-            std::make_move_iterator(result.m_grouped.begin()),
-            std::make_move_iterator(result.m_grouped.end())
-          );
-          top.m_ungrouped.insert(
-            top.m_ungrouped.end(),
-            std::make_move_iterator(result.m_ungrouped.begin()),
-            std::make_move_iterator(result.m_ungrouped.end())
-          );
-        }
-
-        // If there's any ungrouped files left over, group those now
-        groupFiles(top.m_grouped, std::move(top.m_ungrouped));
-        assertx(top.m_ungrouped.empty());
-
-        // Finally add in any files explicitly added via configuration
-        // and group them.
-        FileAndSizeVec extraFiles;
-        for (auto& file : m_filesToParse) {
-          if (!m_parsedFiles.insert(file).second) continue;
-          extraFiles.emplace_back(FileAndSize{std::move(file.first), 0});
-        }
-        groupFiles(top.m_grouped, std::move(extraFiles));
-
-        HPHP_CORO_RETURN(std::move(top.m_grouped));
-      }));
-
-      // Parse the "main" round and get any ondemand files
-      FileAndSizeVec ondemand;
-      {
-        Timer timer{Timer::WallTime, "parsing inputs"};
-        ondemand = HPHP_CORO_AWAIT(parseGroups(std::move(groups)));
-        m_parsingInputs = std::chrono::microseconds{timer.getMicroSeconds()};
-      }
-
-      if (ondemand.empty()) HPHP_CORO_RETURN_VOID;
-
-      Timer timer{Timer::WallTime, "parsing on-demand"};
-      // We have ondemand files, so keep parsing until we have nothing
-      // more to parse.
-      do {
-        assertx(groups.empty());
-        groupFiles(groups, std::move(ondemand));
-        ondemand = HPHP_CORO_AWAIT(parseGroups(std::move(groups)));
-      } while (!ondemand.empty());
-      m_parsingOndemand = std::chrono::microseconds{timer.getMicroSeconds()};
-
-      HPHP_CORO_RETURN_VOID;
-    }
-  ).scheduleOn(m_async->m_executor.sticky());
-  coro::wait(std::move(work));
+  Timer timer{Timer::WallTime, "parsing on-demand"};
+  // We have ondemand files, so keep parsing until we have nothing
+  // more to parse.
+  do {
+    assertx(groups.empty());
+    groupFiles(groups, std::move(ondemand));
+    ondemand = HPHP_CORO_AWAIT(parseGroups(std::move(groups), index));
+  } while (!ondemand.empty());
+  m_parsingOndemand = std::chrono::microseconds{timer.getMicroSeconds()};
+  HPHP_CORO_RETURN_VOID;
 }
 
-bool Package::parse(const Callback& callback) {
+coro::Task<bool> Package::parse(const UnitIndex& index,
+                                const ParseCallback& callback,
+                                const LocalCallback& localCallback) {
   assertx(callback);
+  assertx(localCallback);
   assertx(!m_callback);
 
   Logger::FInfo(
     "parsing using {} threads using {}{}",
-    m_async->m_executor.numThreads(),
-    m_async->m_client.implName(),
+    m_executor.numThreads(),
+    m_client.implName(),
     coro::using_coros ? "" : " (coros disabled!)"
   );
 
@@ -876,19 +733,166 @@ bool Package::parse(const Callback& callback) {
 
   // Treat any symbol refs from systemlib as if they were part of the
   // original Package.
+  UEVec localUEs;
   for (auto& ue : SystemLib::claimRegisteredUnitEmitters()) {
     FileAndSizeVec ondemand;
-    resolveOnDemand(ondemand, ue->m_symbol_refs, true);
-    for (auto const& p : ondemand) addSourceFile(p.m_path);
-    (*m_callback)(std::move(ue));
+    resolveOnDemand(ondemand, ue->m_symbol_refs, index, true);
+    for (auto const& p : ondemand) {
+      addSourceFile(p.m_path);
+      Logger::FVerbose("systemlib unit {} -> {}",
+          ue->m_filepath,
+          p.m_path.string()
+      );
+    }
+    localUEs.emplace_back(std::move(ue));
   }
-  parseAll();
-  return !m_parseFailed.load();
+
+  std::vector<coro::TaskWithExecutor<void>> tasks;
+  if (!localUEs.empty()) {
+    auto task = localCallback(std::move(localUEs));
+    tasks.emplace_back(std::move(task).scheduleOn(m_executor.sticky()));
+  }
+  tasks.emplace_back(parseAll(index).scheduleOn(m_executor.sticky()));
+  HPHP_CORO_AWAIT(coro::collectRange(std::move(tasks)));
+  HPHP_CORO_RETURN(!m_failed.load());
+}
+
+namespace {
+
+bool statFile(const std::filesystem::path& fileName, const std::string& root,
+               std::string& fullPath, Optional<std::string>& targetPath) {
+  if (FileUtil::isDirSeparator(fileName.native().front())) {
+    fullPath = fileName;
+  } else {
+    fullPath = root + fileName.native();
+  }
+
+  struct stat sb;
+  if (lstat(fullPath.c_str(), &sb)) {
+    if (fullPath.find(' ') == std::string::npos) {
+      Logger::Error("Unable to stat file %s", fullPath.c_str());
+    }
+    return false;
+  }
+  if ((sb.st_mode & S_IFMT) == S_IFDIR) {
+    Logger::Error("Unable to parse directory: %s", fullPath.c_str());
+    return false;
+  }
+  if (S_ISLNK(sb.st_mode)) {
+    auto const target = std::filesystem::canonical(fullPath);
+    targetPath.emplace(std::filesystem::relative(target, root).native());
+  }
+  return true;
+}
+
+using InputsT = std::vector<
+  std::tuple<Ref<std::string>, Ref<RepoOptionsFlags>>
+>;
+
+coro::Task<std::tuple<
+  const Ref<Package::Config>*,
+  Ref<std::vector<Package::FileMeta>>,
+  InputsT
+>>
+storeInputs(
+  bool optimistic,
+  std::vector<std::filesystem::path>& paths,
+  std::vector<Package::FileMeta>& metas,
+  std::vector<coro::Task<Ref<RepoOptionsFlags>>>& options,
+  Optional<std::vector<Ref<RepoOptionsFlags>>>& storedOptions,
+  extern_worker::Client& client,
+  const coro::AsyncValue<extern_worker::Ref<Package::Config>>& config
+) {
+  auto workItems = paths.size();
+
+  // Store the inputs and get their refs
+  auto [fileRefs, metasRef, optionRefs, configRef] =
+    HPHP_CORO_AWAIT(
+      coro::collect(
+        client.storeFile(paths, optimistic),
+        optimistic
+          ? client.storeOptimistically(metas)
+          : client.store(metas),
+        // If we already called storeInputs, then options will be
+        // empty here (but storedOptions will be set).
+        coro::collectRange(std::move(options)),
+        *config
+      )
+    );
+
+  assertx(fileRefs.size() == workItems);
+
+  // Options are never stored optimistically. The first time we call
+  // storeInputs, we'll store them above and store the results in
+  // storedOptions. If we call this again, the above store for options
+  // will do nothing, and we'll just reload the storedOptions.
+  if (storedOptions) {
+    assertx(!optimistic);
+    assertx(optionRefs.empty());
+    assertx(storedOptions->size() == workItems);
+    optionRefs = *std::move(storedOptions);
+  } else {
+    assertx(optionRefs.size() == workItems);
+    if (optimistic) storedOptions = optionRefs;
+  }
+
+  // "Tuplize" the input refs (so they're in the format that
+  // extern-worker expects).
+  InputsT inputs;
+  inputs.reserve(workItems);
+  for (size_t i = 0; i < workItems; ++i) {
+    inputs.emplace_back(
+      std::move(fileRefs[i]),
+      std::move(optionRefs[i])
+    );
+  }
+
+  HPHP_CORO_RETURN(std::make_tuple(configRef, metasRef, std::move(inputs)));
+}
+
+}
+
+coro::Task<void> Package::prepareInputs(
+  Group group,
+  std::vector<std::filesystem::path>& paths,
+  std::vector<Package::FileMeta>& metas,
+  std::vector<coro::Task<Ref<RepoOptionsFlags>>>& options
+) {
+  paths.reserve(group.m_files.size());
+  metas.reserve(group.m_files.size());
+  options.reserve(group.m_files.size());
+  for (auto& fileName : group.m_files) {
+    assertx(!fileName.empty());
+
+    std::string fullPath;
+    Optional<std::string> targetPath;
+    if (!statFile(fileName, m_root, fullPath, targetPath)) {
+      Logger::FError("Fatal: Unable to stat/parse {}", fileName.native());
+      m_failed.store(true);
+      continue;
+    }
+
+    // Most files will have the same RepoOptions, so we cache them
+    auto const& repoOptions = RepoOptions::forFile(fullPath.data()).flags();
+    options.emplace_back(
+      m_repoOptions.get(
+        repoOptions.cacheKeySha1(),
+        repoOptions,
+        HPHP_CORO_CURRENT_EXECUTOR
+      )
+    );
+    paths.emplace_back(std::move(fullPath));
+    metas.emplace_back(std::move(fileName), std::move(targetPath));
+  }
+  HPHP_CORO_RETURN_VOID;
 }
 
 // Parse a group using extern-worker, hand off the UnitEmitter
 // obtained, and return any on-demand files from the parsing.
-coro::Task<Package::FileAndSizeVec> Package::parseGroup(ParseGroup group) {
+coro::Task<Package::FileAndSizeVec> Package::parseGroup(
+    Group group,
+    const UnitIndex& index
+) {
   using namespace folly::gen;
 
   // Make sure we're running on the thread we should be
@@ -899,66 +903,7 @@ coro::Task<Package::FileAndSizeVec> Package::parseGroup(ParseGroup group) {
     std::vector<std::filesystem::path> paths;
     std::vector<FileMeta> metas;
     std::vector<coro::Task<Ref<RepoOptionsFlags>>> options;
-
-    paths.reserve(group.m_files.size());
-    metas.reserve(group.m_files.size());
-    options.reserve(group.m_files.size());
-    for (auto& fileName : group.m_files) {
-      assertx(!fileName.empty());
-
-      std::string fullPath;
-      if (FileUtil::isDirSeparator(fileName.native().front())) {
-        fullPath = fileName;
-      } else {
-        fullPath = m_root + fileName.native();
-      }
-
-      struct stat sb;
-
-      auto const doStat = [&] {
-        if (lstat(fullPath.c_str(), &sb)) {
-          if (fullPath.find(' ') == std::string::npos) {
-            Logger::Error("Unable to stat file %s", fullPath.c_str());
-          }
-          return false;
-        }
-        if ((sb.st_mode & S_IFMT) == S_IFDIR) {
-          Logger::Error("Unable to parse directory: %s", fullPath.c_str());
-          return false;
-        }
-        return true;
-      }();
-      if (!doStat) {
-        Logger::FError("Fatal: Unable to stat/parse {}", fileName.native());
-        m_parseFailed.store(true);
-        continue;
-      }
-
-      if (!m_extraStaticFiles.count(fileName)) {
-        m_discoveredStaticFiles.emplace(
-          fileName,
-          Option::CachePHPFile ? fullPath : ""
-        );
-      }
-
-      Optional<std::string> targetPath;
-      if (S_ISLNK(sb.st_mode)) {
-        auto const target = std::filesystem::canonical(fullPath);
-        targetPath.emplace(std::filesystem::relative(target, m_root).native());
-      }
-
-      // Most files will have the same RepoOptions, so we cache them
-      auto const& repoOptions = RepoOptions::forFile(fullPath.data()).flags();
-      options.emplace_back(
-        m_async->m_repoOptions.get(
-          repoOptions.cacheKeySha1(),
-          repoOptions,
-          HPHP_CORO_CURRENT_EXECUTOR
-        )
-      );
-      paths.emplace_back(std::move(fullPath));
-      metas.emplace_back(std::move(fileName), std::move(targetPath));
-    }
+    HPHP_CORO_AWAIT(prepareInputs(std::move(group), paths, metas, options));
 
     if (paths.empty()) {
       assertx(metas.empty());
@@ -966,138 +911,74 @@ coro::Task<Package::FileAndSizeVec> Package::parseGroup(ParseGroup group) {
       HPHP_CORO_RETURN(FileAndSizeVec{});
     }
 
-    // Free up some memory before awaiting
-    decltype(group.m_files){}.swap(group.m_files);
     auto const workItems = paths.size();
+    for (size_t i = 0; i < workItems; i++) {
+      auto const& fileName = metas[i].m_filename;
+      if (!m_extraStaticFiles.count(fileName)) {
+        m_discoveredStaticFiles.emplace(
+          fileName,
+          Option::CachePHPFile ? paths[i] : ""
+        );
+      }
+    }
 
     Optional<std::vector<Ref<RepoOptionsFlags>>> storedOptions;
 
-    using InputsT = std::vector<decltype(g_parseJob)::InputsT>;
-    using ExecT = decltype(g_parseJob)::ExecT;
+    auto parseMetas = HPHP_CORO_AWAIT(coro::invoke(
+      [&] () -> coro::Task<ParseMetaVec> {
+        assertx(m_callback);
 
-    auto const doStore =
-      [&] (bool opportunistic) ->
-      coro::Task<
-        std::tuple<const Ref<Config>*, Ref<std::vector<FileMeta>>, InputsT>
-      > {
-      // Store the inputs and get their refs
-      auto [fileRefs, metasRef, optionRefs, configRef] =
-        HPHP_CORO_AWAIT(
-          coro::collect(
-            m_async->m_client.storeFile(
-              paths,
-              opportunistic
-            ),
-            opportunistic
-              ? m_async->m_client.storeOptimistically(metas)
-              : m_async->m_client.store(metas),
-            // If we already called doStore, then options will be
-            // empty here (but storedOptions will be set).
-            coro::collectRange(std::move(options)),
-            *m_async->m_config
-          )
-        );
-
-      assertx(fileRefs.size() == workItems);
-
-      // Options are never stored opportunistically. The first time we
-      // call doStore, we'll store them above and store the results in
-      // storedOptions. If we call this again, the above store for
-      // options will do nothing, and we'll just reload the
-      // storedOptions.
-      if (storedOptions) {
-        assertx(!opportunistic);
-        assertx(optionRefs.empty());
-        assertx(storedOptions->size() == workItems);
-        optionRefs = *std::move(storedOptions);
-      } else {
-        assertx(optionRefs.size() == workItems);
-        if (opportunistic) storedOptions = optionRefs;
-      }
-
-      // "Tuplize" the input refs (so they're in the format that
-      // extern-worker expects).
-      std::vector<decltype(g_parseJob)::InputsT> inputs;
-      inputs.reserve(workItems);
-      for (size_t i = 0; i < workItems; ++i) {
-        inputs.emplace_back(
-          std::move(fileRefs[i]),
-          std::move(optionRefs[i])
-        );
-      }
-
-      HPHP_CORO_RETURN(std::make_tuple(configRef, metasRef, std::move(inputs)));
-    };
-
-    auto const doExec = [&] (auto inputs,
-                             bool opportunistic) -> coro::Task<ExecT> {
-      auto out = HPHP_CORO_AWAIT(
-        m_async->m_client.exec(
-          g_parseJob,
-          std::make_tuple(
-            *std::get<0>(inputs),
-            std::move(std::get<1>(inputs))
-          ),
-          std::move(std::get<2>(inputs)),
-          opportunistic
-        )
-      );
-      HPHP_CORO_MOVE_RETURN(out);
-    };
-
-    auto outputRefs = HPHP_CORO_AWAIT(coro::invoke(
-      [&] () -> coro::Task<ExecT> {
         if (Option::ParserOptimisticStore &&
-            m_async->m_client.supportsOptimistic()) {
+            m_client.supportsOptimistic()) {
           // Try optimistic mode first. We won't actually store
           // anything, just generate the Refs. If something isn't
           // actually present in the workers, the execution will throw
           // an exception. If everything is present, we've skipped a
           // lot of work.
-          auto inputs = HPHP_CORO_AWAIT(doStore(true));
+          auto inputs = HPHP_CORO_AWAIT(storeInputs(
+              true, paths, metas, options, storedOptions, m_client, m_config
+          ));
           try {
-            HPHP_CORO_RETURN(HPHP_CORO_AWAIT(doExec(std::move(inputs), true)));
+            HPHP_CORO_RETURN(HPHP_CORO_AWAIT(
+              (*m_callback)(
+                *std::get<0>(inputs),
+                std::move(std::get<1>(inputs)),
+                std::move(std::get<2>(inputs)),
+                true
+              )
+            ));
           } catch (const extern_worker::Error&) {}
         }
         // Either optimistic mode isn't enabled, or it failed
         // above. Try again, actually storing everything this time.
-        auto inputs = HPHP_CORO_AWAIT(doStore(false));
-        HPHP_CORO_RETURN(HPHP_CORO_AWAIT(doExec(std::move(inputs), false)));
+        auto inputs = HPHP_CORO_AWAIT(storeInputs(
+            false, paths, metas, options, storedOptions, m_client, m_config
+        ));
+        HPHP_CORO_RETURN(HPHP_CORO_AWAIT(
+          (*m_callback)(
+            *std::get<0>(inputs),
+            std::move(std::get<1>(inputs)),
+            std::move(std::get<2>(inputs)),
+            false
+          )
+        ));
       }
     ));
 
-    // Load the outputs
-    auto [wrappers, parseMetas] = HPHP_CORO_AWAIT(coro::collect(
-      m_async->m_client.load(
-        std::get<0>(std::move(outputRefs))
-      ),
-      m_async->m_client.load(
-        std::get<1>(std::move(outputRefs))
-      )
-    ));
-    assertx(wrappers.size() == workItems);
     always_assert(parseMetas.size() == workItems);
     m_total += workItems;
 
     // Process the outputs
     FileAndSizeVec ondemand;
-    for (size_t i = 0; i < workItems; ++i) {
-      auto const& meta = parseMetas[i];
-      auto& wrapper = wrappers[i];
+    for (auto& meta : parseMetas) {
       // The Unit had an ICE and we're configured to treat that as a
       // fatal error. Here is where we die on it.
       if (!meta.m_abort.empty()) {
         fprintf(stderr, "%s", meta.m_abort.c_str());
         _Exit(1);
       }
-      // If we produced an UnitEmitter, hand it off for whatever
-      // processing we need to do with it.
-      if (wrapper.m_ue) {
-        assertx(m_callback);
-        (*m_callback)(std::move(wrapper.m_ue));
-      }
       // Resolve any symbol refs into files to parse ondemand
-      resolveOnDemand(ondemand, meta.m_symbol_refs);
+      resolveOnDemand(ondemand, meta.m_symbol_refs, index);
     }
     HPHP_CORO_MOVE_RETURN(ondemand);
   } catch (const Exception& e) {
@@ -1105,20 +986,20 @@ coro::Task<Package::FileAndSizeVec> Package::parseGroup(ParseGroup group) {
       "Fatal: An unexpected exception was thrown while parsing: {}",
       e.getMessage()
     );
-    m_parseFailed.store(true);
+    m_failed.store(true);
   } catch (const Error& e) {
     Logger::FError("Extern worker error while parsing: {}",
                    e.what());
-    m_parseFailed.store(true);
+    m_failed.store(true);
   } catch (const std::exception& e) {
     Logger::FError(
       "Fatal: An unexpected exception was thrown while parsing: {}",
       e.what()
     );
-    m_parseFailed.store(true);
+    m_failed.store(true);
   } catch (...) {
     Logger::Error("Fatal: An unexpected exception was thrown while parsing");
-    m_parseFailed.store(true);
+    m_failed.store(true);
   }
 
   HPHP_CORO_RETURN(FileAndSizeVec{});
@@ -1128,19 +1009,19 @@ coro::Task<Package::FileAndSizeVec> Package::parseGroup(ParseGroup group) {
 
 void Package::resolveOnDemand(FileAndSizeVec& out,
                               const SymbolRefs& symbolRefs,
+                              const UnitIndex& index,
                               bool report) {
   if (!m_parseOnDemand) return;
 
-  auto const& onPath = [&] (const std::string& path) {
-    auto rpath = [&] {
-      if (path.compare(0, m_root.length(), m_root) == 0) {
-        return path.substr(m_root.length());
-      }
-      return path;
-    }();
-    if (rpath.empty()) return;
-    if (Option::PackageExcludeFiles.count(rpath) > 0) return;
-    if (Option::IsFileExcluded(rpath, Option::PackageExcludePatterns)) return;
+  auto const& onPath = [&] (const StringData* rpath_str) {
+    if (rpath_str->empty()) return;
+    auto rpath = rpath_str->toCppString();
+    if (Option::PackageExcludeFiles.count(rpath) > 0 ||
+        Option::IsFileExcluded(rpath, Option::PackageExcludePatterns)) {
+      // Found symbol in UnitIndex, but the corresponding file was excluded.
+      Logger::FVerbose("excluding ondemand file {}", rpath_str);
+      return;
+    }
 
     auto canon = FileUtil::canonicalize(String(std::move(rpath))).toCppString();
     assertx(!canon.empty());
@@ -1159,37 +1040,304 @@ void Package::resolveOnDemand(FileAndSizeVec& out,
       struct stat sb;
       if (stat(absolute.c_str(), &sb)) {
         Logger::FError("Unable to stat {}", absolute);
-        m_parseFailed.store(true);
+        m_failed.store(true);
         return;
       }
       out.emplace_back(FileAndSize{std::move(canon), (size_t)sb.st_size});
     }
   };
 
-  auto const onMap = [&] (auto const& syms, auto const& m) {
+  auto const onMap = [&] (auto const& syms, auto const& sym_to_file) {
     for (auto const& sym : syms) {
-      auto const it = m.find(sym);
-      if (it == m.end()) continue;
-      onPath(Option::AutoloadRoot + it->second);
+      auto const interned = lookupStaticString(sym);
+      if (!interned) continue; // cannot be in index
+      auto const it = sym_to_file.find(interned);
+      if (it == sym_to_file.end()) continue;
+      onPath(it->second);
     }
   };
 
   for (auto const& [kind, syms] : symbolRefs) {
     switch (kind) {
       case SymbolRef::Include:
-        for (auto const& name : syms) onPath(name);
+        for (auto const& path : syms) {
+          auto const rpath = path.compare(0, m_root.length(), m_root) == 0
+            ? path.substr(m_root.length())
+            : path;
+          onPath(makeStaticString(rpath));
+        }
         break;
       case SymbolRef::Class:
-        onMap(syms, Option::AutoloadClassMap);
+        onMap(syms, index.types);
         break;
       case SymbolRef::Function:
-        onMap(syms, Option::AutoloadFuncMap);
+        onMap(syms, index.funcs);
         break;
       case SymbolRef::Constant:
-        onMap(syms, Option::AutoloadConstMap);
+        onMap(syms, index.constants);
         break;
     }
   }
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+namespace {
+struct UnitDecls {
+  uint64_t nopos_hash;
+  std::string serialized;
+
+  template <typename SerDe> void serde(SerDe& sd) {
+    sd(nopos_hash)
+      (serialized);
+  }
+};
+
+// Extern-worker job for computing decls and autoload-index from source files.
+struct IndexJob {
+  static std::string name() { return "hphpc-index"; }
+
+  static void init(const Package::Config& config,
+                   Package::FileMetaVec meta) {
+    Package::parseInit(config, std::move(meta));
+  }
+
+  static Package::IndexMetaVec fini() {
+    return Package::indexFini();
+  }
+
+  static UnitDecls run(
+      const std::string& content,
+      const RepoOptionsFlags& repoOptions
+  );
+};
+
+Job<IndexJob> g_indexJob;
+}
+
+Package::IndexMetaVec Package::indexFini() {
+  assertx(s_fileMetasIdx == s_fileMetas.size());
+  assertx(s_indexMetas.size() == s_indexMetas.size());
+  finishJob();
+  return std::move(s_indexMetas);
+}
+
+// Index one source file:
+// 1. compute decls
+// 2. use facts from decls to compute IndexMeta (decl names in each file)
+// 3. save serialized decls in UnitDecls as job output
+UnitDecls IndexJob::run(
+    const std::string& content,
+    const RepoOptionsFlags& repoOptions
+) {
+  if (s_fileMetasIdx >= s_fileMetas.size()) {
+    throw Error{
+      folly::sformat("Encountered {} inputs, but only {} file metas",
+                     s_fileMetasIdx+1, s_fileMetas.size())
+    };
+  }
+  auto const& meta = s_fileMetas[s_fileMetasIdx++];
+  auto const& fileName = meta.m_filename;
+
+  auto const bail = [&](const char* message) -> UnitDecls {
+    Package::IndexMeta summary;
+    summary.error = message;
+    s_indexMetas.emplace_back(std::move(summary));
+    return UnitDecls{};
+  };
+
+  if (meta.m_targetPath) {
+    // When/if this symlink is parsed, it's UnitEmitter will be a generated
+    // stub function that calls the entrypoint of the target file (if any).
+    // Don't index it since we don't expect any external references to the
+    // generated stub entry point function.
+    return bail("not indexing symlink");
+  }
+
+  if (RO::EvalAllowHhas && folly::StringPiece(fileName).endsWith(".hhas")) {
+    return bail("cannot index hhas");
+  }
+
+  auto decl_flags = repoOptions.getDeclFlags();
+  auto decl_options = hackc_create_direct_decl_parse_options(
+      decl_flags,
+      repoOptions.getAliasedNamespacesConfig()
+  );
+  auto decls = hackc_direct_decl_parse(*decl_options, fileName, content);
+  if (decls.has_errors) {
+    return bail("decl parser error");
+  }
+
+  // Get Facts from Decls, then populate IndexMeta.
+  auto facts = hackc_decls_to_facts_cpp_ffi(decl_flags, decls, "");
+  Package::IndexMeta summary;
+  for (auto& e : facts.facts.types) {
+    summary.types.emplace_back(std::move(e.name));
+  }
+  for (auto& e : facts.facts.functions) {
+    summary.funcs.emplace_back(std::move(e));
+  }
+  for (auto& e : facts.facts.constants) {
+    summary.constants.emplace_back(std::move(e));
+  }
+  s_indexMetas.emplace_back(std::move(summary));
+  return UnitDecls{
+    decls.nopos_hash,
+    std::string{decls.serialized.begin(), decls.serialized.end()}
+  };
+}
+
+coro::Task<bool> Package::index(const IndexCallback& callback) {
+  Logger::FInfo(
+    "indexing using {} threads using {}{}",
+    m_executor.numThreads(),
+    m_client.implName(),
+    coro::using_coros ? "" : " (coros disabled!)"
+  );
+
+  // TODO: index systemlib. But here is too late; they have already been
+  // parsed into UEs at startup, and not yet claimed.
+  HPHP_CORO_AWAIT(indexAll(callback).scheduleOn(m_executor.sticky()));
+  HPHP_CORO_RETURN(!m_failed.load());
+}
+
+coro::Task<void> Package::indexAll(const IndexCallback& callback) {
+  // Find the indexing groups
+  auto groups = HPHP_CORO_AWAIT(groupAll(false));
+  Logger::FInfo("indexing {:,} groups", groups.size());
+
+  // Index all files
+  Timer timer{Timer::WallTime, "indexing files"};
+  HPHP_CORO_AWAIT(indexGroups(callback, std::move(groups)));
+  HPHP_CORO_RETURN_VOID;
+}
+
+// Index all of the files in the given groups
+coro::Task<void> Package::indexGroups(const IndexCallback& callback,
+                                      Groups groups) {
+  if (groups.empty()) HPHP_CORO_RETURN_VOID;
+
+  // Kick off indexing. Each group gets its own sticky ticket (so
+  // earlier groups will get scheduling priority over later ones).
+  std::vector<coro::TaskWithExecutor<void>> tasks;
+  for (auto& group : groups) {
+    tasks.emplace_back(
+      indexGroup(callback, std::move(group)).scheduleOn(m_executor.sticky())
+    );
+  }
+  HPHP_CORO_AWAIT(coro::collectRange(std::move(tasks)));
+  HPHP_CORO_RETURN_VOID;
+}
+
+// Index a group using extern-worker, invoke callback with each IndexMeta.
+coro::Task<void> Package::indexGroup(const IndexCallback& callback,
+                                     Group group) {
+  using namespace folly::gen;
+
+  // Make sure we're running on the thread we should be
+  HPHP_CORO_RESCHEDULE_ON_CURRENT_EXECUTOR;
+
+  try {
+    // First build the inputs for the job
+    std::vector<std::filesystem::path> paths;
+    std::vector<FileMeta> metas;
+    std::vector<coro::Task<Ref<RepoOptionsFlags>>> options;
+    HPHP_CORO_AWAIT(prepareInputs(std::move(group), paths, metas, options));
+
+    if (paths.empty()) {
+      assertx(metas.empty());
+      assertx(options.empty());
+      HPHP_CORO_RETURN_VOID;
+    }
+
+    auto const workItems = paths.size();
+    Optional<std::vector<Ref<RepoOptionsFlags>>> storedOptions;
+
+    using ExecT = decltype(g_indexJob)::ExecT;
+    auto const doExec = [&] (auto inputs, bool optimistic) -> coro::Task<ExecT> {
+      auto out = HPHP_CORO_AWAIT(
+        m_client.exec(
+          g_indexJob,
+          std::make_tuple(
+            *std::get<0>(inputs),
+            std::move(std::get<1>(inputs))
+          ),
+          std::move(std::get<2>(inputs)),
+          optimistic
+        )
+      );
+      HPHP_CORO_MOVE_RETURN(out);
+    };
+
+    auto [decls_refs, summaries_ref] = HPHP_CORO_AWAIT(coro::invoke(
+      [&] () -> coro::Task<ExecT> {
+        if (Option::ParserOptimisticStore &&
+            m_client.supportsOptimistic()) {
+          // Try optimistic mode first. We won't actually store
+          // anything, just generate the Refs. If something isn't
+          // actually present in the workers, the execution will throw
+          // an exception. If everything is present, we've skipped a
+          // lot of work.
+          auto inputs = HPHP_CORO_AWAIT(storeInputs(
+              true, paths, metas, options, storedOptions, m_client, m_config
+          ));
+          try {
+            HPHP_CORO_RETURN(HPHP_CORO_AWAIT(doExec(std::move(inputs), true)));
+          } catch (const extern_worker::Error&) {}
+        }
+        // Either optimistic mode isn't enabled, or it failed
+        // above. Try again, actually storing everything this time.
+        auto inputs = HPHP_CORO_AWAIT(storeInputs(
+            false, paths, metas, options, storedOptions, m_client, m_config
+        ));
+        HPHP_CORO_RETURN(HPHP_CORO_AWAIT(doExec(std::move(inputs), false)));
+      }
+    ));
+
+    // Load the summaries but leave decls in external storage
+    auto summaries = HPHP_CORO_AWAIT(m_client.load(summaries_ref));
+    assertx(metas.size() == workItems);
+    assertx(decls_refs.size() == workItems);
+    always_assert(summaries.size() == workItems);
+    m_total += workItems;
+
+    // Process the summaries
+    for (size_t i = 0; i < workItems; ++i) {
+      auto& meta = metas[i];
+      auto& summary = summaries[i];
+      // TODO: pass decls_refs[i] to callback
+      if (summary.error.empty()) {
+        callback(std::move(meta.m_filename), std::move(summary));
+      } else {
+        // Could not parse decls in this file. Compiler may fail, or produce
+        // a unit that fatals when run.
+        Logger::FWarning("Warning: decl-parser error in {}: {}",
+            meta.m_filename, summary.error
+        );
+      }
+    }
+    HPHP_CORO_RETURN_VOID;
+  } catch (const Exception& e) {
+    Logger::FError(
+      "Fatal: An unexpected exception was thrown while indexing: {}",
+      e.getMessage()
+    );
+    m_failed.store(true);
+  } catch (const Error& e) {
+    Logger::FError("Extern worker error while indexing: {}",
+                   e.what());
+    m_failed.store(true);
+  } catch (const std::exception& e) {
+    Logger::FError(
+      "Fatal: An unexpected exception was thrown while indexing: {}",
+      e.what()
+    );
+    m_failed.store(true);
+  } catch (...) {
+    Logger::Error("Fatal: An unexpected exception was thrown while indexing");
+    m_failed.store(true);
+  }
+  HPHP_CORO_RETURN_VOID;
 }
 
 ///////////////////////////////////////////////////////////////////////////////

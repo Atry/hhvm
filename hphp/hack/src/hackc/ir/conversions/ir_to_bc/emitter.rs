@@ -3,9 +3,9 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
-use crate::convert::HackCUnitBuilder;
-use crate::ex_frame::BlockIdOrExFrame;
-use crate::ex_frame::ExFrame;
+use std::collections::VecDeque;
+use std::fmt::Display;
+
 use ffi::Slice;
 use ffi::Str;
 use hash::HashMap;
@@ -15,11 +15,11 @@ use hhbc::Instruct;
 use hhbc::Opcode;
 use hhbc::Pseudo;
 use instruction_sequence::InstrSeq;
+use ir::instr;
 use ir::instr::FCallArgsFlags;
 use ir::instr::HasLoc;
 use ir::instr::HasLocals;
 use ir::instr::IrToBc;
-use ir::instr::{self};
 use ir::print::FmtRawVid;
 use ir::print::FmtSep;
 use ir::string_intern::StringInterner;
@@ -27,8 +27,10 @@ use ir::BlockId;
 use ir::BlockIdMap;
 use ir::LocalId;
 use log::trace;
-use std::collections::VecDeque;
-use std::fmt::Display;
+
+use crate::convert::HackCUnitBuilder;
+use crate::ex_frame::BlockIdOrExFrame;
+use crate::ex_frame::ExFrame;
 
 pub(crate) fn emit_func<'a>(
     alloc: &'a bumpalo::Bump,
@@ -428,6 +430,7 @@ impl<'a, 'b> InstrEmitter<'a, 'b> {
             Hhbc::CastString(..) => Opcode::CastString,
             Hhbc::CastVec(..) => Opcode::CastVec,
             Hhbc::CheckClsReifiedGenericMismatch(..) => Opcode::CheckClsReifiedGenericMismatch,
+            Hhbc::CheckClsRGSoft(..) => Opcode::CheckClsRGSoft,
             Hhbc::ChainFaults(..) => Opcode::ChainFaults,
             Hhbc::CheckProp(prop, _) => {
                 let prop = prop.to_hhbc(self.alloc, self.strings);
@@ -495,6 +498,7 @@ impl<'a, 'b> InstrEmitter<'a, 'b> {
             }
             Hhbc::CreateCont(_) => Opcode::CreateCont,
             Hhbc::Div(..) => Opcode::Div,
+            Hhbc::GetClsRGProp(..) => Opcode::GetClsRGProp,
             Hhbc::GetMemoKeyL(lid, _) => {
                 let local = self.lookup_local(lid);
                 Opcode::GetMemoKeyL(local)
@@ -570,6 +574,10 @@ impl<'a, 'b> InstrEmitter<'a, 'b> {
             Hhbc::Pow(..) => Opcode::Pow,
             Hhbc::Print(..) => Opcode::Print,
             Hhbc::RecordReifiedGeneric(..) => Opcode::RecordReifiedGeneric,
+            Hhbc::ResolveClass(clsid, _) => {
+                let class = clsid.to_hhbc(self.alloc, self.strings);
+                Opcode::ResolveClass(class)
+            }
             Hhbc::ResolveClsMethod(_, method, _) => {
                 let method = method.to_hhbc(self.alloc, self.strings);
                 Opcode::ResolveClsMethod(method)
