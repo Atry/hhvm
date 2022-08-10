@@ -61,7 +61,8 @@ jobs:
       if: runner.os == 'Linux'
       run: dpkg-deb --contents bundle.deb
     - name: Save the deb package as build artifact
-      if: runner.os == 'Linux'
+      # Publish hhvm built from GCC, not hhvm_clang
+      if: runner.os == 'Linux' && matrix.package == 'hhvm'
       uses: actions/upload-artifact@v2
       with:
         name: bundle.deb
