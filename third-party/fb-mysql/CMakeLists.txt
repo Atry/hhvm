@@ -20,9 +20,6 @@ SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
 ExternalProject_Add(
   bundled_fbmysqlclient
   ${FB_MYSQL_DOWNLOAD_ARGS}
-  PATCH_COMMAND
-  "${CMAKE_CURRENT_SOURCE_DIR}/../apply-quilt-patches.sh"
-  "${CMAKE_CURRENT_SOURCE_DIR}/patches"
   CMAKE_ARGS
   -DWITHOUT_SERVER=TRUE
   -DDISABLE_SHARED=TRUE
