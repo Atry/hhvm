@@ -366,7 +366,7 @@ struct Class {
    * When returning false the class is guaranteed to be final.  When returning
    * true the system cannot tell though the class may still be final.
    */
-  bool couldBeOverriden() const;
+  bool couldBeOverridden() const;
 
   /*
    * Whether this class (or its subtypes) could possibly have have
@@ -551,7 +551,6 @@ struct Func {
   const CompactVector<CoeffectRule>* coeffectRules() const;
 
   struct FuncInfo;
-  struct MethTabEntryPair;
   struct FuncFamily;
 
 private:
@@ -566,10 +565,13 @@ private:
     bool operator==(MethodName o) const { return name == o.name; }
     SString name;
   };
-  // Like MethTabEntryPair, but the method is not guaranteed to
-  // actually exist (this only matters for things like exactFunc()).
+  struct Method {
+    const php::Func* func;
+  };
+  // Like Method, but the method is not guaranteed to actually exist
+  // (this only matters for things like exactFunc()).
   struct MethodOrMissing {
-    const MethTabEntryPair* mte;
+    const php::Func* func;
   };
   // Simultaneously a group of func families. Any data must be
   // intersected across all of the func families in the list. Used for
@@ -580,7 +582,7 @@ private:
   using Rep = boost::variant< FuncName
                             , MethodName
                             , FuncInfo*
-                            , const MethTabEntryPair*
+                            , Method
                             , FuncFamily*
                             , MethodOrMissing
                             , Isect
@@ -713,6 +715,12 @@ struct Index {
    */
   const php::Class* lookup_unit_class(const php::Unit&, Id) const;
   php::Class* lookup_unit_class_mutable(php::Unit&, Id);
+
+  /*
+   * Obtain a pointer to the class which defines the given class
+   * constant.
+   */
+  const php::Class* lookup_const_class(const php::Const&) const;
 
   /*
    * Obtain a pointer to the class which serves as the context for the

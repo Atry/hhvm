@@ -592,8 +592,9 @@ void prepareAndCallKnown(IRGS& env, const Func* callee, const FCallArgs& fca,
     auto const hasRdsCache =
       hasConstParamMemoCache(env, callee, objOrClass);
 
-    auto const entryOffset = callee->getEntryForNumArgs(numArgsInclUnpack);
-    auto const entry = SrcKey { callee, entryOffset, SrcKey::FuncEntryTag {} };
+    auto const numArgs =
+      std::min(numArgsInclUnpack, callee->numNonVariadicParams());
+    auto const entry = SrcKey { callee, numArgs, SrcKey::FuncEntryTag {} };
 
     if (isFCall(curSrcKey(env).op()) && !hasRdsCache) {
       if (irGenTryInlineFCall(env, entry, objOrClass, asyncEagerOffset)) {
@@ -1957,8 +1958,6 @@ void fcallClsMethodCommon(IRGS& env,
     }
   };
 
-  emitModuleBoundaryCheck(env, clsVal, false);
-
   if (!methVal->hasConstVal()) {
     emitFCall();
     return;
@@ -2018,6 +2017,7 @@ void emitFCallClsMethod(IRGS& env, FCallArgs fca, const StringData* clsHint,
     op == IsLogAsDynamicCallOp::DontLogAsDynamicCall &&
     !RO::EvalLogKnownMethodsAsDynamicCalls;
 
+  emitModuleBoundaryCheck(env, cls, false);
   fcallClsMethodCommon(env, fca, clsHint, cls, methName, false,
                        true, suppressDynCallCheck,
                        2);
@@ -2047,6 +2047,7 @@ void emitFCallClsMethodM(IRGS& env, FCallArgs fca, const StringData* clsHint,
     op == IsLogAsDynamicCallOp::DontLogAsDynamicCall &&
     !RO::EvalLogKnownMethodsAsDynamicCalls;
 
+  emitModuleBoundaryCheck(env, cls, false);
   fcallClsMethodCommon(env, fca, clsHint, cls, cns(env, methName), false,
                        name->isA(TStr) || RO::EvalEmitClassPointers == 0,
                        suppressDynCallCheck,

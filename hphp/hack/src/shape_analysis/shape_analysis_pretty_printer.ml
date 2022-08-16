@@ -28,12 +28,16 @@ let show_constraint env =
   function
   | Marks (kind, pos) ->
     Format.asprintf "%s at %a" (show_marker_kind kind) Pos.pp pos
-  | Has_static_key (entity, key, ty) ->
+  | Has_static_key (source, entity, key, ty) ->
     let field_map =
       T.TShapeMap.singleton key T.{ sft_ty = ty; sft_optional = false }
     in
     let shape = mk_shape field_map in
-    Format.asprintf "SK %s : %s" (show_entity entity) (show_ty shape)
+    Format.asprintf
+      "SK %s %s : %s"
+      (show_source source)
+      (show_entity entity)
+      (show_ty shape)
   | Has_optional_key (entity, key) ->
     Format.asprintf
       "OK %s : %s"
@@ -41,11 +45,9 @@ let show_constraint env =
       (Typing_utils.get_printable_shape_field_name key)
   | Has_dynamic_key entity -> "DK " ^ show_entity entity ^ " : dyn"
   | Subsets (sub, sup) -> show_entity sub ^ " ⊆ " ^ show_entity sup
-  | Joins { left; right; join } ->
-    show_entity left ^ " ∪ " ^ show_entity right ^ " = " ^ show_entity join
 
 let show_inter_constraint _ = function
-  | HT.Arg ((f_id, arg_idx), ent) ->
+  | HT.Arg ((f_id, arg_idx, _), ent) ->
     Format.asprintf "Arg(%s, %i, %s)" f_id arg_idx (show_entity ent)
 
 let show_decorated_constraint_general

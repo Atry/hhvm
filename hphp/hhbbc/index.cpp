@@ -102,7 +102,7 @@ constexpr bool CheckSize() { static_assert(Expected == Actual); return true; };
 static_assert(CheckSize<php::Block, 24>(), "");
 static_assert(CheckSize<php::Local, use_lowptr ? 12 : 16>(), "");
 static_assert(CheckSize<php::Param, use_lowptr ? 64 : 96>(), "");
-static_assert(CheckSize<php::Func, use_lowptr ? 176 : 224>(), "");
+static_assert(CheckSize<php::Func, use_lowptr ? 184 : 224>(), "");
 
 // Likewise, we also keep the bytecode and immediate types small.
 static_assert(CheckSize<Bytecode, use_lowptr ? 32 : 40>(), "");
@@ -220,27 +220,27 @@ struct PublicSPropEntry {
  * class hierarchy.
  */
 struct MethTabEntry {
-  MethTabEntry(const php::Func* func, Attr a, bool hpa, bool tl) :
-      func(func), attrs(a), hasPrivateAncestor(hpa), topLevel(tl) {}
-  const php::Func* func = nullptr;
+  explicit MethTabEntry(const php::Func& f)
+    : MethTabEntry{f, f.attrs} {}
+  MethTabEntry(const php::Func& f, Attr a)
+    : cls{f.cls->name}, clsIdx{f.clsIdx}, attrs{a} {}
+  SString cls;
+  // Index in the class' methods table.
+  uint32_t clsIdx;
   // A method could be imported from a trait, and its attributes changed
-  Attr attrs {};
-  bool hasAncestor = false;
+  Attr attrs;
   bool hasPrivateAncestor = false;
   // This method came from the ClassInfo that owns the MethTabEntry,
   // or one of its used traits.
-  bool topLevel = false;
+  bool topLevel = true;
   uint32_t idx = 0;
 };
 
 }
 
-struct res::Func::MethTabEntryPair :
-      SStringToOneNodeT<MethTabEntry>::value_type {};
-
 namespace {
 
-using MethTabEntryPair = res::Func::MethTabEntryPair;
+struct MethTabEntryPair : SStringToOneNodeT<MethTabEntry>::value_type {};
 
 inline MethTabEntryPair* mteFromElm(
   SStringToOneNodeT<MethTabEntry>::value_type& elm) {
@@ -366,7 +366,6 @@ struct ConstInfo {
 
 using FuncFamily       = res::Func::FuncFamily;
 using FuncInfo         = res::Func::FuncInfo;
-using MethTabEntryPair = res::Func::MethTabEntryPair;
 
 //////////////////////////////////////////////////////////////////////
 
@@ -1056,7 +1055,7 @@ Optional<res::Class> Class::canonicalizeInterface() const {
   );
 }
 
-bool Class::couldBeOverriden() const {
+bool Class::couldBeOverridden() const {
   return val.match(
     [] (SString) { return true; },
     [] (ClassInfo* cinfo) {
@@ -1666,11 +1665,11 @@ SString Func::name() const {
     [&] (FuncName s)   { return s.name; },
     [&] (MethodName s) { return s.name; },
     [&] (FuncInfo* fi) { return fi->func->name; },
-    [&] (const MethTabEntryPair* mte) { return mte->first; },
-    [&] (FuncFamily* fa) -> SString {
+    [&] (Method m)     { return m.func->name; },
+    [&] (FuncFamily* fa) {
       return fa->possibleFuncs().front()->first;
     },
-    [&] (MethodOrMissing m) { return m.mte->first; },
+    [&] (MethodOrMissing m) { return m.func->name; },
     [&] (const Isect& i) -> SString {
       assertx(i.families.size() > 1);
       return i.families[0]->possibleFuncs().front()->first;
@@ -1685,7 +1684,7 @@ const php::Func* Func::exactFunc() const {
     [&](FuncName)                    { return Ret{}; },
     [&](MethodName)                  { return Ret{}; },
     [&](FuncInfo* fi)                { return fi->func; },
-    [&](const MethTabEntryPair* mte) { return mte->second.func; },
+    [&](Method m)                    { return m.func; },
     [&](FuncFamily*)                 { return Ret{}; },
     [&](MethodOrMissing)             { return Ret{}; },
     [&](const Isect&)                { return Ret{}; }
@@ -1700,9 +1699,7 @@ bool Func::isFoldable() const {
     [&](FuncInfo* fi) {
       return fi->func->attrs & AttrIsFoldable;
     },
-    [&](const MethTabEntryPair* mte) {
-      return mte->second.func->attrs & AttrIsFoldable;
-    },
+    [&](Method m) { return m.func->attrs & AttrIsFoldable; },
     [&](FuncFamily*)     { return false; },
     [&](MethodOrMissing) { return false; },
     [&](const Isect&)    { return false; }
@@ -1715,13 +1712,9 @@ bool Func::couldHaveReifiedGenerics() const {
     [&](FuncName s) { return true; },
     [&](MethodName) { return true; },
     [&](FuncInfo* fi) { return fi->func->isReified; },
-    [&](const MethTabEntryPair* mte) {
-      return mte->second.func->isReified;
-    },
+    [&](Method m) { return m.func->isReified; },
     [&](FuncFamily* fa) { return fa->m_static->m_maybeReified; },
-    [&](MethodOrMissing m) {
-      return m.mte->second.func->isReified;
-    },
+    [&](MethodOrMissing m) { return m.func->isReified; },
     [&](const Isect& i) {
       for (auto const ff : i.families) {
         if (!ff->m_static->m_maybeReified) return false;
@@ -1751,13 +1744,9 @@ bool Func::mightCareAboutDynCalls() const {
     [&](FuncInfo* fi) {
       return dyn_call_error_level(fi->func) > 0;
     },
-    [&](const MethTabEntryPair* mte) {
-      return dyn_call_error_level(mte->second.func) > 0;
-    },
+    [&](Method m) { return dyn_call_error_level(m.func) > 0; },
     [&](FuncFamily* fa) { return fa->m_static->m_maybeCaresAboutDynCalls; },
-    [&](MethodOrMissing m) {
-      return dyn_call_error_level(m.mte->second.func) > 0;
-    },
+    [&](MethodOrMissing m) { return dyn_call_error_level(m.func) > 0; },
     [&](const Isect& i) {
       for (auto const ff : i.families) {
         if (!ff->m_static->m_maybeCaresAboutDynCalls) return false;
@@ -1775,13 +1764,9 @@ bool Func::mightBeBuiltin() const {
     [&](FuncName s) { return s.renamable; },
     [&](MethodName) { return true; },
     [&](FuncInfo* fi) { return fi->func->attrs & AttrBuiltin; },
-    [&](const MethTabEntryPair* mte) {
-      return mte->second.func->attrs & AttrBuiltin;
-    },
+    [&](Method m) { return m.func->attrs & AttrBuiltin; },
     [&](FuncFamily* fa) { return fa->m_static->m_maybeBuiltin; },
-    [&](MethodOrMissing m) {
-      return m.mte->second.func->attrs & AttrBuiltin;
-    },
+    [&](MethodOrMissing m) { return m.func->attrs & AttrBuiltin; },
     [&](const Isect& i) {
       for (auto const ff : i.families) {
         if (!ff->m_static->m_maybeBuiltin) return false;
@@ -1797,9 +1782,9 @@ uint32_t Func::minNonVariadicParams() const {
     [&] (FuncName) { return 0; },
     [&] (MethodName) { return 0; },
     [&] (FuncInfo* fi) { return numNVArgs(*fi->func); },
-    [&] (const MethTabEntryPair* mte) { return numNVArgs(*mte->second.func); },
+    [&] (Method m) { return numNVArgs(*m.func); },
     [&] (FuncFamily* fa) { return fa->m_static->m_minNonVariadicParams; },
-    [&] (MethodOrMissing m) { return numNVArgs(*m.mte->second.func); },
+    [&] (MethodOrMissing m) { return numNVArgs(*m.func); },
     [&] (const Isect& i) {
       uint32_t nv = 0;
       for (auto const ff : i.families) {
@@ -1816,9 +1801,9 @@ uint32_t Func::maxNonVariadicParams() const {
     [&] (FuncName) { return std::numeric_limits<uint32_t>::max(); },
     [&] (MethodName) { return std::numeric_limits<uint32_t>::max(); },
     [&] (FuncInfo* fi) { return numNVArgs(*fi->func); },
-    [&] (const MethTabEntryPair* mte) { return numNVArgs(*mte->second.func); },
+    [&] (Method m) { return numNVArgs(*m.func); },
     [&] (FuncFamily* fa) { return fa->m_static->m_maxNonVariadicParams; },
-    [&] (MethodOrMissing m) { return numNVArgs(*m.mte->second.func); },
+    [&] (MethodOrMissing m) { return numNVArgs(*m.func); },
     [&] (const Isect& i) {
       auto nv = std::numeric_limits<uint32_t>::max();
       for (auto const ff : i.families) {
@@ -1835,15 +1820,11 @@ const RuntimeCoeffects* Func::requiredCoeffects() const {
     [&] (FuncName) { return nullptr; },
     [&] (MethodName) { return nullptr; },
     [&] (FuncInfo* fi) { return &fi->func->requiredCoeffects; },
-    [&] (const MethTabEntryPair* mte) {
-      return &mte->second.func->requiredCoeffects;
-    },
+    [&] (Method m) { return &m.func->requiredCoeffects; },
     [&] (FuncFamily* fa) {
       return fa->m_static->m_requiredCoeffects.get_pointer();
     },
-    [&] (MethodOrMissing m) {
-      return &m.mte->second.func->requiredCoeffects;
-    },
+    [&] (MethodOrMissing m) { return &m.func->requiredCoeffects; },
     [&] (const Isect& i) {
       const RuntimeCoeffects* coeffects = nullptr;
       for (auto const ff : i.families) {
@@ -1869,15 +1850,11 @@ const CompactVector<CoeffectRule>* Func::coeffectRules() const {
     [&] (FuncName) { return nullptr; },
     [&] (MethodName) { return nullptr; },
     [&] (FuncInfo* fi) { return &fi->func->coeffectRules; },
-    [&] (const MethTabEntryPair* mte) {
-      return &mte->second.func->coeffectRules;
-    },
+    [&] (Method m) { return &m.func->coeffectRules; },
     [&] (FuncFamily* fa) {
       return fa->m_static->m_coeffectRules.get_pointer();
     },
-    [&] (MethodOrMissing m) {
-      return &m.mte->second.func->coeffectRules;
-    },
+    [&] (MethodOrMissing m) { return &m.func->coeffectRules; },
     [&] (const Isect& i) {
       const CompactVector<CoeffectRule>* coeffects = nullptr;
       for (auto const ff : i.families) {
@@ -1909,7 +1886,7 @@ std::string show(const Func& f) {
     [&](Func::FuncName s)        { if (s.renamable) ret += '?'; },
     [&](Func::MethodName)        {},
     [&](FuncInfo*)               { ret += "*"; },
-    [&](const MethTabEntryPair*) { ret += "*"; },
+    [&](Func::Method)            { ret += "*"; },
     [&](FuncFamily*)             { ret += "+"; },
     [&](Func::MethodOrMissing)   { ret += "-"; },
     [&](const Func::Isect&)      { ret += "&"; }
@@ -2234,6 +2211,17 @@ struct TraitMethod {
   Attr modifiers;
 };
 
+//////////////////////////////////////////////////////////////////////
+
+const php::Func* func_from_mte(const IndexData& index,
+                               const MethTabEntry& mte) {
+  auto const cls = index.classes.at(mte.cls);
+  assertx(mte.clsIdx < cls->methods.size());
+  return cls->methods[mte.clsIdx].get();
+}
+
+//////////////////////////////////////////////////////////////////////
+
 struct TMIOps {
   using string_type = LSString;
   using class_type = TraitMethod::class_type;
@@ -2252,20 +2240,12 @@ struct TMIOps {
     return traitCls->cls->name;
   }
 
-  // Return the name for the trait method.
-  static const string_type methName(method_type meth) {
-    return meth->name;
-  }
-
   // Return the name of the trait where the method was originally defined
   static origin_type originalClass(method_type meth) {
     return meth->originalClass ? meth->originalClass : meth->cls->name;
   }
 
   // Is-a methods.
-  static bool isTrait(class_type traitCls) {
-    return traitCls->cls->attrs & AttrTrait;
-  }
   static bool isAbstract(Attr modifiers) {
     return modifiers & AttrAbstract;
   }
@@ -2275,59 +2255,7 @@ struct TMIOps {
     return Func::isSpecial(methName);
   }
 
-  // TraitMethod constructor.
-  static TraitMethod traitMethod(class_type traitCls,
-                                 method_type traitMeth,
-                                 const PreClass::TraitAliasRule& rule) {
-    return TraitMethod { traitCls, traitMeth, rule.modifiers() };
-  }
-
-  // Register a trait alias once the trait class is found.
-  static void addTraitAlias(const ClassInfo* /*cls*/,
-                            const PreClass::TraitAliasRule& /*rule*/,
-                            class_type /*traitCls*/) {
-    // purely a runtime thing... nothing to do
-  }
-
-  // Trait class/method finders.
-  static class_type findSingleTraitWithMethod(class_type cls,
-                                              string_type origMethName) {
-    class_type traitCls = nullptr;
-
-    for (auto const t : cls->usedTraits) {
-      // Note: m_methods includes methods from parents/traits recursively.
-      if (t->methods.count(origMethName)) {
-        if (traitCls != nullptr) {
-          return nullptr;
-        }
-        traitCls = t;
-      }
-    }
-    return traitCls;
-  }
-
-  static class_type findTraitClass(class_type cls,
-                                   string_type traitName) {
-    for (auto const t : cls->usedTraits) {
-      if (traitName->isame(t->cls->name)) return t;
-    }
-    return nullptr;
-  }
-
-  static method_type findTraitMethod(class_type traitCls,
-                                     string_type origMethName) {
-    auto it = traitCls->methods.find(origMethName);
-    if (it == traitCls->methods.end()) return nullptr;
-    return it->second.func;
-  }
-
   // Errors.
-  static void errorUnknownMethod(string_type methName) {
-    throw TMIException(folly::sformat("Unknown method '{}'", methName));
-  }
-  static void errorUnknownTrait(string_type traitName) {
-    throw TMIException(folly::sformat("Unknown trait '{}'", traitName));
-  }
   static void errorDuplicateMethod(class_type cls,
                                    string_type methName,
                                    const std::vector<const StringData*>&) {
@@ -2340,16 +2268,6 @@ struct TMIOps {
       return;
     }
     throw TMIException(folly::sformat("DuplicateMethod: {}", methName));
-  }
-  static void errorInconsistentInsteadOf(class_type cls,
-                                         string_type methName) {
-    throw TMIException(folly::sformat("InconsistentInsteadOf: {} {}",
-                                      methName, cls->cls->name));
-  }
-  static void errorMultiplyExcluded(string_type traitName,
-                                    string_type methName) {
-    throw TMIException(folly::sformat("MultiplyExcluded: {}::{}",
-                                      traitName, methName));
   }
 };
 
@@ -2465,9 +2383,9 @@ bool build_class_constants(IndexData& index,
         "`{}' as a {} and by `{}' as a {}\n",
         cinfo->cls->name,
         cns->name,
-        cns->cls->name,
+        cns->cls,
         ConstModifiers::show(cns->kind),
-        existing->cls->name,
+        existing->cls,
         ConstModifiers::show(existing->kind)
       );
       return false;
@@ -2487,21 +2405,23 @@ bool build_class_constants(IndexData& index,
       // (Excluding constants from interfaces a trait implements)
       // Need this check otherwise constants from traits that conflict with
       // declared interfaces will silently lose and not conflict in the runtime
-      // Type and Context constants can be overriden.
+      // Type and Context constants can be overridden.
+      auto const existingCls = index.classes.at(existing->cls);
+      auto const cnsCls = index.classes.at(cns->cls);
       if (cns->kind == ConstModifiers::Kind::Value &&
           !existing->isAbstract &&
-          existing->cls->attrs & AttrInterface &&
-          !(cns->cls->attrs & AttrInterface && fromTrait)) {
+          existingCls->attrs & AttrInterface &&
+          !(cnsCls->attrs & AttrInterface && fromTrait)) {
         for (auto const& interface : cinfo->declInterfaces) {
-          if (existing->cls == interface->cls) {
+          if (existingCls == interface->cls) {
             ITRACE(
               2,
               "build_class_constants failed for `{}' because "
               "`{}' was defined by both `{}' and `{}'\n",
               cinfo->cls->name,
               cns->name,
-              cns->cls->name,
-              existing->cls->name
+              cns->cls,
+              existing->cls
             );
             return false;
           }
@@ -2513,8 +2433,9 @@ bool build_class_constants(IndexData& index,
         if (fromTrait) return true;
       }
 
-      if ((cns->cls->attrs & AttrInterface ||
-           (RO::EvalTraitConstantInterfaceBehavior && (cns->cls->attrs & AttrTrait))) &&
+      if ((cnsCls->attrs & AttrInterface ||
+           (RO::EvalTraitConstantInterfaceBehavior &&
+            (cnsCls->attrs & AttrTrait))) &&
           (existing->isAbstract || cns->kind == ConstModifiers::Kind::Type)) {
         // Because existing has val, this covers the case where it is abstract
         // with default allow incoming to win.  Also, type constants from
@@ -2522,16 +2443,17 @@ bool build_class_constants(IndexData& index,
       } else {
         // A constant from an interface or from an included enum collides
         // with an existing constant.
-        if (cns->cls->attrs & (AttrInterface | AttrEnum | AttrEnumClass) ||
-            (RO::EvalTraitConstantInterfaceBehavior && (cns->cls->attrs & AttrTrait))) {
+        if (cnsCls->attrs & (AttrInterface | AttrEnum | AttrEnumClass) ||
+            (RO::EvalTraitConstantInterfaceBehavior &&
+             (cnsCls->attrs & AttrTrait))) {
           ITRACE(
             2,
             "build_class_constants failed for `{}' because "
             "`{}' was defined by both `{}' and `{}'\n",
             cinfo->cls->name,
             cns->name,
-            cns->cls->name,
-            existing->cls->name
+            cns->cls,
+            existing->cls
           );
           return false;
         }
@@ -2618,8 +2540,10 @@ bool build_class_constants(IndexData& index,
       auto const& cns = *t.second;
       if (cns.isAbstract && cns.val) {
         if (cns.val.value().m_type == KindOfUninit) {
-          // We need to copy the constant's initializer into this class
-          auto const& cns_86cinit = cns.cls->methods.back().get();
+          // We need to copy the constant's initializer into this
+          // class.
+          auto const cnsCls = index.classes.at(cns.cls);
+          auto const& cns_86cinit = cnsCls->methods.back().get();
           assertx(cns_86cinit->name == s_86cinit.get());
 
           std::unique_ptr<php::Func> empty;
@@ -2642,19 +2566,19 @@ bool build_class_constants(IndexData& index,
               clonedClosures
             );
             assertx(clonedClosures.empty());
+            current_86cinit->clsIdx = cls->methods.size();
             DEBUG_ONLY auto res = cinfo->methods.emplace(
               current_86cinit->name,
-              MethTabEntry { current_86cinit.get(), current_86cinit->attrs, false, true }
+              MethTabEntry { *current_86cinit }
             );
             assertx(res.second);
-            cls->methods.push_back(std::move(current_86cinit));
+            cls->methods.emplace_back(std::move(current_86cinit));
           } else {
             append_86cinit(current_86cinit.get(), *cns_86cinit);
           }
-
         }
         auto concretizedCns = cns;
-        concretizedCns.cls = cls;
+        concretizedCns.cls = cls->name;
         concretizedCns.isAbstract = false;
 
         // this is similar to trait constant flattening
@@ -2852,33 +2776,37 @@ bool build_class_methods(const IndexData& index,
                          ClsPreResolveUpdates& updates) {
   if (cinfo->cls->attrs & AttrInterface) return true;
 
-  auto const methodOverride = [&] (auto& it,
+  auto const methodOverride = [&] (auto& existing,
                                    const php::Func* meth,
                                    Attr attrs,
                                    SString name) {
-    if (it->second.func->attrs & AttrFinal) {
+    auto const existingMeth = func_from_mte(index, existing->second);
+    if (existingMeth->attrs & AttrFinal) {
       if (!is_mock_class(cinfo->cls)) {
         ITRACE(2,
                "build_class_methods failed for `{}' because "
                "it tried to override final method `{}::{}'\n",
                cinfo->cls->name,
-               it->second.func->cls->name, name);
+               existing->second.cls,
+               name);
         return false;
       }
     }
     ITRACE(9,
            "  {}: overriding method {}::{} with {}::{}\n",
            cinfo->cls->name,
-           it->second.func->cls->name, it->second.func->name,
-           meth->cls->name, name);
-    if (it->second.func->attrs & AttrPrivate) {
-      it->second.hasPrivateAncestor = true;
+           existing->second.cls,
+           existing->first,
+           meth->cls->name,
+           name);
+    if (existingMeth->attrs & AttrPrivate) {
+      existing->second.hasPrivateAncestor = true;
     }
-    it->second.func = meth;
-    it->second.attrs = attrs;
-    it->second.hasAncestor = true;
-    it->second.topLevel = true;
-    assertx(it->first == name);
+    existing->second.cls = meth->cls->name;
+    existing->second.clsIdx = meth->clsIdx;
+    existing->second.attrs = attrs;
+    existing->second.topLevel = true;
+    assertx(existing->first == name);
     return true;
   };
 
@@ -2901,11 +2829,8 @@ bool build_class_methods(const IndexData& index,
   uint32_t idx = cinfo->methods.size();
 
   // Now add our methods.
-  for (auto& m : cinfo->cls->methods) {
-    auto res = cinfo->methods.emplace(
-      m->name,
-      MethTabEntry { m.get(), m->attrs, false, true }
-    );
+  for (auto const& m : cinfo->cls->methods) {
+    auto res = cinfo->methods.emplace(m->name, MethTabEntry { *m });
     if (res.second) {
       res.first->second.idx = idx++;
       ITRACE(9,
@@ -2935,7 +2860,11 @@ bool build_class_methods(const IndexData& index,
       }
       for (auto const m : methods) {
         if (!m) continue;
-        TraitMethod traitMethod { t, m->second.func, m->second.attrs };
+        TraitMethod traitMethod {
+          t,
+          func_from_mte(index, m->second),
+          m->second.attrs
+        };
         tmid.add(traitMethod, m->first);
       }
       if (auto const it = index.classClosureMap.find(t->cls);
@@ -2963,7 +2892,7 @@ bool build_class_methods(const IndexData& index,
       }
       auto res = cinfo->methods.emplace(
         mdata.name,
-        MethTabEntry { method, attrs, false, true }
+        MethTabEntry { *method, attrs }
       );
       if (res.second) {
         res.first->second.idx = idx++;
@@ -2973,7 +2902,7 @@ bool build_class_methods(const IndexData& index,
                method->cls->name, method->name, mdata.name);
       } else {
         if (attrs & AttrAbstract) continue;
-        if (res.first->second.func->cls == cinfo->cls) continue;
+        if (res.first->second.cls->isame(cinfo->cls->name)) continue;
         if (!methodOverride(res.first, method, attrs, mdata.name)) {
           return false;
         }
@@ -3342,6 +3271,9 @@ std::unique_ptr<php::Func> clone_meth(IndexData& index,
   auto cloneMeth  = std::make_unique<php::Func>(*origMeth);
   cloneMeth->name = name;
   cloneMeth->attrs = attrs | AttrTrait;
+  // cloned method doesn't belong to any class yet, so trash its
+  // index.
+  cloneMeth->clsIdx = std::numeric_limits<uint32_t>::max();
   return clone_meth_helper(index, newContext, origMeth,
                            std::move(cloneMeth), updates,
                            clonedClosures);
@@ -3383,9 +3315,9 @@ bool merge_inits(IndexData& index,
   for (auto t : cinfo->usedTraits) {
     auto it = t->methods.find(xinitName);
     if (it != t->methods.end()) {
-      if (!merge_one(it->second.func)) {
+      if (!merge_one(func_from_mte(index, it->second))) {
         ITRACE(5, "merge_xinits: failed to merge {}::{}\n",
-               it->second.func->cls->name, it->second.func->name);
+               it->second.cls, it->first);
         return false;
       }
     }
@@ -3501,10 +3433,10 @@ void flatten_traits(IndexData& index,
   if (hasConstProp) cls->hasConstProp = true;
   std::vector<MethTabEntryPair*> methodsToAdd;
   for (auto& ent : cinfo->methods) {
-    if (!ent.second.topLevel || ent.second.func->cls == cinfo->cls) {
+    if (!ent.second.topLevel || ent.second.cls->isame(cinfo->cls->name)) {
       continue;
     }
-    always_assert(ent.second.func->cls->attrs & AttrTrait);
+    always_assert(index.classes.at(ent.second.cls)->attrs & AttrTrait);
     methodsToAdd.push_back(mteFromElm(ent));
   }
 
@@ -3512,10 +3444,12 @@ void flatten_traits(IndexData& index,
 
   if (!methodsToAdd.empty()) {
     assertx(it != updates.extraMethods.end());
-    std::sort(begin(methodsToAdd), end(methodsToAdd),
-              [] (const MethTabEntryPair* a, const MethTabEntryPair* b) {
-                return a->second.idx < b->second.idx;
-              });
+    std::sort(
+      begin(methodsToAdd), end(methodsToAdd),
+      [] (const MethTabEntryPair* a, const MethTabEntryPair* b) {
+        return a->second.idx < b->second.idx;
+      }
+    );
   } else if (debug && it != updates.extraMethods.end()) {
     // When building the ClassInfos, we proactively added all closures
     // from usedTraits to classExtraMethodMap; but now we're going to
@@ -3533,17 +3467,23 @@ void flatten_traits(IndexData& index,
   ClonedClosureMap clonedClosures;
 
   for (auto const ent : methodsToAdd) {
-    auto clone = clone_meth(index, cls, ent->second.func, ent->first,
-                            ent->second.attrs, updates, clonedClosures);
+    auto clone = clone_meth(
+      index,
+      cls,
+      func_from_mte(index, ent->second),
+      ent->first,
+      ent->second.attrs,
+      updates,
+      clonedClosures
+    );
     if (!clone) {
       ITRACE(5, "Not flattening {} because {}::{} could not be cloned\n",
-             cls->name, ent->second.func->cls->name, ent->first);
+             cls->name, ent->second.cls, ent->first);
       return;
     }
 
     clone->attrs |= AttrTrait;
     ent->second.attrs |= AttrTrait;
-    ent->second.func = clone.get();
     clones.push_back(std::move(clone));
   }
 
@@ -3582,35 +3522,49 @@ void flatten_traits(IndexData& index,
   for (auto const& c : cinfo->traitConsts) {
     ITRACE(5, "  - const {}\n", c.name);
     cls->constants.push_back(c);
-    cls->constants.back().cls = cls;
+    cls->constants.back().cls = cls->name;
     cinfo->clsConstants[c.name].cls = cls;
     cinfo->clsConstants[c.name].idx = cls->constants.size()-1;
     cinfo->preResolveState->constsFromTraits.erase(c.name);
   }
   cinfo->traitConsts.clear();
 
-  if (clones.size()) {
+  if (!clones.empty()) {
+    auto const add = [&] (std::unique_ptr<php::Func> clone, bool overwrite) {
+      assertx(clone->cls == cls);
+      clone->clsIdx = cls->methods.size();
+      if (!is_special_method_name(clone->name)) {
+        auto it = cinfo->methods.find(clone->name);
+        assertx(it != cinfo->methods.end());
+        it->second.cls = cls->name;
+        it->second.clsIdx = cls->methods.size();
+      } else {
+        auto const res = cinfo->methods.emplace(
+          clone->name,
+          MethTabEntry { *clone }
+        );
+        if (!res.second) {
+          assertx(overwrite);
+          assertx(res.first->second.cls->isame(cls->name));
+          res.first->second.clsIdx = clone->clsIdx;
+        }
+      }
+      cls->methods.emplace_back(std::move(clone));
+    };
+
     auto cinit = cls->methods.size() &&
       cls->methods.back()->name == s_86cinit.get() ?
       std::move(cls->methods.back()) : nullptr;
     if (cinit) cls->methods.pop_back();
     for (auto& clone : clones) {
-      if (is_special_method_name(clone->name)) {
-        DEBUG_ONLY auto res = cinfo->methods.emplace(
-          clone->name,
-          MethTabEntry { clone.get(), clone->attrs, false, true }
-        );
-        assertx(res.second);
-      }
       ITRACE(5, "  - meth {}\n", clone->name);
-      cinfo->methods.find(clone->name)->second.func = clone.get();
       if (clone->name == s_86cinit.get()) {
         cinit = std::move(clone);
         continue;
       }
-      cls->methods.push_back(std::move(clone));
+      add(std::move(clone), false);
     }
-    if (cinit) cls->methods.push_back(std::move(cinit));
+    if (cinit) add(std::move(cinit), true);
 
     if (!clonedClosures.empty()) {
       auto& closures = updates.closures[cls];
@@ -3887,10 +3841,11 @@ bool define_func_family(IndexData& index, ClassInfo* cinfo,
       // the first one is used as the name for FCall*Method* hint,
       // after that, sort by name so that different case spellings
       // come in the same order.
-      if (a->second.func == b->second.func)   return false;
+      if (a->second.cls->isame(b->second.cls) &&
+          a->second.clsIdx == b->second.clsIdx) return false;
       if (func) {
-        if (b->second.func == func) return false;
-        if (a->second.func == func) return true;
+        if (func_from_mte(index, b->second) == func) return false;
+        if (func_from_mte(index, a->second) == func) return true;
       }
       if (auto d = a->first->compare(b->first)) {
         if (!func) {
@@ -3899,14 +3854,18 @@ bool define_func_family(IndexData& index, ClassInfo* cinfo,
         }
         return d < 0;
       }
-      return std::less<const void*>{}(a->second.func, b->second.func);
+      auto const d = a->second.cls->compare(b->second.cls);
+      if (d != 0) return d < 0;
+      return a->second.clsIdx < b->second.clsIdx;
     }
   );
   funcs.erase(
     std::unique(
       begin(funcs), end(funcs),
       [] (const MethTabEntryPair* a, const MethTabEntryPair* b) {
-        return a->second.func == b->second.func;
+        return
+          a->second.cls->isame(b->second.cls) &&
+          a->second.clsIdx == b->second.clsIdx;
       }
     ),
     end(funcs)
@@ -3918,9 +3877,7 @@ bool define_func_family(IndexData& index, ClassInfo* cinfo,
     FTRACE(4, "define_func_family: {}::{}:\n",
            cinfo ? cinfo->cls->name->data() : "*", name);
     for (auto const DEBUG_ONLY func : funcs) {
-      FTRACE(4, "  {}::{}\n",
-             func->second.func->cls->name,
-             func->second.func->name);
+      FTRACE(4, "  {}::{}\n", func->second.cls, func->first);
     }
   }
 
@@ -4058,17 +4015,11 @@ void build_abstract_func_families(IndexData& data, ClassInfo* cinfo) {
     }
   }
 
-  if (cinfo->cls->attrs & AttrInterface) {
-    for (auto& m : cinfo->cls->methods) {
-      if (added.count(m->name)) {
-        cinfo->methods.emplace(
-          m->name,
-          MethTabEntry { m.get(), m->attrs, false, true }
-        );
-      }
-    }
+  if (!(cinfo->cls->attrs & AttrInterface)) return;
+  for (auto const& m : cinfo->cls->methods) {
+    if (!added.count(m->name)) continue;
+    cinfo->methods.emplace(m->name, MethTabEntry { *m });
   }
-  return;
 }
 
 // Calculate the StaticInfo for the given FuncFamily, and assign it
@@ -4082,7 +4033,7 @@ void build_func_family_static_info(IndexData& index, FuncFamily* ff) {
   auto info =  [&] {
     FuncFamily::StaticInfo info;
 
-    auto const func = possible.front()->second.func;
+    auto const func = func_from_mte(index, possible.front()->second);
     info.m_numInOut = func_num_inout(func);
     info.m_isReadonlyReturn = yesOrNo(func->isReadonlyReturn);
     info.m_isReadonlyThis = yesOrNo(func->isReadonlyThis);
@@ -4099,7 +4050,7 @@ void build_func_family_static_info(IndexData& index, FuncFamily* ff) {
     }
     for (auto const pf : possible) {
       if (pf->second.attrs & AttrAbstract) continue;
-      info.m_supportsAER = func_supports_AER(pf->second.func);
+      info.m_supportsAER = func_supports_AER(func_from_mte(index, pf->second));
       break;
     }
     return info;
@@ -4120,7 +4071,7 @@ void build_func_family_static_info(IndexData& index, FuncFamily* ff) {
   };
 
   for (auto const pf : possible) {
-    auto const func = pf->second.func;
+    auto const func = func_from_mte(index, pf->second);
 
     if (info.m_numInOut && *info.m_numInOut != func_num_inout(func)) {
       info.m_numInOut.reset();
@@ -4211,7 +4162,12 @@ void define_func_families(IndexData& index) {
             continue;
           }
 
-          define_func_family(index, cinfo.get(), mte->first, mte->second.func);
+          define_func_family(
+            index,
+            cinfo.get(),
+            mte->first,
+            func_from_mte(index, mte->second)
+          );
         }
       }
       if (cinfo->cls->attrs & (AttrInterface | AttrAbstract)) {
@@ -4284,7 +4240,7 @@ void define_func_families(IndexData& index) {
       build_func_family_static_info(index, ff);
 
       for (auto const pf : ff->possibleFuncs()) {
-        auto finfo = create_func_info(index, pf->second.func);
+        auto finfo = create_func_info(index, func_from_mte(index, pf->second));
         auto& lock = locks[pointer_hash<FuncInfo>{}(finfo) % locks.size()];
         std::lock_guard<std::mutex> _{lock};
         finfo->families.emplace_back(ff);
@@ -4649,9 +4605,13 @@ void mark_no_override_methods(IndexData& index) {
       for (auto& m : cinfo->methods) {
         if (!(is_special_method_name(m.first))) {
           FTRACE(9, "Pre-setting AttrNoOverride on {}::{}\n",
-                 m.second.func->cls->name, m.first);
+                 m.second.cls, m.first);
           attribute_setter(m.second.attrs, true, AttrNoOverride);
-          attribute_setter(m.second.func->attrs, true, AttrNoOverride);
+          attribute_setter(
+            func_from_mte(index, m.second)->attrs,
+            true,
+            AttrNoOverride
+          );
         }
       }
     }
@@ -4671,9 +4631,10 @@ void mark_no_override_methods(IndexData& index) {
         for (auto const& derivedMethod : cinfo->methods) {
           auto const it = ancestor->methods.find(derivedMethod.first);
           if (it == end(ancestor->methods)) continue;
-          if (it->second.func != derivedMethod.second.func) {
+          if (!it->second.cls->isame(derivedMethod.second.cls) ||
+              it->second.clsIdx != derivedMethod.second.clsIdx) {
             FTRACE(2, "Removing AttrNoOverride on {}::{}\n",
-                   it->second.func->cls->name, it->first);
+                   it->second.cls, it->first);
             changes.emplace(&it->second);
           }
         }
@@ -4686,10 +4647,14 @@ void mark_no_override_methods(IndexData& index) {
   for (auto const& u : updates) {
     for (auto& mte : u) {
       assertx(mte->attrs & AttrNoOverride ||
-              !(mte->func->attrs & AttrNoOverride));
+              !(func_from_mte(index, *mte)->attrs & AttrNoOverride));
       if (mte->attrs & AttrNoOverride) {
         attribute_setter(mte->attrs, false, AttrNoOverride);
-        attribute_setter(mte->func->attrs, false, AttrNoOverride);
+        attribute_setter(
+          func_from_mte(index, *mte)->attrs,
+          false,
+          AttrNoOverride
+        );
       }
     }
   }
@@ -4741,9 +4706,12 @@ void check_invariants(const ClassInfo* cinfo) {
     // For non-interface classes, each method in a php class has an
     // entry in its ClassInfo method table, and if it's not special,
     // AttrNoOverride, or private, an entry in the family table.
-    for (auto& m : cinfo->cls->methods) {
+    for (size_t idx = 0; idx < cinfo->cls->methods.size(); ++idx) {
+      auto const& m = cinfo->cls->methods[idx];
       auto const it = cinfo->methods.find(m->name);
       always_assert(it != cinfo->methods.end());
+      always_assert(it->second.cls->isame(cinfo->cls->name));
+      always_assert(it->second.clsIdx == idx);
       if (it->second.attrs & (AttrNoOverride|AttrPrivate)) continue;
       if (is_special_method_name(m->name)) continue;
       always_assert(
@@ -5850,6 +5818,10 @@ php::Class* Index::lookup_unit_class_mutable(php::Unit& unit, Id id) {
   return m_data->classes.at(unit.classes[id]);
 }
 
+const php::Class* Index::lookup_const_class(const php::Const& cns) const {
+  return m_data->classes.at(cns.cls);
+}
+
 //////////////////////////////////////////////////////////////////////
 
 void Index::for_each_unit_func(const php::Unit& unit,
@@ -6599,7 +6571,11 @@ res::Func Index::resolve_method(Context ctx,
     // from just the method name.
     auto const singleMethIt = m_data->singleMethodFamilies.find(name);
     if (singleMethIt != m_data->singleMethodFamilies.end()) {
-      return res::Func { res::Func::MethodOrMissing{ singleMethIt->second }};
+      return res::Func {
+        res::Func::MethodOrMissing{
+          func_from_mte(*m_data, singleMethIt->second->second)
+        }
+      };
     }
     auto const methIt = m_data->methodFamilies.find(name);
     if (methIt != m_data->methodFamilies.end()) {
@@ -6619,7 +6595,11 @@ res::Func Index::resolve_method(Context ctx,
     auto const find_extra_method = [&] {
       auto singleMethIt = cinfo->singleMethodFamilies.find(name);
       if (singleMethIt != cinfo->singleMethodFamilies.end()) {
-        return res::Func { singleMethIt->second };
+        return res::Func {
+          res::Func::Method {
+            func_from_mte(*m_data, singleMethIt->second->second)
+          }
+        };
       }
       auto methIt = cinfo->methodFamilies.find(name);
       if (methIt == end(cinfo->methodFamilies)) return general();
@@ -6665,7 +6645,7 @@ res::Func Index::resolve_method(Context ctx,
     if (methIt == end(cinfo->methods)) {
       return isExact ? general() : find_extra_method();
     }
-    auto const ftarget = methIt->second.func;
+    auto const ftarget = func_from_mte(*m_data, methIt->second);
 
     // Be conservative around unflattened trait methods, since their cls
     // may change at runtime.
@@ -6700,7 +6680,7 @@ res::Func Index::resolve_method(Context ctx,
 
     auto const resolve = [&] {
       create_func_info(*m_data, ftarget);
-      return res::Func { mteFromIt(methIt) };
+      return res::Func { res::Func::Method { ftarget } };
     };
 
     if (isExact) return resolve();
@@ -6710,7 +6690,11 @@ res::Func Index::resolve_method(Context ctx,
 
     auto const singleFamIt = cinfo->singleMethodFamilies.find(name);
     if (singleFamIt != cinfo->singleMethodFamilies.end()) {
-      return res::Func { singleFamIt->second };
+      return res::Func {
+        res::Func::Method {
+          func_from_mte(*m_data, singleFamIt->second->second)
+        }
+      };
     }
     auto const famIt = cinfo->methodFamilies.find(name);
     if (famIt == end(cinfo->methodFamilies)) return general();
@@ -6738,7 +6722,7 @@ res::Func Index::resolve_method(Context ctx,
 
   auto maybeMissing = true;
   Func::Isect isect;
-  const MethTabEntryPair* singleMte = nullptr;
+  const php::Func* singleMethod = nullptr;
   for (auto const i : dcls.isect()) {
     auto const cinfo = i.val.right();
     if (!cinfo) continue;
@@ -6747,9 +6731,9 @@ res::Func Index::resolve_method(Context ctx,
     match<void>(
       func.val,
       [&] (Func::MethodName) {},
-      [&] (const MethTabEntryPair* mte) {
-        assertx(IMPLIES(singleMte, singleMte->second.func == mte->second.func));
-        if (!singleMte) singleMte = mte;
+      [&] (Func::Method m) {
+        assertx(IMPLIES(singleMethod, singleMethod == m.func));
+        if (!singleMethod) singleMethod = m.func;
         maybeMissing = false;
       },
       [&] (FuncFamily* ff) {
@@ -6757,10 +6741,8 @@ res::Func Index::resolve_method(Context ctx,
         maybeMissing = false;
       },
       [&] (Func::MethodOrMissing m) {
-        assertx(
-          IMPLIES(singleMte, singleMte->second.func == m.mte->second.func)
-        );
-        if (!singleMte) singleMte = m.mte;
+        assertx(IMPLIES(singleMethod, singleMethod == m.func));
+        if (!singleMethod) singleMethod = m.func;
       },
       [&] (Func::FuncName)     { always_assert(false); },
       [&] (FuncInfo*)          { always_assert(false); },
@@ -6768,15 +6750,15 @@ res::Func Index::resolve_method(Context ctx,
     );
   }
 
-  // If we got a MethTabEntryPair, that always wins. Again, every
-  // res::Func is true, and MethTabEntryPair is more specific than a
-  // FuncFamily, so it is preferred.
-  if (singleMte) {
+  // If we got a method, that always wins. Again, every res::Func is
+  // true, and method is more specific than a FuncFamily, so it is
+  // preferred.
+  if (singleMethod) {
     // If maybeMissing is true, then *every* resolution was to a
     // MethodName or MethodOrMissing, so include that fact here by
     // using MethodOrMissing.
-    if (maybeMissing) return Func { Func::MethodOrMissing { singleMte } };
-    return Func { singleMte };
+    if (maybeMissing) return Func { Func::MethodOrMissing { singleMethod } };
+    return Func { Func::Method { singleMethod } };
   }
   // We only got unresolved classes, so be pessimistic.
   if (isect.families.empty()) return general();
@@ -6804,13 +6786,16 @@ Index::resolve_ctor(Context /*ctx*/, res::Class rcls, bool exact) const {
 
   auto const ctor = mteFromIt(cit);
   if (exact || ctor->second.attrs & AttrNoOverride) {
-    create_func_info(*m_data, ctor->second.func);
-    return res::Func { ctor };
+    auto const f = func_from_mte(*m_data, ctor->second);
+    create_func_info(*m_data, f);
+    return res::Func { res::Func::Method { f } };
   }
 
   auto const singleFamIt = cinfo->singleMethodFamilies.find(s_construct.get());
   if (singleFamIt != cinfo->singleMethodFamilies.end()) {
-    return res::Func { singleFamIt->second};
+    return res::Func {
+      res::Func::Method { func_from_mte(*m_data, singleFamIt->second->second) }
+    };
   }
   auto const famIt = cinfo->methodFamilies.find(s_construct.get());
   if (famIt == end(cinfo->methodFamilies)) return std::nullopt;
@@ -7073,12 +7058,12 @@ Index::supports_async_eager_return(res::Func rfunc) const {
     [&](FuncInfo* finfo) {
       return func_supports_AER(finfo->func);
     },
-    [&](const MethTabEntryPair* mte) {
-      return func_supports_AER(mte->second.func);
+    [&](res::Func::Method m) {
+      return func_supports_AER(m.func);
     },
     [&](FuncFamily* fam) { return fam->m_static->m_supportsAER; },
     [&](res::Func::MethodOrMissing m) {
-      return func_supports_AER(m.mte->second.func);
+      return func_supports_AER(m.func);
     },
     [&](const res::Func::Isect& i) {
       auto aer = TriBool::Maybe;
@@ -7107,7 +7092,9 @@ bool Index::is_effect_free(Context ctx, res::Func rfunc) const {
   auto const processFF = [&] (FuncFamily* ff) {
     add_dependency(*m_data, ff, ctx, Dep::InlineDepthLimit);
     for (auto const mte : ff->possibleFuncs()) {
-      if (!func_info(*m_data, mte->second.func)->effectFree) return false;
+      auto const effectFree =
+        func_info(*m_data, func_from_mte(*m_data, mte->second))->effectFree;
+      if (!effectFree) return false;
     }
     return true;
   };
@@ -7120,9 +7107,9 @@ bool Index::is_effect_free(Context ctx, res::Func rfunc) const {
       add_dependency(*m_data, finfo->func, ctx, Dep::InlineDepthLimit);
       return finfo->effectFree;
     },
-    [&](const MethTabEntryPair* mte) {
-      add_dependency(*m_data, mte->second.func, ctx, Dep::InlineDepthLimit);
-      return func_info(*m_data, mte->second.func)->effectFree;
+    [&] (res::Func::Method m) {
+      add_dependency(*m_data, m.func, ctx, Dep::InlineDepthLimit);
+      return func_info(*m_data, m.func)->effectFree;
     },
     [&](FuncFamily* fam) { return processFF(fam); },
     [&] (res::Func::MethodOrMissing m) { return false; },
@@ -7230,15 +7217,16 @@ ClsConstLookupResult<> Index::lookup_class_constant(Context ctx,
         // analysis and add a dependency. We cannot cache in this
         // case.
         cachable = false;
+        auto const cnsCls = m_data->classes.at(cns.cls);
         if (ctx.func) {
-          auto const cinit = cns.cls->methods.back().get();
+          auto const cinit = cnsCls->methods.back().get();
           assertx(cinit->name == s_86cinit.get());
           add_dependency(*m_data, cinit, ctx, Dep::ClsConst);
         }
 
         ITRACE(4, "(dynamic)\n");
         auto const it =
-          m_data->clsConstTypes.find(std::make_pair(cns.cls, cns.name));
+          m_data->clsConstTypes.find(std::make_pair(cnsCls, cns.name));
         auto const type =
           (it == m_data->clsConstTypes.end()) ? TInitCell : it->second.type;
         return R{ type, TriBool::Yes, true };
@@ -7357,7 +7345,7 @@ Index::lookup_class_type_constant(
     if (!cns.val.has_value()) return abstract();
 
     assertx(tvIsDict(*cns.val));
-    ITRACE(4, "({}) {}\n", cns.cls->name, show(dict_val(val(*cns.val).parr)));
+    ITRACE(4, "({}) {}\n", cns.cls, show(dict_val(val(*cns.val).parr)));
 
     // If we've been given a resolver, use it. Otherwise resolve it in
     // the normal way.
@@ -7545,7 +7533,8 @@ Type Index::lookup_return_type(Context ctx,
       [&] {
         auto ret = TBottom;
         for (auto const pf : fam->possibleFuncs()) {
-          auto const finfo = func_info(*m_data, pf->second.func);
+          auto const finfo =
+            func_info(*m_data, func_from_mte(*m_data, pf->second));
           if (!finfo->func) return TInitCell;
           ret |= unctx(finfo->returnTy);
           if (!ret.strictSubtypeOf(BInitCell)) return ret;
@@ -7554,14 +7543,14 @@ Type Index::lookup_return_type(Context ctx,
       }
     );
   };
-  auto const methTab = [&] (const MethTabEntryPair* mte) {
+  auto const meth = [&] (const php::Func* func) {
     if (methods) {
-      if (auto ret = methods->lookupReturnType(*mte->second.func)) {
+      if (auto ret = methods->lookupReturnType(*func)) {
         return unctx(std::move(*ret));
       }
     }
-    add_dependency(*m_data, mte->second.func, ctx, dep);
-    auto const finfo = func_info(*m_data, mte->second.func);
+    add_dependency(*m_data, func, ctx, dep);
+    auto const finfo = func_info(*m_data, func);
     if (!finfo->func) return TInitCell;
     return unctx(finfo->returnTy);
   };
@@ -7574,9 +7563,9 @@ Type Index::lookup_return_type(Context ctx,
       add_dependency(*m_data, finfo->func, ctx, dep);
       return unctx(finfo->returnTy);
     },
-    [&] (const MethTabEntryPair* mte)  { return methTab(mte); },
+    [&] (res::Func::Method m)          { return meth(m.func); },
     [&] (FuncFamily* fam)              { return funcFamily(fam); },
-    [&] (res::Func::MethodOrMissing m) { return methTab(m.mte); },
+    [&] (res::Func::MethodOrMissing m) { return meth(m.func); },
     [&] (const res::Func::Isect& i) {
       auto ty = TInitCell;
       for (auto const ff : i.families) ty &= funcFamily(ff);
@@ -7597,7 +7586,8 @@ Type Index::lookup_return_type(Context caller,
       [&] {
         auto ty = TBottom;
         for (auto const pf : fam->possibleFuncs()) {
-          auto const finfo = func_info(*m_data, pf->second.func);
+          auto const finfo =
+            func_info(*m_data, func_from_mte(*m_data, pf->second));
           if (!finfo->func) return TInitCell;
           ty |= finfo->returnTy;
           if (!ty.strictSubtypeOf(BInitCell)) return ty;
@@ -7607,17 +7597,17 @@ Type Index::lookup_return_type(Context caller,
     );
     return return_with_context(std::move(ret), context);
   };
-  auto const methTab = [&] (const MethTabEntryPair* mte) {
-    auto const finfo = func_info(*m_data, mte->second.func);
+  auto const meth = [&] (const php::Func* func) {
+    auto const finfo = func_info(*m_data, func);
     if (!finfo->func) return TInitCell;
 
     auto returnType = [&] {
       if (methods) {
-        if (auto ret = methods->lookupReturnType(*mte->second.func)) {
+        if (auto ret = methods->lookupReturnType(*func)) {
           return *ret;
         }
       }
-      add_dependency(*m_data, mte->second.func, caller, dep);
+      add_dependency(*m_data, func, caller, dep);
       return finfo->returnTy;
     }();
 
@@ -7644,9 +7634,9 @@ Type Index::lookup_return_type(Context caller,
         finfo->returnTy
       );
     },
-    [&] (const MethTabEntryPair* mte)  { return methTab(mte); },
+    [&] (res::Func::Method m)          { return meth(m.func); },
     [&] (FuncFamily* fam)              { return funcFamily(fam); },
-    [&] (res::Func::MethodOrMissing m) { return methTab(m.mte); },
+    [&] (res::Func::MethodOrMissing m) { return meth(m.func); },
     [&] (const res::Func::Isect& i) {
       auto ty = TInitCell;
       for (auto const ff : i.families) ty &= funcFamily(ff);
@@ -7702,14 +7692,14 @@ Optional<uint32_t> Index::lookup_num_inout_params(
     [&] (FuncInfo* finfo) {
       return func_num_inout(finfo->func);
     },
-    [&] (const MethTabEntryPair* mte) {
-      return func_num_inout(mte->second.func);
+    [&] (res::Func::Method m) {
+      return func_num_inout(m.func);
     },
     [&] (FuncFamily* fam) -> Optional<uint32_t> {
       return fam->m_static->m_numInOut;
     },
     [&] (res::Func::MethodOrMissing m) {
-      return func_num_inout(m.mte->second.func);
+      return func_num_inout(m.func);
     },
     [&] (const res::Func::Isect& i) {
       Optional<uint32_t> numInOut;
@@ -7748,12 +7738,12 @@ PrepKind Index::lookup_param_prep(Context,
     [&] (FuncInfo* finfo) {
       return func_param_prep(finfo->func, paramId);
     },
-    [&] (const MethTabEntryPair* mte) {
-      return func_param_prep(mte->second.func, paramId);
+    [&] (res::Func::Method m) {
+      return func_param_prep(m.func, paramId);
     },
     [&] (FuncFamily* fam) { return fromFuncFamily(fam); },
     [&] (res::Func::MethodOrMissing m) {
-      return func_param_prep(m.mte->second.func, paramId);
+      return func_param_prep(m.func, paramId);
     },
     [&] (const res::Func::Isect& i) {
       auto inOut = TriBool::Maybe;
@@ -7796,14 +7786,14 @@ TriBool Index::lookup_return_readonly(
     [&] (FuncInfo* finfo) {
       return yesOrNo(finfo->func->isReadonlyReturn);
     },
-    [&] (const MethTabEntryPair* mte) {
-      return yesOrNo(mte->second.func->isReadonlyReturn);
+    [&] (res::Func::Method m) {
+      return yesOrNo(m.func->isReadonlyReturn);
     },
     [&] (FuncFamily* fam) {
       return fam->m_static->m_isReadonlyReturn;
     },
     [&] (res::Func::MethodOrMissing m) {
-      return yesOrNo(m.mte->second.func->isReadonlyReturn);
+      return yesOrNo(m.func->isReadonlyReturn);
     },
     [&] (const res::Func::Isect& i) {
       auto readOnly = TriBool::Maybe;
@@ -7841,14 +7831,14 @@ TriBool Index::lookup_readonly_this(
     [&] (FuncInfo* finfo) {
       return yesOrNo(finfo->func->isReadonlyThis);
     },
-    [&] (const MethTabEntryPair* mte) {
-      return yesOrNo(mte->second.func->isReadonlyThis);
+    [&] (res::Func::Method m) {
+      return yesOrNo(m.func->isReadonlyThis);
     },
     [&] (FuncFamily* fam) {
       return fam->m_static->m_isReadonlyThis;
     },
     [&] (res::Func::MethodOrMissing m) {
-      return yesOrNo(m.mte->second.func->isReadonlyThis);
+      return yesOrNo(m.func->isReadonlyThis);
     },
     [&] (const res::Func::Isect& i) {
       auto readOnly = TriBool::Maybe;

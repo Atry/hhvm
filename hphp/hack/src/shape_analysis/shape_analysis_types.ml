@@ -14,6 +14,11 @@ module HT = Hips_types
 
 exception Shape_analysis_exn of string
 
+module CommonSet (S : Set.S) = struct
+  let unions_map ~f set =
+    S.fold (fun elt acc -> S.union (f elt) acc) set S.empty
+end
+
 type potential_targets = {
   expressions_to_modify: Pos.t list;
   hints_to_modify: Pos.t list;
@@ -22,9 +27,11 @@ type potential_targets = {
 type mode =
   | FlagTargets
   | DumpConstraints
+  | DumpDerivedConstraints
   | SimplifyConstraints
   | Codemod
-  | SolveConstraints [@deriving eq]
+  | SolveConstraints
+  | CloseConstraints [@deriving eq]
 
 type options = {
   mode: mode;
@@ -55,17 +62,17 @@ module Codemod = struct
   [@@deriving show { with_path = false }]
 end
 
+type source =
+  | Base
+  | Derived
+[@@deriving ord, show { with_path = false }]
+
 type constraint_ =
   | Marks of marker_kind * Pos.t
-  | Has_static_key of entity_ * T.TShapeField.t * T.locl_ty
+  | Has_static_key of source * entity_ * T.TShapeField.t * T.locl_ty
   | Has_optional_key of entity_ * T.TShapeField.t
   | Has_dynamic_key of entity_
   | Subsets of entity_ * entity_
-  | Joins of {
-      left: entity_;
-      right: entity_;
-      join: entity_;
-    }
 [@@deriving ord]
 
 type inter_constraint_ = entity_ HT.inter_constraint_
@@ -108,11 +115,16 @@ module EntityMap = Map.Make (struct
   let compare = compare_entity_
 end)
 
-module EntitySet = Set.Make (struct
-  type t = entity_
+module EntitySet = struct
+  module S = Set.Make (struct
+    type t = entity_
 
-  let compare = compare_entity_
-end)
+    let compare = compare_entity_
+  end)
+
+  include S
+  include CommonSet (S)
+end
 
 module ConstraintSet = Set.Make (struct
   type t = constraint_

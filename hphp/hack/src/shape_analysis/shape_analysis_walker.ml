@@ -14,12 +14,15 @@ module T = Tast
 module SN = Naming_special_names
 module Env = Shape_analysis_env
 module Utils = Aast_names_utils
+module HT = Hips_types
 
 let join ~pos ~origin (env : env) (left : entity_) (right : entity_) :
     env * entity_ =
   let join = Env.fresh_var () in
-  let constraint_ = Joins { left; right; join } in
-  let env = Env.add_constraint env @@ { hack_pos = pos; origin; constraint_ } in
+  let decorate constraint_ = { hack_pos = pos; origin; constraint_ } in
+  let add_constraint env c = Env.add_constraint env @@ decorate c in
+  let constraints = [Subsets (left, join); Subsets (right, join)] in
+  let env = List.fold ~f:add_constraint ~init:env constraints in
   (env, join)
 
 let when_tast_check tast_env ~default f =
@@ -115,7 +118,7 @@ let add_key_constraint
       | A.String str ->
         let key = Typing_defs.TSFlit_str (Pos_or_decl.none, str) in
         let ty = Tast_env.fully_expand env.tast_env ty in
-        let constraint_ = Has_static_key (entity, key, ty) in
+        let constraint_ = Has_static_key (Base, entity, key, ty) in
         let env = Env.add_constraint env { hack_pos; origin; constraint_ } in
         if is_optional then
           let constraint_ = Has_optional_key (entity, key) in
@@ -239,7 +242,8 @@ and expr_ (env : env) ((ty, pos, e) : T.expr) : env * entity =
             Env.add_constraint env constraint_
           else
             let inter_constraint_ =
-              decorate ~origin:__LINE__ @@ HT.Arg ((f_id, arg_idx), arg_entity_)
+              decorate ~origin:__LINE__
+              @@ HT.Arg ((f_id, arg_idx, pos), arg_entity_)
             in
             Env.add_inter_constraint env inter_constraint_
         in
@@ -444,14 +448,23 @@ and stmt (env : env) ((pos, stmt) : T.stmt) : env =
 
 and block (env : env) : T.block -> env = List.fold ~init:env ~f:stmt
 
-let decl_hint tast_env kind ((ty, hint) : T.type_hint) :
+let decl_hint kind tast_env ((ty, hint) : T.type_hint) :
     constraint_ decorated list * entity =
   if is_suitable_target_ty tast_env ty then
     let hint_pos = dict_pos_of_hint hint in
+    let entity_ =
+      match kind with
+      | `Parameter (id, idx) -> Inter (HT.Param (id, idx, hint_pos))
+      | `Return -> Literal hint_pos
+    in
+    let kind =
+      match kind with
+      | `Parameter _ -> Parameter
+      | `Return -> Return
+    in
     let decorate ~origin constraint_ =
       { hack_pos = hint_pos; origin; constraint_ }
     in
-    let entity_ = Literal hint_pos in
     let marker_constraint =
       decorate ~origin:__LINE__ @@ Marks (kind, hint_pos)
     in
@@ -467,9 +480,10 @@ let decl_hint tast_env kind ((ty, hint) : T.type_hint) :
   else
     ([], None)
 
-let init_params tast_env (params : T.fun_param list) :
+let init_params id tast_env (params : T.fun_param list) :
     constraint_ decorated list * entity LMap.t =
   let add_param
+      idx
       (constraints, lmap)
       A.{ param_name; param_type_hint; param_is_variadic; _ } =
     if param_is_variadic then
@@ -477,18 +491,18 @@ let init_params tast_env (params : T.fun_param list) :
       (constraints, lmap)
     else
       let (new_constraints, entity) =
-        decl_hint tast_env Parameter param_type_hint
+        decl_hint (`Parameter (id, idx)) tast_env param_type_hint
       in
       let param_lid = Local_id.make_unscoped param_name in
       let lmap = LMap.add param_lid entity lmap in
       let constraints = new_constraints @ constraints in
       (constraints, lmap)
   in
-  List.fold ~f:add_param ~init:([], LMap.empty) params
+  List.foldi ~f:add_param ~init:([], LMap.empty) params
 
-let callable tast_env params ~return body : decorated_constraints =
-  let (param_constraints, param_env) = init_params tast_env params in
-  let (return_constraints, return) = decl_hint tast_env Return return in
+let callable id tast_env params ~return body : decorated_constraints =
+  let (param_constraints, param_env) = init_params id tast_env params in
+  let (return_constraints, return) = decl_hint `Return tast_env return in
   let constraints = return_constraints @ param_constraints in
   let env = Env.init tast_env constraints [] param_env ~return in
   let env = block env body.A.fb_ast in
@@ -501,12 +515,12 @@ let program (ctx : Provider_context.t) (tast : Tast.program) :
     match def with
     | A.Fun fd ->
       let A.{ f_body; f_name = (_, id); f_params; f_ret; _ } = fd.A.fd_fun in
-      [(id, callable tast_env f_params ~return:f_ret f_body)]
+      [(id, callable id tast_env f_params ~return:f_ret f_body)]
     | A.Class A.{ c_methods; c_name = (_, class_name); _ } ->
       let handle_method
           A.{ m_body; m_name = (_, method_name); m_params; m_ret; _ } =
         let id = class_name ^ "::" ^ method_name in
-        (id, callable tast_env m_params ~return:m_ret m_body)
+        (id, callable id tast_env m_params ~return:m_ret m_body)
       in
       List.map ~f:handle_method c_methods
     | _ -> failwith "A definition is not yet handled"

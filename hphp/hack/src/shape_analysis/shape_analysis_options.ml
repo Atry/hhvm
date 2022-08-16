@@ -11,9 +11,11 @@ open Shape_analysis_types
 let parse_mode = function
   | "flag" -> Some FlagTargets
   | "dump" -> Some DumpConstraints
+  | "dump-derived" -> Some DumpDerivedConstraints
   | "simplify" -> Some SimplifyConstraints
   | "codemod" -> Some Codemod
   | "solve" -> Some SolveConstraints
+  | "close" -> Some CloseConstraints
   | _ -> None
 
 let mk ~mode ~verbosity = { mode; verbosity }

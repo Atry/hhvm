@@ -10,16 +10,9 @@ endif ()
 
 include(HPHPFunctions)
 
-SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
-  FB_MYSQL_DOWNLOAD_ARGS
-  SOURCE_URL
-  "https://github.com/facebook/mysql-5.6/archive/refs/tags/percona-202204.tar.gz"
-  SOURCE_HASH
-  "SHA256=5e7cd9cb8d5909f87bddaa6068d109622f132b248b0d407651260c22221cbdf9"
-)
 ExternalProject_Add(
   bundled_fbmysqlclient
-  ${FB_MYSQL_DOWNLOAD_ARGS}
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/
   CMAKE_ARGS
   -DWITHOUT_SERVER=TRUE
   -DDISABLE_SHARED=TRUE

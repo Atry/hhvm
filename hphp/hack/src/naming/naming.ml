@@ -401,18 +401,31 @@ and hint_
     N.Haccess ((pos, root_ty), ids)
   | Aast.Hrefinement (subject, members) ->
     let subject = hint env subject in
-    let member (Aast.Rtype (ident, ref)) =
-      let ref =
-        match ref with
-        | Aast.Texact h -> N.Texact (hint env h)
-        | Aast.Tloose { Aast.tr_lower; tr_upper } ->
-          N.Tloose
-            {
-              N.tr_lower = List.map tr_lower ~f:(hint env);
-              N.tr_upper = List.map tr_upper ~f:(hint env);
-            }
-      in
-      N.Rtype (ident, ref)
+    let member = function
+      | Aast.Rtype (ident, ref) ->
+        let ref =
+          match ref with
+          | Aast.Texact h -> N.Texact (hint env h)
+          | Aast.Tloose { Aast.tr_lower; tr_upper } ->
+            N.Tloose
+              {
+                N.tr_lower = List.map tr_lower ~f:(hint env);
+                N.tr_upper = List.map tr_upper ~f:(hint env);
+              }
+        in
+        N.Rtype (ident, ref)
+      | Aast.Rctx (ident, ref) ->
+        let ref =
+          match ref with
+          | Aast.CRexact h -> N.CRexact (hint env h)
+          | Aast.CRloose { Aast.cr_lower; cr_upper } ->
+            N.CRloose
+              {
+                N.cr_lower = Option.map cr_lower ~f:(hint env);
+                N.cr_upper = Option.map cr_upper ~f:(hint env);
+              }
+        in
+        N.Rctx (ident, ref)
     in
     N.Hrefinement (subject, List.map members ~f:member)
   | Aast.Hshape { Aast.nsi_allows_unknown_fields; nsi_field_map } ->
@@ -1487,6 +1500,15 @@ and extend_tparams genv paraml =
   { genv with type_params = params }
 
 and fun_def ctx fd =
+  let fd =
+    if
+      Provider_context.get_tcopt ctx |> TypecheckerOptions.substitution_mutation
+      && FileInfo.equal_mode fd.Aast.fd_mode FileInfo.Mstrict
+    then
+      Substitution_mutation.mutate_fun_def fd
+    else
+      fd
+  in
   let genv = Env.make_fun_decl_genv ctx fd in
   let fd =
     elaborate_namespaces#on_fun_def

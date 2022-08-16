@@ -84,8 +84,6 @@ template <typename SerDe> void Local::serde(SerDe& sd) {
 
 template <typename SerDe> void Func::serde(SerDe& sd,
                                            Class* parentClass) {
-  // This isn't true in general, but is right now for where we're
-  // using the serializer.
   if constexpr (SerDe::deserializing) {
     cls = parentClass;
   } else {
@@ -94,6 +92,7 @@ template <typename SerDe> void Func::serde(SerDe& sd,
 
   sd(name)
     (idx)
+    (clsIdx)
     (srcInfo)
     (attrs)
     (params)
@@ -151,14 +150,9 @@ template <typename SerDe> void Prop::serde(SerDe& sd) {
     (val);
 }
 
-template <typename SerDe> void Const::serde(SerDe& sd, Class* parentClass) {
-  if constexpr (SerDe::deserializing) {
-    cls = parentClass;
-  } else {
-    assertx(cls == parentClass);
-  }
-
+template <typename SerDe> void Const::serde(SerDe& sd) {
   sd(name)
+    (cls)
     (val)
     (coeffects)
     (resolvedTypeStructure)
@@ -181,7 +175,7 @@ template <typename SerDe> void Class::serde(SerDe& sd) {
     (usedTraitNames)
     (requirements)
     (properties)
-    (constants, this)
+    (constants)
     (userAttributes)
     (enumBaseTy)
     (methods, this);
@@ -266,8 +260,8 @@ template void Func::serde(BlobDecoder&, Class*);
 template void Prop::serde(BlobEncoder&);
 template void Prop::serde(BlobDecoder&);
 
-template void Const::serde(BlobEncoder&, Class*);
-template void Const::serde(BlobDecoder&, Class*);
+template void Const::serde(BlobEncoder&);
+template void Const::serde(BlobDecoder&);
 
 template void Class::serde(BlobEncoder&);
 template void Class::serde(BlobDecoder&);

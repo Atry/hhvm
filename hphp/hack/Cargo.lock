@@ -554,6 +554,7 @@ dependencies = [
  "decl_provider",
  "direct_decl_parser",
  "facts_rust",
+ "hash",
  "hhbc",
  "itertools 0.10.3",
  "libc",
@@ -941,7 +942,9 @@ dependencies = [
  "arena_deserializer",
  "bincode",
  "bumpalo",
+ "hash",
  "oxidized_by_ref",
+ "sha-1",
  "thiserror",
 ]
 
@@ -3532,9 +3535,12 @@ checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
 name = "types"
 version = "0.0.0"
 dependencies = [
+ "decl_provider",
  "hh_autoimport_rust",
+ "lazy_static",
  "naming_special_names_rust",
  "oxidized",
+ "oxidized_by_ref",
  "parser_core_types",
 ]
 

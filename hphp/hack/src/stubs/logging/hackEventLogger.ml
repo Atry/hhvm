@@ -69,6 +69,7 @@ type rollout_flags = {
   no_marshalled_naming_table_in_saved_state: bool;
   no_load_two_saved_states: bool;
   use_manifold_cython_client: bool;
+  disable_naming_table_fallback_loading: bool;
 }
 
 let flush () = ()
@@ -366,6 +367,8 @@ let type_check_end
 let notifier_returned _ _ = ()
 
 let load_state_exn _ = ()
+
+let naming_table_sqlite_missing _ = ()
 
 let prechecked_update_rechecked _ = ()
 
