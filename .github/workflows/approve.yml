@@ -14,3 +14,5 @@ jobs:
       github.event.issue.pull_request
     steps:
     - run: gh pr review ${{ github.event.issue.number }} --approve
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
