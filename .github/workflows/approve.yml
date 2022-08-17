@@ -1,0 +1,16 @@
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  approval:
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.issue.pull_request &&
+    steps:
+    - run: gh pr review ${{ github.event.issue.number }} --approve
