@@ -13,6 +13,11 @@ jobs:
       github.event_name == 'issue_comment' &&
       github.event.issue.pull_request
     steps:
+    - uses: actions/checkout@v3
+    - if: github.event_name == 'issue_comment'
+      uses: dawidd6/action-checkout-pr@v1
+      with:
+        pr: ${{ github.event.issue.number }}
     - run: gh pr review ${{ github.event.issue.number }} --approve
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
