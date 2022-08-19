@@ -89,18 +89,13 @@ bool MemFile::open(const String& filename, const String& mode) {
   return false;
 }
 
-bool MemFile::close() {
-  return closeImpl();
-}
-
-bool MemFile::closeImpl() {
-  *s_pcloseRet = 0;
+bool MemFile::close(int*) {
   setIsClosed(true);
   if (m_malloced && m_data) {
     free(m_data);
     m_data = nullptr;
   }
-  File::closeImpl();
+  File::close();
   return true;
 }
 

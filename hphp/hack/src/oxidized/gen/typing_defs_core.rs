@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<c925a9dc5213824d87631a07cfda1bfc>>
+// @generated SignedSource<<9d3215b130c36d8cc285626eb9a02d77>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -40,6 +40,7 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum CeVisibility {
     Vpublic,
@@ -64,6 +65,7 @@ pub enum CeVisibility {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord)")]
 #[repr(C, u8)]
 pub enum IfcFunDecl {
     FDPolicied(Option<String>),
@@ -88,6 +90,7 @@ pub enum IfcFunDecl {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving eq")]
 #[repr(u8)]
 pub enum ValKind {
     Lval,
@@ -115,6 +118,7 @@ arena_deserializer::impl_deserialize_in_arena!(ValKind);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving eq")]
 #[repr(u8)]
 pub enum FunTparamsKind {
     /// If ft_tparams is empty, the containing fun_type is a concrete function type.
@@ -126,6 +130,7 @@ pub enum FunTparamsKind {
     /// at every invocation, and ft_tparams specifies the type arguments with
     /// which the generic function was instantiated, as well as whether each
     /// explicit type argument must be reified.
+    #[rust_to_ocaml(name = "FTKinstantiated_targs")]
     FTKinstantiatedTargs,
 }
 impl TrivialDrop for FunTparamsKind {}
@@ -149,9 +154,12 @@ arena_deserializer::impl_deserialize_in_arena!(FunTparamsKind);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(u8)]
 pub enum ShapeKind {
+    #[rust_to_ocaml(name = "Closed_shape")]
     ClosedShape,
+    #[rust_to_ocaml(name = "Open_shape")]
     OpenShape,
 }
 impl TrivialDrop for ShapeKind {}
@@ -173,9 +181,11 @@ arena_deserializer::impl_deserialize_in_arena!(ShapeKind);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct PosString(pub pos_or_decl::PosOrDecl, pub String);
 
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 pub type TByteString = String;
 
 #[derive(
@@ -194,6 +204,7 @@ pub type TByteString = String;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct PosByteString(pub pos_or_decl::PosOrDecl, pub bstr::BString);
 
@@ -213,10 +224,14 @@ pub struct PosByteString(pub pos_or_decl::PosOrDecl, pub bstr::BString);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum TshapeFieldName {
+    #[rust_to_ocaml(name = "TSFlit_int")]
     TSFlitInt(PosString),
+    #[rust_to_ocaml(name = "TSFlit_str")]
     TSFlitStr(PosByteString),
+    #[rust_to_ocaml(name = "TSFclass_const")]
     TSFclassConst(PosId, PosString),
 }
 
@@ -238,6 +253,7 @@ pub enum TshapeFieldName {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(u8)]
 pub enum ParamMode {
     FPnormal,
@@ -246,6 +262,7 @@ pub enum ParamMode {
 impl TrivialDrop for ParamMode {}
 arena_deserializer::impl_deserialize_in_arena!(ParamMode);
 
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 pub type XhpAttr = xhp_attribute::XhpAttribute;
 
 /// Denotes the categories of requirements we apply to constructor overrides.
@@ -273,6 +290,7 @@ pub type XhpAttr = xhp_attribute::XhpAttribute;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(u8)]
 pub enum ConsistentKind {
     Inconsistent,
@@ -298,6 +316,7 @@ arena_deserializer::impl_deserialize_in_arena!(ConsistentKind);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum DependentType {
     DTexpr(ident::Ident),
@@ -319,6 +338,7 @@ pub enum DependentType {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[rust_to_ocaml(prefix = "ua_")]
 #[repr(C)]
 pub struct UserAttribute {
@@ -342,6 +362,7 @@ pub struct UserAttribute {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[rust_to_ocaml(prefix = "tp_")]
 #[repr(C)]
 pub struct Tparam {
@@ -369,6 +390,7 @@ pub struct Tparam {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(C)]
 pub struct WhereConstraint(pub Ty, pub ast_defs::ConstraintKind, pub Ty);
 
@@ -390,6 +412,7 @@ pub struct WhereConstraint(pub Ty, pub ast_defs::ConstraintKind, pub Ty);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show, ord)")]
 #[repr(u8)]
 pub enum Enforcement {
     Unenforced,
@@ -435,7 +458,9 @@ pub struct Ty(pub reason::T_, pub Box<Ty_>);
 )]
 #[repr(C, u8)]
 pub enum NegType {
+    #[rust_to_ocaml(name = "Neg_prim")]
     NegPrim(aast::Tprim),
+    #[rust_to_ocaml(name = "Neg_class")]
     NegClass(PosId),
 }
 
@@ -565,6 +590,7 @@ pub enum Ty_ {
     Tunion(Vec<Ty>),
     Tintersection(Vec<Ty>),
     /// Tvec_or_dict (ty1, ty2) => "vec_or_dict<ty1, ty2>"
+    #[rust_to_ocaml(name = "Tvec_or_dict")]
     TvecOrDict(Ty, Ty),
     /// Name of class, name of type const, remaining names of type consts
     Taccess(TaccessType),
@@ -575,6 +601,7 @@ pub enum Ty_ {
     /// a higher-kinded type. It is never used for an alias like
     /// type Foo2 = ...
     /// that simply doesn't require type arguments.
+    #[rust_to_ocaml(name = "Tunapplied_alias")]
     TunappliedAlias(String),
     /// The type of an opaque type or enum. Outside their defining files or
     /// when they represent enums, they are "opaque", which means that they
@@ -858,6 +885,7 @@ pub type FunParams = Vec<FunParam>;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(u8)]
 pub enum DestructureKind {
     ListDestructure,
@@ -880,6 +908,7 @@ arena_deserializer::impl_deserialize_in_arena!(DestructureKind);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "d_")]
 #[repr(C)]
 pub struct Destructure {
@@ -918,6 +947,7 @@ pub struct Destructure {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "hm_")]
 #[repr(C)]
 pub struct HasMember {
@@ -926,7 +956,9 @@ pub struct HasMember {
     /// This is required to check ambiguous object access, where sometimes
     /// HHVM would access the private member of a parent class instead of the
     /// one from the current class.
+    #[rust_to_ocaml(attr = "opaque")]
     pub class_id: nast::ClassId_,
+    #[rust_to_ocaml(attr = "opaque")]
     pub explicit_targs: Option<Vec<nast::Targ>>,
 }
 
@@ -946,6 +978,7 @@ pub struct HasMember {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "ci_")]
 #[repr(C)]
 pub struct CanIndex {
@@ -972,6 +1005,7 @@ pub struct CanIndex {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "ct_")]
 #[repr(C)]
 pub struct CanTraverse {
@@ -997,8 +1031,11 @@ pub struct CanTraverse {
 )]
 #[repr(C, u8)]
 pub enum ConstraintType_ {
+    #[rust_to_ocaml(name = "Thas_member")]
     ThasMember(HasMember),
+    #[rust_to_ocaml(name = "Tcan_index")]
     TcanIndex(CanIndex),
+    #[rust_to_ocaml(name = "Tcan_traverse")]
     TcanTraverse(CanTraverse),
     /// The type of container destructuring via list() or splat `...`
     Tdestructure(Destructure),
@@ -1020,6 +1057,7 @@ pub enum ConstraintType_ {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[repr(C)]
 pub struct ConstraintType(pub reason::Reason, pub Box<ConstraintType_>);
 
@@ -1037,6 +1075,7 @@ pub struct ConstraintType(pub reason::Reason, pub Box<ConstraintType_>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[repr(C, u8)]
 pub enum InternalType {
     LoclType(Ty),

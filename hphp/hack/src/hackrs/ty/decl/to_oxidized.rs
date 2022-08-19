@@ -434,7 +434,7 @@ impl<'a> ToOxidized<'a> for folded::Constructor {
 }
 
 impl<'a, R: Reason> ToOxidized<'a> for folded::FoldedClass<R> {
-    type Output = obr::decl_defs::DeclClassType<'a>;
+    type Output = &'a obr::decl_defs::DeclClassType<'a>;
 
     fn to_oxidized(&self, arena: &'a bumpalo::Bump) -> Self::Output {
         // Destructure to help ensure we convert every field.
@@ -472,7 +472,7 @@ impl<'a, R: Reason> ToOxidized<'a> for folded::FoldedClass<R> {
             decl_errors,
             docs_url,
         } = self;
-        obr::decl_defs::DeclClassType {
+        arena.alloc(obr::decl_defs::DeclClassType {
             name: name.to_oxidized(arena),
             pos: pos.to_oxidized(arena),
             kind: *kind,
@@ -510,7 +510,7 @@ impl<'a, R: Reason> ToOxidized<'a> for folded::FoldedClass<R> {
             enum_type: enum_type.as_ref().map(|et| et.to_oxidized(arena)),
             decl_errors: decl_errors.to_oxidized(arena),
             docs_url: docs_url.as_deref().to_oxidized(arena),
-        }
+        })
     }
 }
 
@@ -805,13 +805,32 @@ impl<'a, R: Reason> ToOxidized<'a> for shallow::ConstDecl<R> {
     }
 }
 
+impl<'a> ToOxidized<'a> for ModuleReference {
+    type Output = obr::typing_defs::ModuleReference<'a>;
+
+    fn to_oxidized(&self, arena: &'a bumpalo::Bump) -> Self::Output {
+        use obr::typing_defs::ModuleReference as Obr;
+        match self {
+            ModuleReference::MRGlobal => Obr::MRGlobal,
+            ModuleReference::MRPrefix(m) => Obr::MRPrefix(m.to_oxidized(arena)),
+            ModuleReference::MRExact(m) => Obr::MRExact(m.to_oxidized(arena)),
+        }
+    }
+}
+
 impl<'a, R: Reason> ToOxidized<'a> for shallow::ModuleDecl<R> {
     type Output = &'a obr::shallow_decl_defs::ModuleDecl<'a>;
 
     fn to_oxidized(&self, arena: &'a bumpalo::Bump) -> Self::Output {
-        let Self { pos } = self;
+        let Self {
+            pos,
+            exports,
+            imports,
+        } = self;
         arena.alloc(obr::shallow_decl_defs::ModuleDecl {
-            mdt_pos: pos.to_oxidized(arena),
+            pos: pos.to_oxidized(arena),
+            exports: exports.to_oxidized(arena),
+            imports: imports.to_oxidized(arena),
         })
     }
 }

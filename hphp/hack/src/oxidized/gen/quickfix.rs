@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<de6c6a46c8832229531891352d9d280f>>
+// @generated SignedSource<<4a0e80dfd9dc02562a8731cc9febe68a>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -35,9 +35,11 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum QfPos {
     Qpos(pos::Pos),
+    #[rust_to_ocaml(name = "Qclassish_start")]
     QclassishStart(String),
 }
 
@@ -57,6 +59,7 @@ pub enum QfPos {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct Edit(pub String, pub QfPos);
 
@@ -76,6 +79,7 @@ pub struct Edit(pub String, pub QfPos);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct Quickfix {
     pub title: String,

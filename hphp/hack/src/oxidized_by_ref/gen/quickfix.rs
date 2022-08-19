@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<d3b8272a461d1bcd1fa101382bb7a5b1>>
+// @generated SignedSource<<bc9251bb7d8d89a05570dba3eae68f66>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -37,11 +37,13 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum QfPos<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
     Qpos(&'a pos::Pos<'a>),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Qclassish_start")]
     QclassishStart(&'a str),
 }
 impl<'a> TrivialDrop for QfPos<'a> {}
@@ -63,6 +65,7 @@ arena_deserializer::impl_deserialize_in_arena!(QfPos<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct Edit<'a>(
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)] pub &'a str,
@@ -87,6 +90,7 @@ arena_deserializer::impl_deserialize_in_arena!(Edit<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct Quickfix<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]

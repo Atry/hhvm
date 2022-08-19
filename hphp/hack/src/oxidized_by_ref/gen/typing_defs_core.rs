@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<891621c517b4aac1458a676065a75bcc>>
+// @generated SignedSource<<c7ffb18c01e989ae035fb6f09e9ed99e>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -40,6 +40,7 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum CeVisibility<'a> {
     Vpublic,
@@ -70,6 +71,7 @@ arena_deserializer::impl_deserialize_in_arena!(CeVisibility<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord)")]
 #[repr(C, u8)]
 pub enum IfcFunDecl<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -100,6 +102,7 @@ pub use oxidized::typing_defs_core::ValKind;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct PosString<'a>(
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -109,6 +112,7 @@ pub struct PosString<'a>(
 impl<'a> TrivialDrop for PosString<'a> {}
 arena_deserializer::impl_deserialize_in_arena!(PosString<'arena>);
 
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 pub type TByteString<'a> = str;
 
 #[derive(
@@ -128,6 +132,7 @@ pub type TByteString<'a> = str;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C)]
 pub struct PosByteString<'a>(
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -154,13 +159,18 @@ arena_deserializer::impl_deserialize_in_arena!(PosByteString<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum TshapeFieldName<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "TSFlit_int")]
     TSFlitInt(&'a PosString<'a>),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "TSFlit_str")]
     TSFlitStr(&'a PosByteString<'a>),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "TSFclass_const")]
+    #[rust_to_ocaml(inline_tuple)]
     TSFclassConst(&'a (PosId<'a>, PosString<'a>)),
 }
 impl<'a> TrivialDrop for TshapeFieldName<'a> {}
@@ -168,6 +178,7 @@ arena_deserializer::impl_deserialize_in_arena!(TshapeFieldName<'arena>);
 
 pub use oxidized::typing_defs_core::ParamMode;
 
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 pub type XhpAttr = oxidized::xhp_attribute::XhpAttribute;
 
 pub use oxidized::typing_defs_core::ConsistentKind;
@@ -189,6 +200,7 @@ pub use oxidized::typing_defs_core::ConsistentKind;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, ord, show)")]
 #[repr(C, u8)]
 pub enum DependentType {
     DTexpr(ident::Ident),
@@ -212,6 +224,7 @@ arena_deserializer::impl_deserialize_in_arena!(DependentType);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[rust_to_ocaml(prefix = "ua_")]
 #[repr(C)]
 pub struct UserAttribute<'a> {
@@ -239,6 +252,7 @@ arena_deserializer::impl_deserialize_in_arena!(UserAttribute<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[rust_to_ocaml(prefix = "tp_")]
 #[repr(C)]
 pub struct Tparam<'a> {
@@ -272,6 +286,7 @@ arena_deserializer::impl_deserialize_in_arena!(Tparam<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(C)]
 pub struct WhereConstraint<'a>(
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)] pub &'a Ty<'a>,
@@ -323,8 +338,10 @@ arena_deserializer::impl_deserialize_in_arena!(Ty<'arena>);
 #[repr(C, u8)]
 pub enum NegType<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Neg_prim")]
     NegPrim(&'a aast::Tprim),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Neg_class")]
     NegClass(&'a PosId<'a>),
 }
 impl<'a> TrivialDrop for NegType<'a> {}
@@ -387,9 +404,11 @@ pub enum Ty_<'a> {
     Tthis,
     /// Either an object type or a type alias, ty list are the arguments
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     Tapply(&'a (PosId<'a>, &'a [&'a Ty<'a>])),
     /// 'With' refinements of the form `_ with { type T as int; type TC = C; }`.
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     Trefinement(&'a (&'a Ty<'a>, ClassRefinement<'a>)),
     /// "Any" is the type of a variable with a missing annotation, and "mixed" is
     /// the type of a variable annotated as "mixed". THESE TWO ARE VERY DIFFERENT!
@@ -449,6 +468,7 @@ pub enum Ty_<'a> {
     /// Whether all fields of this shape are known, types of each of the
     /// known arms.
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     Tshape(
         &'a (
             oxidized::typing_defs_core::ShapeKind,
@@ -462,6 +482,7 @@ pub enum Ty_<'a> {
     /// Typing_phase.add_generic_parameters_and_constraints. The list denotes
     /// type arguments.
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     Tgeneric(&'a (&'a str, &'a [&'a Ty<'a>])),
     /// Union type.
     /// The values that are members of this type are the union of the values
@@ -476,6 +497,8 @@ pub enum Ty_<'a> {
     Tintersection(&'a [&'a Ty<'a>]),
     /// Tvec_or_dict (ty1, ty2) => "vec_or_dict<ty1, ty2>"
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Tvec_or_dict")]
+    #[rust_to_ocaml(inline_tuple)]
     TvecOrDict(&'a (&'a Ty<'a>, &'a Ty<'a>)),
     /// Name of class, name of type const, remaining names of type consts
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -488,6 +511,7 @@ pub enum Ty_<'a> {
     /// type Foo2 = ...
     /// that simply doesn't require type arguments.
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Tunapplied_alias")]
     TunappliedAlias(&'a str),
     /// The type of an opaque type or enum. Outside their defining files or
     /// when they represent enums, they are "opaque", which means that they
@@ -512,14 +536,17 @@ pub enum Ty_<'a> {
     ///
     /// The second parameter is the list of type arguments to the type.
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     Tnewtype(&'a (&'a str, &'a [&'a Ty<'a>], &'a Ty<'a>)),
     /// see dependent_type
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     Tdependent(&'a (DependentType, &'a Ty<'a>)),
     /// An instance of a class or interface, ty list are the arguments
     /// If exact=Exact, then this represents instances of *exactly* this class
     /// If exact=Nonexact, this also includes subclasses
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     Tclass(&'a (PosId<'a>, Exact<'a>, &'a [&'a Ty<'a>])),
     /// The negation of the type in neg_type
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
@@ -824,6 +851,7 @@ pub use oxidized::typing_defs_core::DestructureKind;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "d_")]
 #[repr(C)]
 pub struct Destructure<'a> {
@@ -867,6 +895,7 @@ arena_deserializer::impl_deserialize_in_arena!(Destructure<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "hm_")]
 #[repr(C)]
 pub struct HasMember<'a> {
@@ -878,8 +907,10 @@ pub struct HasMember<'a> {
     /// HHVM would access the private member of a parent class instead of the
     /// one from the current class.
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(attr = "opaque")]
     pub class_id: &'a nast::ClassId_<'a>,
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(attr = "opaque")]
     pub explicit_targs: Option<&'a [&'a nast::Targ<'a>]>,
 }
 impl<'a> TrivialDrop for HasMember<'a> {}
@@ -901,6 +932,7 @@ arena_deserializer::impl_deserialize_in_arena!(HasMember<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "ci_")]
 #[repr(C)]
 pub struct CanIndex<'a> {
@@ -934,6 +966,7 @@ arena_deserializer::impl_deserialize_in_arena!(CanIndex<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "ct_")]
 #[repr(C)]
 pub struct CanTraverse<'a> {
@@ -966,17 +999,22 @@ arena_deserializer::impl_deserialize_in_arena!(CanTraverse<'arena>);
 #[repr(C, u8)]
 pub enum ConstraintType_<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Thas_member")]
     ThasMember(&'a HasMember<'a>),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Tcan_index")]
     TcanIndex(&'a CanIndex<'a>),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(name = "Tcan_traverse")]
     TcanTraverse(&'a CanTraverse<'a>),
     /// The type of container destructuring via list() or splat `...`
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
     Tdestructure(&'a Destructure<'a>),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     TCunion(&'a (&'a Ty<'a>, ConstraintType<'a>)),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     TCintersection(&'a (&'a Ty<'a>, ConstraintType<'a>)),
 }
 impl<'a> TrivialDrop for ConstraintType_<'a> {}
@@ -993,6 +1031,7 @@ arena_deserializer::impl_deserialize_in_arena!(ConstraintType_<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[repr(C)]
 pub struct ConstraintType<'a>(
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)] pub &'a reason::Reason<'a>,
@@ -1016,6 +1055,7 @@ arena_deserializer::impl_deserialize_in_arena!(ConstraintType<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[repr(C, u8)]
 pub enum InternalType<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]

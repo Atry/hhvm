@@ -251,6 +251,52 @@ impl<'a, 'o, 't, S: SourceTextAllocator<'t, 'a>> DirectDeclSmartConstructors<'a,
         qualified_name.into_bump_str()
     }
 
+    fn module_reference_from_parts(
+        &self,
+        module_name: &'a str,
+        parts: &'a [Node<'a>],
+    ) -> shallow_decl_defs::ModuleReference<'a> {
+        let mut s = bump::String::new_in(self.arena);
+
+        for part in parts.iter() {
+            match part {
+                Node::ListItem(&(item, _)) => {
+                    if !s.is_empty() {
+                        s += ".";
+                    }
+
+                    match item {
+                        Node::Name(&(n, _)) => {
+                            if n == "self" {
+                                s += module_name;
+                            } else {
+                                s += n;
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                Node::Token(t) => match t.kind() {
+                    TokenKind::Global => {
+                        return shallow_decl_defs::ModuleReference::MRGlobal;
+                    }
+                    TokenKind::Star => {
+                        return shallow_decl_defs::ModuleReference::MRPrefix(s.into_bump_str());
+                    }
+                    _ => {}
+                },
+                Node::Name(&(n, _)) => {
+                    if !s.is_empty() {
+                        s += ".";
+                    }
+                    s += n;
+                }
+                _ => {}
+            }
+        }
+        shallow_decl_defs::ModuleReference::MRExact(s.into_bump_str())
+    }
+
     /// If the given node is an identifier, XHP name, or qualified name,
     /// elaborate it in the current namespace and return Some. To be used for
     /// the name of a decl in its definition (e.g., "C" in `class C {}` or "f"
@@ -2140,7 +2186,58 @@ impl<'a, 'o, 't, S: SourceTextAllocator<'t, 'a>> DirectDeclSmartConstructors<'a,
                         .map(|&targ| self.convert_tapply_to_tgeneric(targ)),
                 ),
             ),
-            _ => return ty,
+            Ty_::Tintersection(tys) => Ty_::Tintersection(
+                self.slice(tys.iter().map(|&ty| self.convert_tapply_to_tgeneric(ty))),
+            ),
+            Ty_::Tunion(tys) => {
+                Ty_::Tunion(self.slice(tys.iter().map(|&ty| self.convert_tapply_to_tgeneric(ty))))
+            }
+            Ty_::Trefinement(&(root_ty, class_ref)) => {
+                let convert_class_type_ref = |ctr: &'a ClassTypeRefinement<'a>| match ctr {
+                    ClassTypeRefinement::Texact(ty) => {
+                        ClassTypeRefinement::Texact(self.convert_tapply_to_tgeneric(ty))
+                    }
+
+                    ClassTypeRefinement::Tloose(bnds) => {
+                        let convert_tys = |tys: &'a [&'a Ty<'a>]| {
+                            self.slice(tys.iter().map(|&ty| self.convert_tapply_to_tgeneric(ty)))
+                        };
+                        ClassTypeRefinement::Tloose(self.alloc(ClassTypeRefinementBounds {
+                            lower: convert_tys(bnds.lower),
+                            upper: convert_tys(bnds.upper),
+                        }))
+                    }
+                };
+                Ty_::Trefinement(
+                    self.alloc((
+                        self.convert_tapply_to_tgeneric(root_ty),
+                        ClassRefinement {
+                            cr_types: arena_collections::map::Map::from(
+                                self.arena,
+                                class_ref
+                                    .cr_types
+                                    .iter()
+                                    .map(|(id, ctr)| (*id, convert_class_type_ref(ctr))),
+                            ),
+                        },
+                    )),
+                )
+            }
+            Ty_::Taccess(_)
+            | Ty_::Tany(_)
+            | Ty_::Tclass(_)
+            | Ty_::Tdynamic
+            | Ty_::Terr
+            | Ty_::Tgeneric(_)
+            | Ty_::Tmixed
+            | Ty_::Tnonnull
+            | Ty_::Tprim(_)
+            | Ty_::Tthis => return ty,
+            Ty_::Tdependent(_)
+            | Ty_::Tneg(_)
+            | Ty_::Tnewtype(_)
+            | Ty_::Tvar(_)
+            | Ty_::TunappliedAlias(_) => panic!("unexpected decl type in constraint"),
         };
         self.alloc(Ty(ty.0, ty_))
     }
@@ -2808,7 +2905,8 @@ impl<'a, 'o, 't, S: SourceTextAllocator<'t, 'a>> FlattenSmartConstructors
             | TokenKind::Required
             | TokenKind::Ctx
             | TokenKind::Readonly
-            | TokenKind::Internal => Node::Token(FixedWidthToken::new(kind, token.start_offset())),
+            | TokenKind::Internal
+            | TokenKind::Global => Node::Token(FixedWidthToken::new(kind, token.start_offset())),
             _ if kind.fixed_width().is_some() => {
                 Node::IgnoredToken(FixedWidthToken::new(kind, token.start_offset()))
             }
@@ -5873,18 +5971,53 @@ impl<'a, 'o, 't, S: SourceTextAllocator<'t, 'a>> FlattenSmartConstructors
         _module_keyword: Self::Output,
         name: Self::Output,
         _left_brace: Self::Output,
-        _exports: Self::Output,
-        _imports: Self::Output,
+        exports: Self::Output,
+        imports: Self::Output,
         _right_brace: Self::Output,
     ) -> Self::Output {
-        match name {
-            Node::ModuleName(&(parts, mdt_pos)) => {
-                let module = self.alloc(shallow_decl_defs::ModuleDefType { mdt_pos });
-                self.add_module(self.module_name_string_from_parts(parts, mdt_pos), module);
-            }
-            _ => {}
+        if let Node::ModuleName(&(parts, pos)) = name {
+            let module_name = self.module_name_string_from_parts(parts, pos);
+            let map_references = |references_list| match references_list {
+                Node::List(&references) => {
+                    self.slice(references.iter().filter_map(|reference| match reference {
+                        Node::ModuleName(&(name, _)) => {
+                            Some(self.module_reference_from_parts(module_name, name))
+                        }
+                        _ => None,
+                    }))
+                }
+                _ => bumpalo::vec![in self.arena;].into_bump_slice(),
+            };
+            let exports = map_references(exports);
+            let imports = map_references(imports);
+            let module = self.alloc(shallow_decl_defs::ModuleDefType {
+                pos,
+                exports,
+                imports,
+            });
+            self.add_module(module_name, module);
         }
         Node::Ignored(SK::ModuleDeclaration)
+    }
+
+    fn make_module_exports(
+        &mut self,
+        _exports_keyword: Self::Output,
+        _left_brace: Self::Output,
+        clauses: Self::Output,
+        _right_brace: Self::Output,
+    ) -> Self::Output {
+        clauses
+    }
+
+    fn make_module_imports(
+        &mut self,
+        _imports_keyword: Self::Output,
+        _left_brace: Self::Output,
+        clauses: Self::Output,
+        _right_brace: Self::Output,
+    ) -> Self::Output {
+        clauses
     }
 
     fn make_module_membership_declaration(
