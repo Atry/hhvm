@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<9cf7ac648bca69e032ce162207bed354>>
+// @generated SignedSource<<73305785914f9dc9a561b843ea5b1fc8>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -68,6 +68,7 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (show, ord)")]
 #[rust_to_ocaml(prefix = "sc_")]
 #[repr(C)]
 pub struct SubstContext {
@@ -94,6 +95,7 @@ pub struct SubstContext {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(u8)]
 pub enum SourceType {
     Child,
@@ -127,9 +129,12 @@ arena_deserializer::impl_deserialize_in_arena!(SourceType);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (show, ord)")]
 #[repr(u8)]
 pub enum LinearizationKind {
+    #[rust_to_ocaml(name = "Member_resolution")]
     MemberResolution,
+    #[rust_to_ocaml(name = "Ancestor_types")]
     AncestorTypes,
 }
 impl TrivialDrop for LinearizationKind {}
@@ -151,8 +156,10 @@ arena_deserializer::impl_deserialize_in_arena!(LinearizationKind);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[repr(C, u8)]
 pub enum DeclError {
+    #[rust_to_ocaml(name = "Wrong_extend_kind")]
     WrongExtendKind {
         pos: pos::Pos,
         kind: ast_defs::ClassishKind,
@@ -161,10 +168,8 @@ pub enum DeclError {
         parent_kind: ast_defs::ClassishKind,
         parent_name: String,
     },
-    CyclicClassDef {
-        pos: pos::Pos,
-        stack: s_set::SSet,
-    },
+    #[rust_to_ocaml(name = "Cyclic_class_def")]
+    CyclicClassDef { pos: pos::Pos, stack: s_set::SSet },
 }
 
 #[derive(
@@ -183,6 +188,7 @@ pub enum DeclError {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "dc_")]
 #[repr(C)]
 pub struct DeclClassType {

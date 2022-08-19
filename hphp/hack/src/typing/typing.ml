@@ -1193,7 +1193,7 @@ let fun_type_of_id env x tal el =
           match
             Typing_modules.can_access
               ~env
-              ~current:(Env.get_module env)
+              ~current:(Env.get_current_module env)
               ~target:(Option.map fe_module ~f:snd)
           with
           | `Yes -> None
@@ -5075,7 +5075,7 @@ and function_dynamically_callable env f params_decl_ty ret_locl_ty =
         in
         ())
       (fun error ->
-        Errors.function_is_not_dynamically_callable pos (snd f.f_name) error)
+        Errors.function_is_not_dynamically_callable (snd f.f_name) error)
   in
   if not interface_check then function_body_check ()
 

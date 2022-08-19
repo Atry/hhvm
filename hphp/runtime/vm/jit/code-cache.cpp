@@ -133,8 +133,6 @@ CodeCache::CodeCache() {
 
   auto const currBase = (uintptr_t)sbrk(0);
   auto const usedBase = shiftTC(ru(currBase));
-  auto const baseAdjustment = usedBase - currBase;
-  const size_t allocationSize = m_totalSize + baseAdjustment;
 
   if (m_totalSize > (2ul << 30)) {
     fprintf(stderr, "Combined size of ASize, AColdSize, AFrozenSize, "
@@ -166,38 +164,23 @@ CodeCache::CodeCache() {
       return;
     }
     always_assert_flog(
-      currBase + allocationSize <= lowArenaStart,
+      usedBase + m_totalSize <= lowArenaStart,
       "computed allocationSize ({}) is too large to fit within "
-      "lowArenaStart ({}), currBase = {}\n",
-      allocationSize, lowArenaStart, currBase
+      "lowArenaStart ({}), usedBase = {}\n",
+      m_totalSize, lowArenaStart, usedBase
     );
   }
 #endif
-
-  auto const allocBase = (uintptr_t)sbrk(allocationSize);
-
-  if (allocBase == (uintptr_t)-1) {
-    auto const newBrk = (uintptr_t)sbrk(0);
-    always_assert_flog(
-      newBrk != currBase,
-      "Could not allocate {} bytes for translation cache (sbrk = {})",
-      allocationSize,
-      currBase
-    );
-    Logger::FWarning(
-      "sbrk moved from {} to {} while allocating {} bytes. Retrying...",
-      currBase, newBrk, allocationSize
-    );
-    auto const limit = use_lowptr ? lowArenaMinAddr() : (2ul << 30);
-    cutTCSizeTo(limit - shiftTC(ru(newBrk)) - thread_local_size);
-    new (this) CodeCache;
-    return;
-  }
-
-  assertx(allocBase);
-  always_assert_flog(currBase == allocBase,
-                     "sbrk() moved from {} to {} during CodeCache creation!",
-                     currBase, allocBase);
+  auto const allocBase =
+    (uintptr_t)mmap(reinterpret_cast<void*>(usedBase), m_totalSize,
+                    PROT_READ | PROT_WRITE,
+                    MAP_ANONYMOUS | MAP_PRIVATE | MAP_FIXED, -1, 0);
+  always_assert_flog(allocBase == usedBase,
+                     "mmap failed for translation cache (errno = {})",
+                     errno);
+  auto const newBrk = (uintptr_t) sbrk(0);
+  always_assert_flog(allocBase >= (uintptr_t) newBrk,
+                     "unexpected brk movement, we cannot proceed safely");
   CodeAddress base = reinterpret_cast<CodeAddress>(usedBase);
   m_base = base;
 
@@ -257,8 +240,6 @@ CodeCache::CodeCache() {
   AColdMaxUsage = maxUsage(AColdSize);
   AFrozenMaxUsage = maxUsage(AFrozenSize);
 
-  assertx(base - m_base <= allocationSize);
-  assertx(base - m_base + 2 * kRoundUp > allocationSize);
   assertx(base - m_base <= (2ul << 30));
 }
 

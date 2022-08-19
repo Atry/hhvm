@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<af8f6ce64a849265ee14619e4ae90317>>
+// @generated SignedSource<<0495285c38390b0327864ea194adae38>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -39,6 +39,7 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (show, eq)")]
 #[repr(u8)]
 pub enum KindOfType {
     TClass,
@@ -65,10 +66,15 @@ arena_deserializer::impl_deserialize_in_arena!(KindOfType);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (show, eq)")]
 #[repr(C, u8)]
 pub enum NameKind {
+    #[rust_to_ocaml(name = "Type_kind")]
     TypeKind(KindOfType),
+    #[rust_to_ocaml(name = "Fun_kind")]
     FunKind,
+    #[rust_to_ocaml(name = "Const_kind")]
     ConstKind,
+    #[rust_to_ocaml(name = "Module_kind")]
     ModuleKind,
 }

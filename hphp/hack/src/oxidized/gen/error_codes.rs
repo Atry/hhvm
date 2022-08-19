@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<f9a6489500a8d33bdb3f5613a1483e04>>
+// @generated SignedSource<<66172e706372b28500a0cce6686fa52e>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -39,6 +39,7 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (enum, (show { with_path = false }))")]
 #[repr(C)]
 pub enum Parsing {
     FixmeFormat = 1001,
@@ -66,6 +67,7 @@ arena_deserializer::impl_deserialize_in_arena!(Parsing);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (enum, (show { with_path = false }))")]
 #[repr(C)]
 pub enum Naming {
     AddATypehint = 2001,
@@ -96,6 +98,7 @@ pub enum Naming {
     NamingTooManyArguments = 2038,
     PrimitiveToplevel = 2039,
     ShadowedTypeParam = 2041,
+    #[rust_to_ocaml(name = "StartWith_T")]
     StartWithT = 2042,
     ThisMustBeReturn = 2043,
     ThisNoArgument = 2044,
@@ -165,6 +168,7 @@ arena_deserializer::impl_deserialize_in_arena!(Naming);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (enum, (show { with_path = false }))")]
 #[repr(C)]
 pub enum NastCheck {
     AbstractBody = 3001,
@@ -221,6 +225,7 @@ pub enum NastCheck {
     InoutInTransformedPsuedofunction = 3096,
     PrivateAndFinal = 3097,
     InternalMemberInsidePublicTrait = 3099,
+    AttributeConflictingMemoize = 3100,
 }
 impl TrivialDrop for NastCheck {}
 arena_deserializer::impl_deserialize_in_arena!(NastCheck);
@@ -243,6 +248,7 @@ arena_deserializer::impl_deserialize_in_arena!(NastCheck);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (enum, (show { with_path = false }))")]
 #[repr(C)]
 pub enum Typing {
     InternalError = 0,
@@ -592,6 +598,7 @@ arena_deserializer::impl_deserialize_in_arena!(Typing);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (enum, (show { with_path = false }))")]
 #[repr(C)]
 pub enum Init {
     ForwardCompatibilityNotCurrent = 8001,
@@ -618,6 +625,7 @@ arena_deserializer::impl_deserialize_in_arena!(Init);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (enum, (show { with_path = false }))")]
 #[repr(C)]
 pub enum GlobalWriteCheck {
     StaticVariableDirectWrite = 11001,

@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<05935f0fb989070e14c4d445cc85046a>>
+// @generated SignedSource<<b392577afdc1df8aefbea3e26bda113d>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -275,6 +275,7 @@ pub enum Hint_ {
     Hmixed,
     Hnonnull,
     Habstr(String, Vec<Hint>),
+    #[rust_to_ocaml(name = "Hvec_or_dict")]
     HvecOrDict(Option<Hint>, Hint),
     Hprim(Tprim),
     Hthis,
@@ -282,6 +283,7 @@ pub enum Hint_ {
     Hnothing,
     Hunion(Vec<Hint>),
     Hintersection(Vec<Hint>),
+    #[rust_to_ocaml(name = "Hfun_context")]
     HfunContext(String),
     Hvar(String),
 }
@@ -498,6 +500,7 @@ pub struct NastShapeInfo {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "visitors.opaque")]
 #[repr(u8)]
 pub enum KvcKind {
     Map,
@@ -525,6 +528,7 @@ arena_deserializer::impl_deserialize_in_arena!(KvcKind);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "visitors.opaque")]
 #[repr(u8)]
 pub enum VcKind {
     Vector,
@@ -625,6 +629,39 @@ pub struct WhereConstraintHint(pub Hint, pub ast_defs::ConstraintKind, pub Hint)
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = r#"deriving ((show { with_path = false }), eq, ord,
+    (visitors
+       {
+         name = "iter_defs";
+         variety = "iter";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["iter_defs_base"]
+       }),
+    (visitors
+       {
+         name = "reduce_defs";
+         variety = "reduce";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["reduce_defs_base"]
+       }),
+    (visitors
+       {
+         name = "map_defs";
+         variety = "map";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["map_defs_base"]
+       }),
+    (visitors
+       {
+         name = "endo_defs";
+         variety = "endo";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["endo_defs_base"]
+       }))"#)]
 #[repr(u8)]
 pub enum ReifyKind {
     Erased,

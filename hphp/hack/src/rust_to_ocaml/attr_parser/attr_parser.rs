@@ -5,26 +5,52 @@
 
 use syn::Meta::List;
 use syn::Meta::NameValue;
+use syn::Meta::Path;
 use syn::NestedMeta::Lit;
 use syn::NestedMeta::Meta;
 
 static DOC: &str = "doc";
 static RUST_TO_OCAML: &str = "rust_to_ocaml";
 static PREFIX: &str = "prefix";
+static ATTR: &str = "attr";
+static NAME: &str = "name";
+static INLINE_TUPLE: &str = "inline_tuple";
 
 #[derive(Clone, Debug)]
-pub struct Container {
+pub struct Attrs {
     pub doc: Vec<String>,
     pub prefix: Option<String>,
+    pub attrs: Vec<String>,
+    pub name: Option<String>,
+    pub inline_tuple: bool,
 }
 
-impl Container {
-    pub fn from_ast(item: &syn::DeriveInput) -> Self {
-        let doc = get_doc_comment(&item.attrs);
-        let mut prefix = None;
+impl Attrs {
+    pub fn from_type(item: &syn::ItemType) -> Self {
+        Self::from_attributes(&item.attrs, AttrKind::Container)
+    }
+    pub fn from_struct(item: &syn::ItemStruct) -> Self {
+        Self::from_attributes(&item.attrs, AttrKind::Container)
+    }
+    pub fn from_enum(item: &syn::ItemEnum) -> Self {
+        Self::from_attributes(&item.attrs, AttrKind::Container)
+    }
 
-        for meta_item in item
-            .attrs
+    pub fn from_variant(variant: &syn::Variant) -> Self {
+        Self::from_attributes(&variant.attrs, AttrKind::Variant)
+    }
+    pub fn from_field(field: &syn::Field) -> Self {
+        Self::from_attributes(&field.attrs, AttrKind::Field)
+    }
+
+    fn from_attributes(attrs: &[syn::Attribute], kind: AttrKind) -> Self {
+        let doc = get_doc_comment(attrs);
+        let mut prefix = None;
+        let mut ocaml_attrs = vec![];
+        let mut name = None;
+        let mut inline_tuple = false;
+
+        for meta_item in attrs
             .iter()
             .flat_map(get_rust_to_ocaml_meta_items)
             .flatten()
@@ -32,55 +58,32 @@ impl Container {
             match &meta_item {
                 // Parse `#[rust_to_ocaml(prefix = "foo")]`
                 Meta(NameValue(m)) if m.path.is_ident(PREFIX) => {
+                    // TODO: emit error for AttrKind::Field (should use the
+                    // `name` meta item instead)
                     if let Ok(s) = get_lit_str(PREFIX, &m.lit) {
                         prefix = Some(s.value());
                     }
                 }
-                Meta(_meta_item) => {
-                    // let path = meta_item
-                    //     .path()
-                    //     .into_token_stream()
-                    //     .to_string()
-                    //     .replace(' ', "");
-                    // cx.error_spanned_by(
-                    //     meta_item.path(),
-                    //     format!("unknown rust_to_ocaml container attribute `{}`", path),
-                    // );
-                }
-                Lit(_lit) => {
-                    // cx.error_spanned_by(lit, "unexpected literal in rust_to_ocaml container attribute");
-                }
-            }
-        }
-
-        Self { doc, prefix }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Variant {
-    pub doc: Vec<String>,
-    pub prefix: Option<String>,
-}
-
-impl Variant {
-    pub fn from_ast(variant: &syn::Variant) -> Self {
-        let doc = get_doc_comment(&variant.attrs);
-        let mut prefix = None;
-
-        for meta_item in variant
-            .attrs
-            .iter()
-            .flat_map(get_rust_to_ocaml_meta_items)
-            .flatten()
-        {
-            match &meta_item {
-                // Parse `#[rust_to_ocaml(prefix = "foo")]`
-                Meta(NameValue(m)) if m.path.is_ident(PREFIX) => {
-                    if let Ok(s) = get_lit_str(PREFIX, &m.lit) {
-                        prefix = Some(s.value());
+                // Parse `#[rust_to_ocaml(attr = "deriving eq")]`
+                Meta(NameValue(m)) if m.path.is_ident(ATTR) => {
+                    if let Ok(s) = get_lit_str(ATTR, &m.lit) {
+                        ocaml_attrs.push(s.value());
                     }
                 }
+                // Parse `#[rust_to_ocaml(name = "foo")]`
+                Meta(NameValue(m)) if m.path.is_ident(NAME) => {
+                    // TODO: emit error for AttrKind::Container (should add to
+                    // types.rename config instead)
+                    if let Ok(s) = get_lit_str(NAME, &m.lit) {
+                        name = Some(s.value());
+                    }
+                }
+                // Parse `#[rust_to_ocaml(inline_tuple)]`
+                Meta(Path(word)) if word.is_ident(INLINE_TUPLE) => {
+                    // TODO: emit an error instead
+                    assert_eq!(kind, AttrKind::Variant);
+                    inline_tuple = true;
+                }
                 Meta(_meta_item) => {
                     // let path = meta_item
                     //     .path()
@@ -89,53 +92,39 @@ impl Variant {
                     //     .replace(' ', "");
                     // cx.error_spanned_by(
                     //     meta_item.path(),
-                    //     format!("unknown rust_to_ocaml variant attribute `{}`", path),
+                    //     format!("unknown rust_to_ocaml {} attribute `{}`", kind, path),
                     // );
                 }
                 Lit(_lit) => {
-                    // cx.error_spanned_by(lit, "unexpected literal in rust_to_ocaml variant attribute");
+                    // cx.error_spanned_by(lit, format!("unexpected literal in rust_to_ocaml {} attribute", kind));
                 }
             }
         }
 
-        Self { doc, prefix }
+        Self {
+            doc,
+            prefix,
+            attrs: ocaml_attrs,
+            name,
+            inline_tuple,
+        }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Field {
-    pub doc: Vec<String>,
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum AttrKind {
+    Container,
+    Variant,
+    Field,
 }
 
-impl Field {
-    pub fn from_ast(field: &syn::Field) -> Self {
-        let doc = get_doc_comment(&field.attrs);
-
-        for meta_item in field
-            .attrs
-            .iter()
-            .flat_map(get_rust_to_ocaml_meta_items)
-            .flatten()
-        {
-            match &meta_item {
-                Meta(_meta_item) => {
-                    // let path = meta_item
-                    //     .path()
-                    //     .into_token_stream()
-                    //     .to_string()
-                    //     .replace(' ', "");
-                    // cx.error_spanned_by(
-                    //     meta_item.path(),
-                    //     format!("unknown rust_to_ocaml field attribute `{}`", path),
-                    // );
-                }
-                Lit(_lit) => {
-                    // cx.error_spanned_by(lit, "unexpected literal in rust_to_ocaml field attribute");
-                }
-            }
+impl std::fmt::Display for AttrKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Container => write!(f, "container"),
+            Self::Variant => write!(f, "variant"),
+            Self::Field => write!(f, "field"),
         }
-
-        Self { doc }
     }
 }
 

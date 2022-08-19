@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<6c728eb5392039b65991d3b7c8dc7072>>
+// @generated SignedSource<<ae8566636916fe1c45e85068aa079f89>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -40,11 +40,13 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(C, u8)]
 pub enum Pos<'a> {
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
     Full(&'a pos::Pos<'a>),
     #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
+    #[rust_to_ocaml(inline_tuple)]
     File(
         &'a (
             oxidized::file_info::NameType,

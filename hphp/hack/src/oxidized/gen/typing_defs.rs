@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<3ea353b296afa2967c113eb7c55e6dba>>
+// @generated SignedSource<<a46644fcd340909833f0653c2116ae7a>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -52,8 +52,10 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(C, u8)]
 pub enum ClassConstFrom {
+    #[rust_to_ocaml(name = "Self")]
     Self_,
     From(String),
 }
@@ -86,6 +88,7 @@ pub enum ClassConstFrom {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(C)]
 pub struct ClassConstRef(pub ClassConstFrom, pub String);
 
@@ -105,6 +108,7 @@ pub struct ClassConstRef(pub ClassConstFrom, pub String);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "cd_")]
 #[repr(C)]
 pub struct ConstDecl {
@@ -128,6 +132,7 @@ pub struct ConstDecl {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "ce_")]
 #[repr(C)]
 pub struct ClassElt {
@@ -157,6 +162,7 @@ pub struct ClassElt {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "fe_")]
 #[repr(C)]
 pub struct FunElt {
@@ -188,6 +194,7 @@ pub struct FunElt {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(C, u8)]
 pub enum ClassConstKind {
     CCAbstract(bool),
@@ -210,6 +217,7 @@ pub enum ClassConstKind {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "cc_")]
 #[repr(C)]
 pub struct ClassConst {
@@ -239,9 +247,37 @@ pub struct ClassConst {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
+#[repr(C, u8)]
+pub enum ModuleReference {
+    MRGlobal,
+    MRPrefix(String),
+    MRExact(String),
+}
+
+#[derive(
+    Clone,
+    Debug,
+    Deserialize,
+    Eq,
+    EqModuloPos,
+    EqModuloPosAndReason,
+    FromOcamlRep,
+    Hash,
+    NoPosHash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    ToOcamlRep
+)]
+#[rust_to_ocaml(attr = "deriving show")]
+#[rust_to_ocaml(prefix = "mdt_")]
 #[repr(C)]
 pub struct ModuleDefType {
-    pub mdt_pos: pos_or_decl::PosOrDecl,
+    pub pos: pos_or_decl::PosOrDecl,
+    pub exports: Vec<ModuleReference>,
+    pub imports: Vec<ModuleReference>,
 }
 
 /// The position is that of the hint in the `use` / `implements` AST node
@@ -429,6 +465,7 @@ pub struct TypeconstType {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "te_")]
 #[repr(C)]
 pub struct EnumType {
@@ -453,6 +490,7 @@ pub struct EnumType {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "td_")]
 #[repr(C)]
 pub struct TypedefType {
@@ -484,15 +522,19 @@ pub struct TypedefType {
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[repr(C, u8)]
 pub enum DeserializationError {
     /// The type was valid, but some component thereof was a decl_ty when we
     /// expected a locl_phase ty, or vice versa.
+    #[rust_to_ocaml(name = "Wrong_phase")]
     WrongPhase(String),
     /// The specific type or some component thereof is not one that we support
     /// deserializing, usually because not enough information was serialized to be
     /// able to deserialize it again.
+    #[rust_to_ocaml(name = "Not_supported")]
     NotSupported(String),
     /// The input JSON was invalid for some reason.
+    #[rust_to_ocaml(name = "Deserialization_error")]
     DeserializationError(String),
 }

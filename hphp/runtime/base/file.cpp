@@ -68,8 +68,6 @@ FileData::~FileData() {
 
 StaticString File::s_resource_name("stream");
 
-RDS_LOCAL(int, s_pcloseRet);
-
 const int File::USE_INCLUDE_PATH = 1;
 
 String File::TranslatePathKeepRelative(const char* filename, uint32_t size) {
@@ -189,8 +187,8 @@ File::File(bool nonblocking /* = true */,
 { }
 
 File::~File() {
-  if(m_data.unique()) {
-    closeImpl();
+  if (m_data.unique()) {
+    File::close();
   }
   m_data.reset();
 }
@@ -201,13 +199,13 @@ void File::sweep() {
   // sweep() is responsible for closing m_fd and any other non-request
   // resources it might have allocated.
   assertx(!valid());
-  File::closeImpl();
+  File::close();
   m_data.reset();
   m_wrapperType = nullptr;
   m_streamType = nullptr;
 }
 
-bool File::closeImpl() {
+bool File::close(int*) {
   return m_data ? m_data->closeImpl() : true;
 }
 

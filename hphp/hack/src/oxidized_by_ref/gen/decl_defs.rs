@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<fd899d251ce7a10a9bbd136d5a2b6868>>
+// @generated SignedSource<<f060583aaa705163253156bd32b63645>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -67,6 +67,7 @@ use crate::*;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving (show, ord)")]
 #[rust_to_ocaml(prefix = "sc_")]
 #[repr(C)]
 pub struct SubstContext<'a> {
@@ -99,8 +100,10 @@ pub use oxidized::decl_defs::SourceType;
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[repr(C, u8)]
 pub enum DeclError<'a> {
+    #[rust_to_ocaml(name = "Wrong_extend_kind")]
     WrongExtendKind {
         #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
         pos: &'a pos::Pos<'a>,
@@ -113,6 +116,7 @@ pub enum DeclError<'a> {
         #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
         parent_name: &'a str,
     },
+    #[rust_to_ocaml(name = "Cyclic_class_def")]
     CyclicClassDef {
         #[serde(deserialize_with = "arena_deserializer::arena", borrow)]
         pos: &'a pos::Pos<'a>,
@@ -139,6 +143,7 @@ arena_deserializer::impl_deserialize_in_arena!(DeclError<'arena>);
     Serialize,
     ToOcamlRep
 )]
+#[rust_to_ocaml(attr = "deriving show")]
 #[rust_to_ocaml(prefix = "dc_")]
 #[repr(C)]
 pub struct DeclClassType<'a> {
