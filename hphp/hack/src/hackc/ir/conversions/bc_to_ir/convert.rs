@@ -5,19 +5,19 @@
 
 use ffi::Maybe;
 use hash::HashMap;
-use hhbc::hackc_unit::HackCUnit;
+use hhbc::Unit;
 use hhvm_hhbc_defs_ffi as hhvm_ffi;
 
-/// Convert a HackCUnit to an ir::Unit.
+/// Convert a hhbc::Unit to an ir::Unit.
 ///
-/// Most of the outer structure of the HackCUnit maps 1:1 with ir::Unit. As a
+/// Most of the outer structure of the hhbc::Unit maps 1:1 with ir::Unit. As a
 /// result the "interesting" work is in the conversion of the bytecode to IR
 /// when converting functions and methods (see `convert_body` in func.rs).
 ///
-/// NOTE: HackCUnit has to be by-ref because it unfortunately contains a bunch
+/// NOTE: hhbc::Unit has to be by-ref because it unfortunately contains a bunch
 /// of ffi::Slice<T> which cannot own T.
 ///
-pub fn bc_to_ir<'a>(unit: &'_ HackCUnit<'a>) -> ir::Unit<'a> {
+pub fn bc_to_ir<'a>(unit: &'_ Unit<'a>) -> ir::Unit<'a> {
     let mut strings = ir::StringInterner::default();
 
     let adata: HashMap<_, _> = unit.adata.iter().map(|a| (a.id, a.value.clone())).collect();
@@ -76,38 +76,26 @@ pub fn bc_to_ir<'a>(unit: &'_ HackCUnit<'a>) -> ir::Unit<'a> {
         }
     }
 
-    if let Maybe::Just(ffi::Triple(op, pos, msg)) = unit.fatal {
-        let loc = ir::SrcLoc {
-            line_begin: pos.line_begin as isize,
-            col_begin: pos.col_begin as isize,
-            line_end: pos.line_end as isize,
-            col_end: pos.col_end as isize,
-        };
-
-        let fatal = match op {
+    if let Maybe::Just(ffi::Triple(op, loc, msg)) = unit.fatal {
+        ir_unit.fatal = match op {
             hhvm_ffi::ffi::FatalOp::Parse => ir::FatalOp::Parse(loc, msg),
             hhvm_ffi::ffi::FatalOp::Runtime => ir::FatalOp::Runtime(loc, msg),
             hhvm_ffi::ffi::FatalOp::RuntimeOmitFrame => ir::FatalOp::RuntimeOmitFrame(loc, msg),
             _ => panic!("bad FatalOp value"),
         };
-        ir_unit.fatal = fatal;
     }
 
     ir_unit
 }
 
-pub(crate) fn convert_attribute<'a>(
-    attr: &hhbc::hhas_attribute::HhasAttribute<'a>,
-) -> ir::Attribute<'a> {
+pub(crate) fn convert_attribute<'a>(attr: &hhbc::Attribute<'a>) -> ir::Attribute<'a> {
     ir::Attribute {
         name: attr.name,
         arguments: attr.arguments.as_ref().to_vec(),
     }
 }
 
-fn convert_symbol_refs<'a>(
-    symbol_refs: &hhbc::hhas_symbol_refs::HhasSymbolRefs<'a>,
-) -> ir::unit::SymbolRefs<'a> {
+fn convert_symbol_refs<'a>(symbol_refs: &hhbc::SymbolRefs<'a>) -> ir::unit::SymbolRefs<'a> {
     // TODO: It would be nice if we could determine this stuff from the IR
     // instead of having to carry it along with the Unit.
 

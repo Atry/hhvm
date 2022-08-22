@@ -10,20 +10,19 @@ use env::Env;
 use error::Result;
 use ffi::Slice;
 use ffi::Str;
-use hhbc::hhas_attribute;
-use hhbc::hhas_attribute::HhasAttribute;
-use hhbc::hhas_body::HhasBody;
-use hhbc::hhas_coeffects::HhasCoeffects;
-use hhbc::hhas_function::HhasFunction;
-use hhbc::hhas_function::HhasFunctionFlags;
-use hhbc::hhas_param::HhasParam;
-use hhbc::hhas_pos::HhasSpan;
-use hhbc::hhas_type::HhasTypeInfo;
+use hhbc::Attribute;
+use hhbc::Body;
+use hhbc::Coeffects;
 use hhbc::FCallArgs;
 use hhbc::FCallArgsFlags;
+use hhbc::Function;
+use hhbc::FunctionFlags;
 use hhbc::Label;
 use hhbc::Local;
 use hhbc::LocalRange;
+use hhbc::Param;
+use hhbc::Span;
+use hhbc::TypeInfo;
 use hhbc::TypedValue;
 use hhbc_string_utils::reified;
 use hhvm_types_ffi::ffi::Attr;
@@ -51,29 +50,23 @@ pub fn is_interceptable(opts: &Options) -> bool {
 pub(crate) fn get_attrs_for_fun<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     fd: &'a ast::FunDef,
-    user_attrs: &'a [HhasAttribute<'arena>],
+    user_attrs: &'a [Attribute<'arena>],
     is_memoize_impl: bool,
 ) -> Attr {
     let f = &fd.fun;
     let is_systemlib = emitter.systemlib();
     let is_dyn_call =
-        is_systemlib || (hhas_attribute::has_dynamically_callable(user_attrs) && !is_memoize_impl);
-    let is_prov_skip_frame = hhas_attribute::has_provenance_skip_frame(user_attrs);
-    let is_meth_caller = hhas_attribute::has_meth_caller(user_attrs);
+        is_systemlib || (hhbc::has_dynamically_callable(user_attrs) && !is_memoize_impl);
+    let is_prov_skip_frame = hhbc::has_provenance_skip_frame(user_attrs);
+    let is_meth_caller = hhbc::has_meth_caller(user_attrs);
 
     let mut attrs = Attr::AttrNone;
     attrs.set(Attr::AttrBuiltin, is_meth_caller | is_systemlib);
     attrs.set(Attr::AttrDynamicallyCallable, is_dyn_call);
     attrs.set(Attr::AttrInterceptable, is_interceptable(emitter.options()));
-    attrs.set(
-        Attr::AttrIsFoldable,
-        hhas_attribute::has_foldable(user_attrs),
-    );
+    attrs.set(Attr::AttrIsFoldable, hhbc::has_foldable(user_attrs));
     attrs.set(Attr::AttrIsMethCaller, is_meth_caller);
-    attrs.set(
-        Attr::AttrNoInjection,
-        hhas_attribute::is_no_injection(user_attrs),
-    );
+    attrs.set(Attr::AttrNoInjection, hhbc::is_no_injection(user_attrs));
     attrs.set(Attr::AttrPersistent, is_systemlib);
     attrs.set(Attr::AttrProvenanceSkipFrame, is_prov_skip_frame);
     attrs.set(Attr::AttrReadonlyReturn, f.readonly_ret.is_some());
@@ -88,7 +81,7 @@ pub(crate) fn emit_wrapper_function<'a, 'arena, 'decl>(
     renamed_id: &hhbc::FunctionName<'arena>,
     deprecation_info: Option<&[TypedValue<'arena>]>,
     fd: &'a ast::FunDef,
-) -> Result<HhasFunction<'arena>> {
+) -> Result<Function<'arena>> {
     let alloc = emitter.alloc;
     let f = &fd.fun;
     emit_memoize_helpers::check_memoize_possible(&(f.name).0, &f.params, false)?;
@@ -113,11 +106,10 @@ pub(crate) fn emit_wrapper_function<'a, 'arena, 'decl>(
         .tparams
         .iter()
         .any(|tp| tp.reified.is_reified() || tp.reified.is_soft_reified());
-    let should_emit_implicit_context = hhas_attribute::is_keyed_by_ic_memoize(attributes.iter());
-    let is_make_ic_inaccessible_memoize =
-        hhas_attribute::is_make_ic_inaccessible_memoize(attributes.iter());
+    let should_emit_implicit_context = hhbc::is_keyed_by_ic_memoize(attributes.iter());
+    let is_make_ic_inaccessible_memoize = hhbc::is_make_ic_inaccessible_memoize(attributes.iter());
     let is_soft_make_ic_inaccessible_memoize =
-        hhas_attribute::is_soft_make_ic_inaccessible_memoize(attributes.iter());
+        hhbc::is_soft_make_ic_inaccessible_memoize(attributes.iter());
     let should_make_ic_inaccessible =
         if is_make_ic_inaccessible_memoize || is_soft_make_ic_inaccessible_memoize {
             Some(is_soft_make_ic_inaccessible_memoize)
@@ -138,7 +130,7 @@ pub(crate) fn emit_wrapper_function<'a, 'arena, 'decl>(
         should_emit_implicit_context,
         should_make_ic_inaccessible,
     )?;
-    let coeffects = HhasCoeffects::from_ast(alloc, f.ctxs.as_ref(), &f.params, &f.tparams, vec![]);
+    let coeffects = Coeffects::from_ast(alloc, f.ctxs.as_ref(), &f.params, &f.tparams, vec![]);
     let body = make_wrapper_body(
         emitter,
         env,
@@ -148,15 +140,15 @@ pub(crate) fn emit_wrapper_function<'a, 'arena, 'decl>(
         body_instrs,
     )?;
 
-    let mut flags = HhasFunctionFlags::empty();
-    flags.set(HhasFunctionFlags::ASYNC, f.fun_kind.is_fasync());
+    let mut flags = FunctionFlags::empty();
+    flags.set(FunctionFlags::ASYNC, f.fun_kind.is_fasync());
     let attrs = get_attrs_for_fun(emitter, fd, &attributes, false);
 
-    Ok(HhasFunction {
+    Ok(Function {
         attributes: Slice::fill_iter(alloc, attributes.into_iter()),
         name: original_id,
         body,
-        span: HhasSpan::from_pos(&f.span),
+        span: Span::from_pos(&f.span),
         coeffects,
         flags,
         attrs,
@@ -168,7 +160,7 @@ fn make_memoize_function_code<'a, 'arena, 'decl>(
     env: &mut Env<'a, 'arena>,
     pos: &Pos,
     deprecation_info: Option<&[TypedValue<'arena>]>,
-    hhas_params: &[(HhasParam<'arena>, Option<(Label, ast::Expr)>)],
+    hhas_params: &[(Param<'arena>, Option<(Label, ast::Expr)>)],
     ast_params: &[ast::FunParam],
     renamed_id: hhbc::FunctionName<'arena>,
     is_async: bool,
@@ -209,7 +201,7 @@ fn make_memoize_function_with_params_code<'a, 'arena, 'decl>(
     env: &mut Env<'a, 'arena>,
     pos: &Pos,
     deprecation_info: Option<&[TypedValue<'arena>]>,
-    hhas_params: &[(HhasParam<'arena>, Option<(Label, ast::Expr)>)],
+    hhas_params: &[(Param<'arena>, Option<(Label, ast::Expr)>)],
     ast_params: &[ast::FunParam],
     renamed_id: hhbc::FunctionName<'arena>,
     is_async: bool,
@@ -395,11 +387,11 @@ fn make_memoize_function_no_params_code<'a, 'arena, 'decl>(
 fn make_wrapper_body<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     env: Env<'a, 'arena>,
-    return_type_info: HhasTypeInfo<'arena>,
-    params: Vec<(HhasParam<'arena>, Option<(Label, ast::Expr)>)>,
+    return_type_info: TypeInfo<'arena>,
+    params: Vec<(Param<'arena>, Option<(Label, ast::Expr)>)>,
     decl_vars: Vec<Str<'arena>>,
     body_instrs: InstrSeq<'arena>,
-) -> Result<HhasBody<'arena>> {
+) -> Result<Body<'arena>> {
     emit_body::make_body(
         emitter.alloc,
         emitter,

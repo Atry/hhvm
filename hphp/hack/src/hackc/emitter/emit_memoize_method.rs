@@ -14,20 +14,19 @@ use error::Error;
 use error::Result;
 use ffi::Slice;
 use ffi::Str;
-use hhbc::hhas_attribute;
-use hhbc::hhas_body::HhasBody;
-use hhbc::hhas_coeffects::HhasCoeffects;
-use hhbc::hhas_method::HhasMethod;
-use hhbc::hhas_method::HhasMethodFlags;
-use hhbc::hhas_param::HhasParam;
-use hhbc::hhas_pos::HhasSpan;
-use hhbc::hhas_type::HhasTypeInfo;
+use hhbc::Body;
+use hhbc::Coeffects;
 use hhbc::FCallArgs;
 use hhbc::FCallArgsFlags;
 use hhbc::Label;
 use hhbc::Local;
 use hhbc::LocalRange;
+use hhbc::Method;
+use hhbc::MethodFlags;
+use hhbc::Param;
+use hhbc::Span;
 use hhbc::SpecialClsRef;
+use hhbc::TypeInfo;
 use hhbc::TypedValue;
 use hhbc::Visibility;
 use hhbc_string_utils::reified;
@@ -107,7 +106,7 @@ pub fn emit_wrapper_methods<'a, 'arena, 'decl>(
     info: &MemoizeInfo<'arena>,
     class: &'a ast::Class_,
     methods: &'a [ast::Method_],
-) -> Result<Vec<HhasMethod<'arena>>> {
+) -> Result<Vec<Method<'arena>>> {
     // Wrapper methods may not have iterators
     emitter.iterator_mut().reset();
 
@@ -129,7 +128,7 @@ fn make_memoize_wrapper_method<'a, 'arena, 'decl>(
     info: &MemoizeInfo<'arena>,
     class: &'a ast::Class_,
     method: &'a ast::Method_,
-) -> Result<HhasMethod<'arena>> {
+) -> Result<Method<'arena>> {
     let alloc = env.arena;
     let ret = if method.name.1 == members::__CONSTRUCT {
         None
@@ -151,7 +150,7 @@ fn make_memoize_wrapper_method<'a, 'arena, 'decl>(
     let is_async = method.fun_kind.is_fasync();
     // __Memoize is not allowed on lambdas, so we never need to inherit the rx
     // level from the declaring scope when we're in a Memoize wrapper
-    let coeffects = HhasCoeffects::from_ast(
+    let coeffects = Coeffects::from_ast(
         alloc,
         method.ctxs.as_ref(),
         &method.params,
@@ -167,29 +166,29 @@ fn make_memoize_wrapper_method<'a, 'arena, 'decl>(
     arg_flags.set(Flags::IS_REIFIED, is_reified);
     arg_flags.set(
         Flags::SHOULD_EMIT_IMPLICIT_CONTEXT,
-        hhas_attribute::is_keyed_by_ic_memoize(attributes.iter()),
+        hhbc::is_keyed_by_ic_memoize(attributes.iter()),
     );
     arg_flags.set(
         Flags::SHOULD_MAKE_IC_INACCESSIBLE,
-        hhas_attribute::is_make_ic_inaccessible_memoize(attributes.iter()),
+        hhbc::is_make_ic_inaccessible_memoize(attributes.iter()),
     );
     arg_flags.set(
         Flags::SHOULD_SOFT_MAKE_IC_INACCESSIBLE,
-        hhas_attribute::is_soft_make_ic_inaccessible_memoize(attributes.iter()),
+        hhbc::is_soft_make_ic_inaccessible_memoize(attributes.iter()),
     );
     let mut args = Args {
         info,
         method,
         scope,
-        deprecation_info: hhas_attribute::deprecation_info(attributes.iter()),
+        deprecation_info: hhbc::deprecation_info(attributes.iter()),
         params: &method.params,
         ret,
         method_id: &name,
         flags: arg_flags,
     };
     let body = emit_memoize_wrapper_body(emitter, env, &mut args)?;
-    let mut flags = HhasMethodFlags::empty();
-    flags.set(HhasMethodFlags::IS_ASYNC, is_async);
+    let mut flags = MethodFlags::empty();
+    flags.set(MethodFlags::IS_ASYNC, is_async);
 
     let attrs = get_attrs_for_method(
         emitter,
@@ -200,12 +199,12 @@ fn make_memoize_wrapper_method<'a, 'arena, 'decl>(
         false,
     );
 
-    Ok(HhasMethod {
+    Ok(Method {
         attributes: Slice::fill_iter(alloc, attributes.into_iter()),
         visibility: Visibility::from(method.visibility),
         name,
         body,
-        span: HhasSpan::from_pos(&method.span),
+        span: Span::from_pos(&method.span),
         coeffects,
         flags,
         attrs,
@@ -216,7 +215,7 @@ fn emit_memoize_wrapper_body<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     env: &mut Env<'a, 'arena>,
     args: &mut Args<'_, 'a, 'arena>,
-) -> Result<HhasBody<'arena>> {
+) -> Result<Body<'arena>> {
     let alloc = env.arena;
     let mut tparams: Vec<&str> = args
         .scope
@@ -239,10 +238,10 @@ fn emit_memoize_wrapper_body<'a, 'arena, 'decl>(
 fn emit<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     env: &mut Env<'a, 'arena>,
-    hhas_params: Vec<(HhasParam<'arena>, Option<(Label, ast::Expr)>)>,
-    return_type_info: HhasTypeInfo<'arena>,
+    hhas_params: Vec<(Param<'arena>, Option<(Label, ast::Expr)>)>,
+    return_type_info: TypeInfo<'arena>,
     args: &Args<'_, 'a, 'arena>,
-) -> Result<HhasBody<'arena>> {
+) -> Result<Body<'arena>> {
     let pos = &args.method.span;
     let (instrs, decl_vars) = make_memoize_method_code(emitter, env, pos, &hhas_params, args)?;
     let instrs = emit_pos_then(pos, instrs);
@@ -261,7 +260,7 @@ fn make_memoize_method_code<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     env: &mut Env<'a, 'arena>,
     pos: &Pos,
-    hhas_params: &[(HhasParam<'arena>, Option<(Label, ast::Expr)>)],
+    hhas_params: &[(Param<'arena>, Option<(Label, ast::Expr)>)],
     args: &Args<'_, 'a, 'arena>,
 ) -> Result<(InstrSeq<'arena>, Vec<Str<'arena>>)> {
     if args.params.is_empty()
@@ -279,7 +278,7 @@ fn make_memoize_method_with_params_code<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     env: &mut Env<'a, 'arena>,
     pos: &Pos,
-    hhas_params: &[(HhasParam<'arena>, Option<(Label, ast::Expr)>)],
+    hhas_params: &[(Param<'arena>, Option<(Label, ast::Expr)>)],
     args: &Args<'_, 'a, 'arena>,
 ) -> Result<(InstrSeq<'arena>, Vec<Str<'arena>>)> {
     let alloc = env.arena;
@@ -530,11 +529,11 @@ fn make_wrapper<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     env: &Env<'a, 'arena>,
     instrs: InstrSeq<'arena>,
-    params: Vec<(HhasParam<'arena>, Option<(Label, ast::Expr)>)>,
+    params: Vec<(Param<'arena>, Option<(Label, ast::Expr)>)>,
     decl_vars: Vec<Str<'arena>>,
-    return_type_info: HhasTypeInfo<'arena>,
+    return_type_info: TypeInfo<'arena>,
     args: &Args<'_, 'a, 'arena>,
-) -> Result<HhasBody<'arena>> {
+) -> Result<Body<'arena>> {
     emit_body::make_body(
         env.arena,
         emitter,

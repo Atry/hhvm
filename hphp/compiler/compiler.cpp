@@ -104,7 +104,6 @@ struct CompilerOptions {
   std::vector<std::string> cmodules;
   std::string push_phases;
   std::string matched_overrides;
-  bool parseOnDemand;
   int logLevel;
   std::string filecache;
   bool coredump;
@@ -159,6 +158,9 @@ void applyBuildOverrides(IniSetting::Map& ini,
   }
 }
 
+// Parse queryStr as a JSON-encoded watchman query expression, adding the the
+// directories specified in the query to package. Only supports 'expression'
+// queries and the 'dirname' term.
 bool addAutoloadQueryToPackage(Package& package, const std::string& queryStr) {
   try {
     auto query = folly::parseJson(queryStr);
@@ -278,8 +280,7 @@ struct SymbolSets {
 
     add(units, path, path, "unit");
 
-    for (size_t n = 0; n < ue.numPreClasses(); ++n) {
-      auto pce = ue.pce(n);
+    for (auto const pce : ue.preclasses()) {
       pce->setAttrs(pce->attrs() | AttrUnique | AttrPersistent);
       if (pce->attrs() & AttrEnum) add(enums, pce->name(), path, "enum");
       add(classes, pce->name(), path, "class", typeAliases);
@@ -533,12 +534,12 @@ int prepareOptions(CompilerOptions &po, int argc, char **argv) {
      "directories to exclude from the input")
     ("exclude-file",
      value<std::vector<std::string>>(&po.excludeFiles)->composing(),
-     "files to exclude from the input, even if parse-on-demand finds it")
+     "files to exclude from the input, even if referenced by included files")
     ("exclude-pattern",
      value<std::vector<std::string>>(&po.excludePatterns)->composing(),
      "regex (in 'find' command's regex command line option format) of files "
-     "or directories to exclude from the input, even if parse-on-demand finds "
-     "it")
+     "or directories to exclude from the input, even if referenced by "
+     "included files")
     ("exclude-static-pattern",
      value<std::vector<std::string>>(&po.excludeStaticPatterns)->composing(),
      "regex (in 'find' command's regex command line option format) of files "
@@ -553,8 +554,6 @@ int prepareOptions(CompilerOptions &po, int argc, char **argv) {
      "extra static files forced to include without exclusion checking")
     ("cmodule", value<std::vector<std::string>>(&po.cmodules)->composing(),
      "extra directories for static files without exclusion checking")
-    ("parse-on-demand", value<bool>(&po.parseOnDemand)->default_value(true),
-     "whether to parse files that are not specified from command line")
     ("output-dir,o", value<std::string>(&po.outputDir), "output directory")
     ("config,c", value<std::vector<std::string>>(&po.config)->composing(),
      "config file name")
@@ -821,13 +820,13 @@ void logPhaseStats(const std::string& phase, const Package& package,
   sample.setInt(phase + "_total_files", package.getTotalFiles());
 
   sample.setInt(phase + "_micros", micros);
-  if (auto const t = package.parsingInputsTime()) {
+  if (auto const t = package.inputsTime()) {
     sample.setInt(
       phase + "_input_micros",
       std::chrono::duration_cast<std::chrono::microseconds>(*t).count()
     );
   }
-  if (auto const t = package.parsingOndemandTime()) {
+  if (auto const t = package.ondemandTime()) {
     sample.setInt(
       phase + "_ondemand_micros",
       std::chrono::duration_cast<std::chrono::microseconds>(*t).count()
@@ -869,21 +868,27 @@ void logPhaseStats(const std::string& phase, const Package& package,
 // Compute a UnitIndex by parsing decls for all autoload-eligible files.
 // If no Autoload.Query is specified by RepoOptions, this just indexes
 // the input files.
-bool compute_index(
+bool computeIndex(
     const CompilerOptions& po,
     StructuredLogEntry& sample,
     coro::TicketExecutor& executor,
     extern_worker::Client& client,
     UnitIndex& index
 ) {
-  auto const onIndex = [&] (std::string&& rpath, Package::IndexMeta&& meta) {
-    auto const interned_rpath = makeStaticString(rpath);
+  auto const onIndex = [&] (
+      std::string rpath,
+      Package::IndexMeta meta,
+      Ref<Package::UnitDecls> declsRef
+  ) {
+    auto locations = std::make_shared<UnitIndex::Locations>(
+        std::move(rpath), std::move(declsRef)
+    );
     auto insert = [&](auto const& names, auto& map, const char* kind) {
       for (auto name : names) {
-        auto const ret = map.emplace(name, interned_rpath);
+        auto const ret = map.emplace(name, locations);
         if (!ret.second) {
           Logger::FWarning("Duplicate {} {} in {} and {}",
-              kind, name, ret.first->first, interned_rpath
+              kind, name, ret.first->first, locations->rpath
           );
         }
       }
@@ -891,29 +896,31 @@ bool compute_index(
     insert(meta.types, index.types, "type");
     insert(meta.funcs, index.funcs, "function");
     insert(meta.constants, index.constants, "constant");
+    insert(meta.modules, index.modules, "module");
   };
 
-  Package index_package{po.inputDir, false, executor, client};
+  Package indexPackage{po.inputDir, executor, client};
   Timer indexTimer(Timer::WallTime, "indexing");
 
   auto const& repoFlags = RepoOptions::forFile(po.inputDir.c_str()).flags();
   auto const queryStr = repoFlags.autoloadQuery();
-  if (!queryStr.empty() && po.parseOnDemand) {
+  if (!queryStr.empty()) {
     // Index the files specified by Autoload.Query
-    if (!addAutoloadQueryToPackage(index_package, queryStr)) return false;
+    if (!addAutoloadQueryToPackage(indexPackage, queryStr)) return false;
   } else {
     // index just the input files
-    addInputsToPackage(index_package, po);
+    addInputsToPackage(indexPackage, po);
   }
 
-  if (!coro::wait(index_package.index(onIndex))) return false;
+  if (!coro::wait(indexPackage.index(onIndex))) return false;
 
-  logPhaseStats("index", index_package, client, sample,
+  logPhaseStats("index", indexPackage, client, sample,
                 indexTimer.getMicroSeconds());
-  Logger::FInfo("index size: types={:,} funcs={:,} constants={:,}",
+  Logger::FInfo("index size: types={:,} funcs={:,} constants={:,} modules={:,}",
       index.types.size(),
       index.funcs.size(),
-      index.constants.size()
+      index.constants.size(),
+      index.modules.size()
   );
   client.resetStats();
 
@@ -936,8 +943,9 @@ struct ParseJob {
   }
 
   static UnitEmitterSerdeWrapper run(const std::string& contents,
-                                     const RepoOptionsFlags& flags) {
-    return Package::parseRun(contents, flags);
+                                     const RepoOptionsFlags& flags,
+                                     Variadic<Package::UnitDecls> decls) {
+    return Package::parseRun(contents, flags, std::move(decls.vals));
   }
 };
 
@@ -961,8 +969,9 @@ struct ParseForHHBBCJob {
   }
 
   static Variadic<WPI::Value> run(const std::string& contents,
-                                  const RepoOptionsFlags& flags) {
-    auto wrapper = Package::parseRun(contents, flags);
+                                  const RepoOptionsFlags& flags,
+                                  Variadic<Package::UnitDecls> decls) {
+    auto wrapper = Package::parseRun(contents, flags, std::move(decls.vals));
     if (!wrapper.m_ue) return {};
 
     std::vector<WPI::Value> values;
@@ -1050,11 +1059,10 @@ bool process(const CompilerOptions &po) {
   sample.setStr("extern_worker_impl", client->implName());
 
   UnitIndex index;
-  if (!compute_index(po, sample, *executor, *client, index)) return false;
+  if (!computeIndex(po, sample, *executor, *client, index)) return false;
 
   auto package = std::make_unique<Package>(
     po.inputDir,
-    po.parseOnDemand,
     *executor,
     *client
   );
@@ -1150,7 +1158,7 @@ bool process(const CompilerOptions &po) {
                            Ref<Package::FileMetaVec> fileMetas,
                            std::vector<Package::FileData> files,
                            bool optimistic)
-    -> coro::Task<Package::ParseMetaVec> {
+    -> coro::Task<std::pair<bool,Package::ParseMetaVec>> {
     if (RO::EvalUseHHBBC) {
       // Run the HHBBC parse job, which produces WholeProgramInput
       // key/values.
@@ -1173,6 +1181,12 @@ bool process(const CompilerOptions &po) {
       auto [parseMetas, inputKeys] =
         HPHP_CORO_AWAIT(client->load(std::move(metaRefs)));
 
+      // Stop now if the index contains any missing decls.
+      // parseRun() will retry this job with additional inputs.
+      if (index.containsAnyMissing(parseMetas)) {
+        HPHP_CORO_RETURN(std::make_pair(true, parseMetas));
+      }
+
       // We don't have unit-emitters to do uniqueness checking, but
       // the parse metadata has the definitions we can use instead.
       for (auto const& p : parseMetas) {
@@ -1191,7 +1205,7 @@ bool process(const CompilerOptions &po) {
       }
       always_assert(keyIdx == numKeys);
 
-      HPHP_CORO_MOVE_RETURN(parseMetas);
+      HPHP_CORO_RETURN(std::make_pair(false, parseMetas));
     }
 
     // Otherwise, do a "normal" (non-HHBBC parse job), load the
@@ -1213,11 +1227,17 @@ bool process(const CompilerOptions &po) {
       client->load(std::move(metaRefs))
     ));
 
+    // Stop now if the index contains any missing decls.
+    // parseRun() will retry this job with additional inputs.
+    if (index.containsAnyMissing(parseMetas)) {
+      HPHP_CORO_RETURN(std::make_pair(true, parseMetas));
+    }
+
     for (auto& wrapper : wrappers) {
       if (!wrapper.m_ue) continue;
       emit(std::move(wrapper.m_ue));
     }
-    HPHP_CORO_MOVE_RETURN(parseMetas);
+    HPHP_CORO_RETURN(std::make_pair(false, parseMetas));
   };
 
   {
@@ -1232,10 +1252,10 @@ bool process(const CompilerOptions &po) {
 
     logPhaseStats("parse", *package, *client, sample,
                   parseTimer.getMicroSeconds());
-  }
 
-  // We don't need the ondemand/autoload index after this point.
-  index.clear();
+    // We don't need the ondemand/autoload index after this point.
+    index.clear();
+  }
 
   std::thread fileCache{
     [&, package = std::move(package)] () mutable {

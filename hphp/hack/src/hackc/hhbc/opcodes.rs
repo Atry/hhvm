@@ -8,11 +8,9 @@ use ffi::Slice;
 use ffi::Str;
 use serde::Serialize;
 
-use crate::hhbc_ast::NUM_ACT_REC_CELLS;
 use crate::AdataId;
 use crate::BareThisOp;
 use crate::ClassName;
-use crate::ClassNum;
 use crate::CollectionType;
 use crate::ConstName;
 use crate::ContCheckOp;
@@ -48,6 +46,7 @@ use crate::StackIndex;
 use crate::SwitchKind;
 use crate::Targets;
 use crate::TypeStructResolveOp;
+use crate::NUM_ACT_REC_CELLS;
 
 #[emit_opcodes_macro::emit_opcodes]
 #[derive(Clone, Debug, Targets, Hash, Eq, PartialEq, Serialize)]

@@ -11,12 +11,11 @@ use env::emitter::Emitter;
 use error::Error;
 use error::Result;
 use ffi::Slice;
-use hhbc::hhas_attribute;
-use hhbc::hhas_attribute::HhasAttribute;
-use hhbc::hhas_coeffects::HhasCoeffects;
-use hhbc::hhas_method::HhasMethod;
-use hhbc::hhas_method::HhasMethodFlags;
-use hhbc::hhas_pos::HhasSpan;
+use hhbc::Attribute;
+use hhbc::Coeffects;
+use hhbc::Method;
+use hhbc::MethodFlags;
+use hhbc::Span;
 use hhbc::Visibility;
 use hhbc_string_utils as string_utils;
 use hhvm_types_ffi::ffi::Attr;
@@ -39,7 +38,7 @@ pub fn from_asts<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     class: &'a ast::Class_,
     methods: &'a [ast::Method_],
-) -> Result<Vec<HhasMethod<'arena>>> {
+) -> Result<Vec<Method<'arena>>> {
     methods
         .iter()
         .map(|m| from_ast(emitter, class, m))
@@ -49,21 +48,20 @@ pub fn from_asts<'a, 'arena, 'decl>(
 pub fn get_attrs_for_method<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     method: &'a ast::Method_,
-    user_attrs: &'a [HhasAttribute<'arena>],
+    user_attrs: &'a [Attribute<'arena>],
     visibility: &'a ast::Visibility,
     class: &'a ast::Class_,
     is_memoize_impl: bool,
 ) -> Attr {
     let is_abstract = class.kind.is_cinterface() || method.abstract_;
-    let is_dyn_callable = emitter.systemlib()
-        || (hhas_attribute::has_dynamically_callable(user_attrs) && !is_memoize_impl);
+    let is_dyn_callable =
+        emitter.systemlib() || (hhbc::has_dynamically_callable(user_attrs) && !is_memoize_impl);
     let is_interceptable = is_method_interceptable(emitter.options());
-    let is_native_opcode_impl = hhas_attribute::is_native_opcode_impl(user_attrs);
-    let is_no_injection = hhas_attribute::is_no_injection(user_attrs);
-    let is_prov_skip_frame = hhas_attribute::has_provenance_skip_frame(user_attrs);
+    let is_native_opcode_impl = hhbc::is_native_opcode_impl(user_attrs);
+    let is_no_injection = hhbc::is_no_injection(user_attrs);
+    let is_prov_skip_frame = hhbc::has_provenance_skip_frame(user_attrs);
     let is_readonly_return = method.readonly_ret.is_some();
-    let is_unique =
-        emitter.systemlib() && hhas_attribute::has_native(user_attrs) && !is_native_opcode_impl;
+    let is_unique = emitter.systemlib() && hhbc::has_native(user_attrs) && !is_native_opcode_impl;
 
     let mut attrs = Attr::AttrNone;
     attrs.add(Attr::from(visibility));
@@ -72,10 +70,7 @@ pub fn get_attrs_for_method<'a, 'arena, 'decl>(
     attrs.set(Attr::AttrDynamicallyCallable, is_dyn_callable);
     attrs.set(Attr::AttrFinal, method.final_);
     attrs.set(Attr::AttrInterceptable, is_interceptable);
-    attrs.set(
-        Attr::AttrIsFoldable,
-        hhas_attribute::has_foldable(user_attrs),
-    );
+    attrs.set(Attr::AttrIsFoldable, hhbc::has_foldable(user_attrs));
     attrs.set(Attr::AttrNoInjection, is_no_injection);
     attrs.set(Attr::AttrPersistent, is_unique);
     attrs.set(Attr::AttrReadonlyReturn, is_readonly_return);
@@ -90,7 +85,7 @@ pub fn from_ast<'a, 'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
     class: &'a ast::Class_,
     method_: impl Into<Cow<'a, ast::Method_>>,
-) -> Result<HhasMethod<'arena>> {
+) -> Result<Method<'arena>> {
     let method_: Cow<'a, ast::Method_> = method_.into();
     let method = method_.as_ref();
     let is_memoize = method
@@ -125,7 +120,7 @@ pub fn from_ast<'a, 'arena, 'decl>(
     let is_native = attributes
         .iter()
         .any(|attr| attr.is(user_attributes::is_native));
-    let is_native_opcode_impl = hhas_attribute::is_native_opcode_impl(&attributes);
+    let is_native_opcode_impl = hhbc::is_native_opcode_impl(&attributes);
     let is_async = method.fun_kind.is_fasync() || method.fun_kind.is_fasync_generator();
 
     if class.kind.is_cinterface() && !method.body.fb_ast.is_empty() {
@@ -161,7 +156,7 @@ pub fn from_ast<'a, 'arena, 'decl>(
     let deprecation_info = if is_memoize {
         None
     } else {
-        hhas_attribute::deprecation_info(attributes.iter())
+        hhbc::deprecation_info(attributes.iter())
     };
     let default_dropthrough = if method.abstract_ {
         Some(emit_fatal::emit_fatal_runtimeomitframe(
@@ -188,7 +183,7 @@ pub fn from_ast<'a, 'arena, 'decl>(
         scope.items.push(ScopeItem::Lambda(Lambda {
             is_long: false,
             is_async,
-            coeffects: HhasCoeffects::default(),
+            coeffects: Coeffects::default(),
             pos: method.span.clone(),
         }))
     };
@@ -203,11 +198,11 @@ pub fn from_ast<'a, 'arena, 'decl>(
         let parent_coeffects = emitter
             .global_state()
             .get_lambda_coeffects_of_scope(&class.name.1, &method.name.1);
-        parent_coeffects.map_or(HhasCoeffects::default(), |pc| {
+        parent_coeffects.map_or(Coeffects::default(), |pc| {
             pc.inherit_to_child_closure(emitter.alloc)
         })
     } else {
-        HhasCoeffects::from_ast(
+        Coeffects::from_ast(
             emitter.alloc,
             method.ctxs.as_ref(),
             &method.params,
@@ -306,18 +301,18 @@ pub fn from_ast<'a, 'arena, 'decl>(
         }
     };
     let span = if is_native_opcode_impl {
-        HhasSpan::default()
+        Span::default()
     } else {
-        HhasSpan::from_pos(&method.span)
+        Span::from_pos(&method.span)
     };
-    let mut flags = HhasMethodFlags::empty();
-    flags.set(HhasMethodFlags::IS_ASYNC, is_async);
-    flags.set(HhasMethodFlags::IS_GENERATOR, is_generator);
-    flags.set(HhasMethodFlags::IS_PAIR_GENERATOR, is_pair_generator);
-    flags.set(HhasMethodFlags::IS_CLOSURE_BODY, is_closure_body);
+    let mut flags = MethodFlags::empty();
+    flags.set(MethodFlags::IS_ASYNC, is_async);
+    flags.set(MethodFlags::IS_GENERATOR, is_generator);
+    flags.set(MethodFlags::IS_PAIR_GENERATOR, is_pair_generator);
+    flags.set(MethodFlags::IS_CLOSURE_BODY, is_closure_body);
 
     let attrs = get_attrs_for_method(emitter, method, &attributes, &visibility, class, is_memoize);
-    Ok(HhasMethod {
+    Ok(Method {
         attributes: Slice::fill_iter(emitter.alloc, attributes.into_iter()),
         visibility: Visibility::from(visibility),
         name,

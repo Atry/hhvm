@@ -10,12 +10,12 @@ use ir::class::TraitReqKind;
 use ir::string_intern::StringInterner;
 
 use crate::convert;
-use crate::convert::HackCUnitBuilder;
+use crate::convert::UnitBuilder;
 use crate::types;
 
 pub(crate) fn convert_class<'a>(
     alloc: &'a bumpalo::Bump,
-    unit: &mut HackCUnitBuilder<'a>,
+    unit: &mut UnitBuilder<'a>,
     class: ir::Class<'a>,
     strings: &StringInterner<'a>,
 ) {
@@ -94,7 +94,7 @@ pub(crate) fn convert_class<'a>(
         uses.into_iter().map(|use_| use_.to_hhbc(alloc, strings)),
     );
 
-    let class = hhbc::hhas_class::HhasClass {
+    let class = hhbc::Class {
         attributes: convert::convert_attributes(alloc, attributes),
         base,
         constants: Slice::fill_iter(
@@ -113,7 +113,7 @@ pub(crate) fn convert_class<'a>(
             alloc,
             methods
                 .into_iter()
-                .map(|method| crate::func::convert_method(alloc, method, strings, unit)),
+                .map(|method| crate::func::convert_method(alloc, method, strings)),
         ),
         name,
         properties: Slice::fill_iter(alloc, properties.iter().cloned()),
@@ -129,8 +129,8 @@ pub(crate) fn convert_class<'a>(
 fn convert_ctx_constant<'a>(
     alloc: &'a bumpalo::Bump,
     ctx: &ir::CtxConstant<'a>,
-) -> hhbc::hhas_coeffects::HhasCtxConstant<'a> {
-    hhbc::hhas_coeffects::HhasCtxConstant {
+) -> hhbc::CtxConstant<'a> {
+    hhbc::CtxConstant {
         name: ctx.name,
         recognized: Slice::fill_iter(alloc, ctx.recognized.iter().cloned()),
         unrecognized: Slice::fill_iter(alloc, ctx.unrecognized.iter().cloned()),
@@ -138,10 +138,8 @@ fn convert_ctx_constant<'a>(
     }
 }
 
-fn convert_type_constant<'a>(
-    tc: &ir::TypeConstant<'a>,
-) -> hhbc::hhas_type_const::HhasTypeConstant<'a> {
-    hhbc::hhas_type_const::HhasTypeConstant {
+fn convert_type_constant<'a>(tc: &ir::TypeConstant<'a>) -> hhbc::TypeConstant<'a> {
+    hhbc::TypeConstant {
         name: tc.name,
         initializer: tc.initializer.clone().into(),
         is_abstract: tc.is_abstract,

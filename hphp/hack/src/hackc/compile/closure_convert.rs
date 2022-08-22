@@ -12,7 +12,7 @@ use global_state::ClosureEnclosingClassInfo;
 use global_state::GlobalState;
 use hack_macro::hack_expr;
 use hash::IndexSet;
-use hhbc::hhas_coeffects::HhasCoeffects;
+use hhbc::Coeffects;
 use hhbc_string_utils as string_utils;
 use itertools::Itertools;
 use naming_special_names_rust::fb;
@@ -94,8 +94,8 @@ struct ClassSummary<'b> {
 }
 
 struct FunctionSummary<'b, 'arena> {
-    // Unfortunately HhasCoeffects has to be owned for now.
-    coeffects: HhasCoeffects<'arena>,
+    // Unfortunately hhbc::Coeffects has to be owned for now.
+    coeffects: Coeffects<'arena>,
     fun_kind: FunKind,
     mode: Mode,
     name: &'b Sid,
@@ -104,16 +104,16 @@ struct FunctionSummary<'b, 'arena> {
 }
 
 struct LambdaSummary<'b, 'arena> {
-    // Unfortunately HhasCoeffects has to be owned for now.
-    coeffects: HhasCoeffects<'arena>,
+    // Unfortunately hhbc::Coeffects has to be owned for now.
+    coeffects: Coeffects<'arena>,
     explicit_capture: Option<&'b [Lid]>,
     fun_kind: FunKind,
     span: &'b Pos,
 }
 
 struct MethodSummary<'b, 'arena> {
-    // Unfortunately HhasCoeffects has to be owned for now.
-    coeffects: HhasCoeffects<'arena>,
+    // Unfortunately hhbc::Coeffects has to be owned for now.
+    coeffects: Coeffects<'arena>,
     fun_kind: FunKind,
     name: &'b Sid,
     span: &'b Pos,
@@ -219,7 +219,7 @@ impl<'b, 'arena> Scope<'b, 'arena> {
         self.as_class_summary().map_or(&[], |cd| cd.tparams)
     }
 
-    fn coeffects_of_scope<'c>(&'c self) -> Option<&'c HhasCoeffects<'arena>> {
+    fn coeffects_of_scope<'c>(&'c self) -> Option<&'c Coeffects<'arena>> {
         for scope in self.walk_scope() {
             match &scope.summary {
                 ScopeSummary::Class(_) => break,
@@ -434,8 +434,6 @@ struct CaptureState {
 /// ReadOnlyState is split from State because it can be a simple ref in
 /// ClosureVisitor.
 struct ReadOnlyState<'a> {
-    /// How many existing classes are there?
-    class_count: usize,
     // Empty namespace as constructed by parser
     empty_namespace: RcOc<namespace_env::Env>,
     /// For debugger eval
@@ -469,7 +467,7 @@ impl<'arena> State<'arena> {
         }
     }
 
-    fn record_function_state(&mut self, key: String, coeffects_of_scope: HhasCoeffects<'arena>) {
+    fn record_function_state(&mut self, key: String, coeffects_of_scope: Coeffects<'arena>) {
         if !coeffects_of_scope.get_static_coeffects().is_empty() {
             self.global_state
                 .lambda_coeffects_of_scope
@@ -552,7 +550,6 @@ fn make_closure_name(scope: &Scope<'_, '_>, state: &State<'_>) -> String {
 }
 
 fn make_closure(
-    class_num: usize,
     p: Pos,
     scope: &Scope<'_, '_>,
     state: &State<'_>,
@@ -647,7 +644,7 @@ fn make_closure(
     };
 
     // TODO(hrust): can we reconstruct fd here from the scratch?
-    fd.name = Id(p.clone(), class_num.to_string());
+    fd.name = cd.name.clone();
     (fd, cd)
 }
 
@@ -861,7 +858,7 @@ impl<'ast, 'a: 'b, 'b, 'arena: 'a> VisitorMut<'ast> for ClosureVisitor<'a, 'b, '
             Error::unrecoverable("unexpected scope shape - method is not inside the class")
         })?;
         let variables = Self::compute_variables_from_fun(&md.params, &md.body.fb_ast, None)?;
-        let coeffects = HhasCoeffects::from_ast(
+        let coeffects = Coeffects::from_ast(
             self.alloc,
             md.ctxs.as_ref(),
             &md.params,
@@ -881,7 +878,7 @@ impl<'ast, 'a: 'b, 'b, 'arena: 'a> VisitorMut<'ast> for ClosureVisitor<'a, 'b, '
             let uid = get_unique_id_for_method(&cd.name.1, &md.name.1);
             self_
                 .state_mut()
-                .record_function_state(uid, HhasCoeffects::default());
+                .record_function_state(uid, Coeffects::default());
             visit_mut(self_, scope, &mut md.params)?;
             Ok(())
         })?;
@@ -917,7 +914,7 @@ impl<'ast, 'a: 'b, 'b, 'arena: 'a> VisitorMut<'ast> for ClosureVisitor<'a, 'b, '
             Def::Fun(fd) => {
                 let variables =
                     Self::compute_variables_from_fun(&fd.fun.params, &fd.fun.body.fb_ast, None)?;
-                let coeffects = HhasCoeffects::from_ast(
+                let coeffects = Coeffects::from_ast(
                     self.alloc,
                     fd.fun.ctxs.as_ref(),
                     &fd.fun.params,
@@ -937,7 +934,7 @@ impl<'ast, 'a: 'b, 'b, 'arena: 'a> VisitorMut<'ast> for ClosureVisitor<'a, 'b, '
                     let uid = get_unique_id_for_function(&fd.fun.name.1);
                     self_
                         .state_mut()
-                        .record_function_state(uid, HhasCoeffects::default());
+                        .record_function_state(uid, Coeffects::default());
                     visit_mut(self_, scope, &mut fd.fun.params)?;
                     visit_mut(self_, scope, &mut fd.fun.user_attributes)?;
                     Ok(())
@@ -1351,7 +1348,7 @@ impl<'a: 'b, 'b, 'arena: 'a + 'b> ClosureVisitor<'a, 'b, 'arena> {
         let variables =
             Self::compute_variables_from_fun(&fd.params, &fd.body.fb_ast, explicit_capture)?;
         let coeffects =
-            HhasCoeffects::from_ast(self.alloc, fd.ctxs.as_ref(), &fd.params, &fd.tparams, &[]);
+            Coeffects::from_ast(self.alloc, fd.ctxs.as_ref(), &fd.params, &fd.tparams, &[]);
         let si = ScopeSummary::Lambda(LambdaSummary {
             coeffects,
             explicit_capture: use_vars_opt.as_deref(),
@@ -1431,7 +1428,6 @@ impl<'a: 'b, 'b, 'arena: 'a + 'b> ClosureVisitor<'a, 'b, 'arena> {
 
         let fun_tparams = scope.fun_tparams().to_vec(); // hiddden .clone()
         let class_tparams = scope.class_tparams().to_vec(); // hiddden .clone()
-        let class_num = state.closures.len() + self.ro_state.class_count;
 
         let is_static = if is_long_lambda {
             // long lambdas are never static
@@ -1448,7 +1444,6 @@ impl<'a: 'b, 'b, 'arena: 'a + 'b> ClosureVisitor<'a, 'b, 'arena> {
         let pos = fd.span.clone();
         let lambda_vars_clone = lambda_vars.clone();
         let (inline_fundef, cd) = make_closure(
-            class_num,
             pos,
             scope,
             state,
@@ -1714,11 +1709,10 @@ pub fn convert_toplevel_prog<'arena, 'decl>(
     defs: &mut Vec<Def>,
     namespace_env: RcOc<namespace_env::Env>,
 ) -> Result<()> {
-    let class_count = prepare_defs(defs);
+    prepare_defs(defs);
 
     let mut scope = Scope::toplevel(defs.as_slice())?;
     let ro_state = ReadOnlyState {
-        class_count,
         empty_namespace: RcOc::clone(&namespace_env),
         for_debugger_eval: e.for_debugger_eval,
         options: e.options(),
@@ -1752,7 +1746,7 @@ pub fn convert_toplevel_prog<'arena, 'decl>(
     }
 
     let mut state = visitor.state.take().unwrap();
-    state.record_function_state(get_unique_id_for_main(), HhasCoeffects::default());
+    state.record_function_state(get_unique_id_for_main(), Coeffects::default());
     hoist_toplevel_functions(defs);
     let named_fun_defs = state
         .named_hoisted_functions

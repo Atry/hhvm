@@ -800,7 +800,7 @@ struct RuntimeOption {
         returns something other than boolean false, the runtime will throw a
         fatal error.
   */                                                                    \
-  F(int32_t, CheckPropTypeHints,       1)                               \
+  F(int32_t, CheckPropTypeHints,       3)                               \
   /* Enables enforcing upper-bounds for generic types
      1 => warning, 2 => error
   */                                                                    \
@@ -1168,7 +1168,7 @@ struct RuntimeOption {
   F(bool, EmitAPCBespokeArrays, true)                                   \
   /* Should we use monotypes? */                                        \
   F(bool, EmitBespokeMonotypes, false)                                  \
-  F(int64_t, ObjProfMaxNesting, 2500)                                   \
+  F(int64_t, ObjProfMaxNesting, 2000)                                   \
   /* Should we use type structures? */                                  \
   F(bool, EmitBespokeTypeStructures, false)                             \
   /* Choice of layout selection algorithms:                             \
