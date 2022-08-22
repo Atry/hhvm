@@ -18,19 +18,10 @@ find_package(FLEX REQUIRED)
 # Thrift uses `%code`, which isn't in 2.x
 find_package(BISON 3.0 REQUIRED)
 
-SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
-  THRIFT_SOURCE_ARGS
-  SOURCE_URL
-  "https://github.com/facebook/fbthrift/archive/refs/tags/v2022.08.08.00.tar.gz"
-  SOURCE_HASH
-  "SHA256=6b5165b4f5115f3537b9b5843f2dec21cd4836e6d69d8562dcdfae13ca8ff322"
-  FILENAME_PREFIX
-  "fbthrift-"
-)
 
 ExternalProject_Add(
   bundled_thrift
-  ${THRIFT_SOURCE_ARGS}
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/
   PATCH_COMMAND
     "${CMAKE_COMMAND}" -E copy
     "${CMAKE_SOURCE_DIR}/CMake/FindGlog.cmake"

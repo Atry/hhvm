@@ -1,14 +1,6 @@
 include(ExternalProject)
 include(HPHPFunctions)
 
-SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
-  FOLLY_SOURCE_ARGS
-  SOURCE_URL
-  "https://github.com/facebook/folly/releases/download/v2022.08.08.00/folly-v2022.08.08.00.tar.gz"
-  SOURCE_HASH
-  "SHA256=a8915c7191f36d5529a49b89c3fe6847db840e5e28a9456149352c0238a5776d"
-)
-
 get_target_property(BOOST_INCLUDE_DIR boost INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(DOUBLE_CONVERSION_INCLUDE_DIR double-conversion INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(DOUBLE_CONVERSION_LIBRARY double-conversion INTERFACE_LINK_LIBRARIES)
@@ -43,7 +35,7 @@ endif()
 
 ExternalProject_add(
   bundled_folly
-  ${FOLLY_SOURCE_ARGS}
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/
   PATCH_COMMAND
     "${CMAKE_CURRENT_SOURCE_DIR}/../apply-quilt-patches.sh"
     "${CMAKE_CURRENT_SOURCE_DIR}/patches"

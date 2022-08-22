@@ -20,14 +20,6 @@ get_target_property(ZSTD_LIBRARY zstd INTERFACE_LINK_LIBRARIES)
 get_target_property(JEMALLOC_INCLUDE_DIR jemalloc INTERFACE_INCLUDE_DIRECTORIES)
 
 
-SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
-  FIZZ_SOURCE_ARGS
-  SOURCE_URL
-  "https://github.com/facebookincubator/fizz/releases/download/v2022.08.08.00/fizz-v2022.08.08.00.tar.gz"
-  SOURCE_HASH
-  "SHA256=74cf7c76289f0eed76e6a000b6161d9e7ef27264f7d05d6bd3c2597313d68e03"
-)
-
 set(
   FIZZ_DEPS
   boost
@@ -41,7 +33,7 @@ target_link_libraries(fizz_deps INTERFACE ${FIZZ_DEPS} ${OPENSSL_LIBRARIES})
 
 ExternalProject_Add(
   bundled_fizz
-  ${FIZZ_SOURCE_ARGS}
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/
   PATCH_COMMAND
     "${CMAKE_COMMAND}" -E copy
     "${CMAKE_SOURCE_DIR}/CMake/FindLibSodium.cmake"

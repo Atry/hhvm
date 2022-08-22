@@ -14,19 +14,9 @@ get_target_property(JEMALLOC_INCLUDE_DIR jemalloc INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(fbmysqlclient_INCLUDE_DIR fbmysqlclient INTERFACE_INCLUDE_DIRECTORIES)
 get_target_property(re2_INCLUDE_DIR re2 INTERFACE_INCLUDE_DIRECTORIES)
 
-SET_HHVM_THIRD_PARTY_SOURCE_ARGS(
-  SQUANGLE_SOURCE_ARGS
-  SOURCE_URL
-  "https://github.com/facebook/squangle/archive/refs/tags/v2022.08.08.00.tar.gz"
-  SOURCE_HASH
-  "SHA256=60138c5626023c8e53198252326ec51f22ac856f843e8aadf09d8ead12a7ca45"
-  FILENAME_PREFIX
-  "squangle-"
-)
-
 ExternalProject_Add(
   bundled_squangle
-  ${SQUANGLE_SOURCE_ARGS}
+  SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src/
   PATCH_COMMAND
     "${CMAKE_COMMAND}" -E make_directory
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake"
