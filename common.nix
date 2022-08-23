@@ -16,6 +16,7 @@
 , gd
 , gdb
 , gettext
+, gflags
 , git
 , glog
 , gmp
@@ -117,6 +118,7 @@ rec {
       gd
       gdb
       gettext
+      gflags
       git
       glog
       gmp
