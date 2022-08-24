@@ -970,15 +970,15 @@ and type_refinement_compare :
     type a. a class_type_refinement -> a class_type_refinement -> int =
  fun a b ->
   match (a, b) with
-  | (Texact _, Tloose _) -> -1
-  | (Tloose _, Texact _) -> 1
-  | (Tloose b1, Tloose b2) ->
+  | (TRexact _, TRloose _) -> -1
+  | (TRloose _, TRexact _) -> 1
+  | (TRloose b1, TRloose b2) ->
     begin
       match tyl_compare ~sort:true b1.tr_lower b2.tr_lower with
       | 0 -> tyl_compare ~sort:true b1.tr_upper b2.tr_upper
       | n -> n
     end
-  | (Texact ty1, Texact ty2) -> ty_compare ty1 ty2
+  | (TRexact ty1, TRexact ty2) -> ty_compare ty1 ty2
 
 and class_refinement_compare :
     type a. a class_refinement -> a class_refinement -> int =
@@ -1103,6 +1103,7 @@ let constraint_ty_con_ordinal cty =
   | TCintersection _ -> 3
   | Tcan_index _ -> 4
   | Tcan_traverse _ -> 5
+  | Thas_type_member _ -> 6
 
 let rec constraint_ty_compare ?(normalize_lists = false) ty1 ty2 =
   let (_, ty1) = deref_constraint_type ty1 in
@@ -1110,6 +1111,10 @@ let rec constraint_ty_compare ?(normalize_lists = false) ty1 ty2 =
   match (ty1, ty2) with
   | (Thas_member hm1, Thas_member hm2) ->
     has_member_compare ~normalize_lists hm1 hm2
+  | (Thas_type_member (id1, lty1), Thas_type_member (id2, lty2)) ->
+    (match String.compare id1 id2 with
+    | 0 -> ty_compare lty1 lty2
+    | comp -> comp)
   | (Tcan_index ci1, Tcan_index ci2) ->
     can_index_compare ~normalize_lists ci1 ci2
   | (Tcan_traverse ct1, Tcan_traverse ct2) ->
@@ -1125,7 +1130,7 @@ let rec constraint_ty_compare ?(normalize_lists = false) ty1 ty2 =
       constraint_ty_compare ~normalize_lists cty1 cty2
   | ( _,
       ( Thas_member _ | Tcan_index _ | Tcan_traverse _ | Tdestructure _
-      | TCunion _ | TCintersection _ ) ) ->
+      | TCunion _ | TCintersection _ | Thas_type_member _ ) ) ->
     constraint_ty_con_ordinal ty2 - constraint_ty_con_ordinal ty1
 
 let constraint_ty_equal ?(normalize_lists = false) ty1 ty2 =
