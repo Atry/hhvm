@@ -362,10 +362,10 @@ module Full = struct
     let tref ~fuel (name, (tr : a class_type_refinement)) =
       let (fuel, tr_doc) =
         match tr with
-        | Texact ty ->
+        | TRexact ty ->
           let (fuel, ty_doc) = k ~fuel ty in
           (fuel, Concat [text "= "; ty_doc])
-        | Tloose { tr_lower = ls; tr_upper = us } ->
+        | TRloose { tr_lower = ls; tr_upper = us } ->
           let bound kind (fuel, docs) ty =
             let (fuel, ty_doc) = k ~fuel ty in
             (fuel, (text (kind ^ " ") ^^ ty_doc) :: docs)
@@ -916,6 +916,12 @@ module Full = struct
     let k' ~fuel cty = constraint_type ~fuel to_doc st penv cty in
     match x with
     | Thas_member hm -> thas_member ~fuel k hm
+    | Thas_type_member (id, lty) ->
+      let (fuel, lty_doc) = k ~fuel lty in
+      let has_type_member_doc =
+        Concat [text "has_type_member("; text id; comma_sep; lty_doc; text ")"]
+      in
+      (fuel, has_type_member_doc)
     | Tdestructure d -> tdestructure ~fuel k d
     | Tcan_index ci -> tcan_index ~fuel k ci
     | Tcan_traverse ct -> tcan_traverse ~fuel k ct
@@ -1275,7 +1281,7 @@ module Json = struct
       | Exact -> []
       | Nonexact r when Class_refinement.is_empty r -> []
       | Nonexact { cr_types = trs } ->
-        let ref (id, (Texact ty : locl_type_refinement)) =
+        let ref (id, (TRexact ty : locl_type_refinement)) =
           obj [("type", JSON_String id); ("equal", from_type env ty)]
         in
         [("refs", JSON_Array (List.map (SMap.bindings trs) ~f:ref))]
@@ -1753,7 +1759,7 @@ module Json = struct
       Result.Monad_infix.(
         get_string "type" (json, keytrace) >>= fun (id, _) ->
         get_obj "equal" (json, keytrace) >>= fun (ty_json, ty_keytrace) ->
-        aux ty_json ~keytrace:ty_keytrace >>= fun ty -> Ok (id, Texact ty))
+        aux ty_json ~keytrace:ty_keytrace >>= fun ty -> Ok (id, TRexact ty))
     and aux_as (json : Hh_json.json) ~(keytrace : Hh_json.Access.keytrace) :
         (locl_ty, deserialization_error) result =
       Result.Monad_infix.(

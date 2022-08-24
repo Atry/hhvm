@@ -44,8 +44,6 @@ namespace apache {
 namespace thrift {
 namespace compiler {
 
-class lexer;
-
 enum class parsing_mode {
   INCLUDES = 1,
   PROGRAM = 2,
@@ -110,23 +108,15 @@ class parsing_driver : public parser_actions {
   void on_program() override { clear_doctext(); }
 
   void on_standard_header(
+      source_range range,
       std::unique_ptr<stmt_attrs> attrs,
-      std::unique_ptr<t_annotations> annotations) override {
-    validate_header_location();
-    validate_header_annotations(std::move(attrs), std::move(annotations));
-  }
-
+      std::unique_ptr<t_annotations> annotations) override;
   void on_program_header(
       source_range range,
       std::unique_ptr<stmt_attrs> attrs,
-      std::unique_ptr<t_annotations> annotations) override {
-    validate_header_location();
-    set_program_annotations(std::move(attrs), std::move(annotations), range);
-  }
+      std::unique_ptr<t_annotations> annotations) override;
 
-  void on_package(source_range range, std::string literal) override {
-    set_package(std::move(literal), range);
-  }
+  void on_package(source_range range, std::string name) override;
 
   void on_include(source_range range, std::string literal) override {
     add_include(std::move(literal), range);
@@ -198,14 +188,7 @@ class parsing_driver : public parser_actions {
       source_range range,
       std::string name,
       const std::string& base_name,
-      std::unique_ptr<t_function_list> functions) override {
-    auto base = !base_name.empty() ? find_service(base_name) : nullptr;
-    auto service = std::make_unique<t_service>(program, std::move(name), base);
-    service->set_src_range(range);
-    set_functions(*service, std::move(functions));
-    service->set_lineno(get_lineno(range.begin));
-    return service;
-  }
+      std::unique_ptr<t_function_list> functions) override;
 
   std::unique_ptr<t_interaction> on_interaction(
       source_range range,
@@ -215,7 +198,6 @@ class parsing_driver : public parser_actions {
         std::make_unique<t_interaction>(program, std::move(name));
     interaction->set_src_range(range);
     set_functions(*interaction, std::move(functions));
-    interaction->set_lineno(get_lineno(range.begin));
     return interaction;
   }
 
@@ -224,7 +206,7 @@ class parsing_driver : public parser_actions {
       std::unique_ptr<stmt_attrs> attrs,
       t_function_qualifier qual,
       std::vector<t_type_ref> return_type,
-      source_location name_loc,
+      source_location,
       std::string name,
       t_field_list params,
       std::unique_ptr<t_throws> throws,
@@ -234,7 +216,6 @@ class parsing_driver : public parser_actions {
     function->set_qualifier(qual);
     set_fields(function->params(), std::move(params));
     function->set_exceptions(std::move(throws));
-    function->set_lineno(get_lineno(name_loc));
     function->set_src_range(range);
     // TODO: Leave the param list unnamed.
     function->params().set_name(function->name() + "_args");
@@ -289,7 +270,6 @@ class parsing_driver : public parser_actions {
                                        : "<interaction placeholder>";
     auto function =
         std::make_unique<t_function>(program, std::move(type), std::move(name));
-    function->set_lineno(get_lineno());
     function->set_src_range(range);
     function->set_is_interaction_constructor();
     return function;
@@ -304,7 +284,6 @@ class parsing_driver : public parser_actions {
     auto typedef_node =
         std::make_unique<t_typedef>(program, std::move(name), std::move(type));
     typedef_node->set_src_range(range);
-    typedef_node->set_lineno(get_lineno(range.begin));
     return typedef_node;
   }
 
@@ -313,7 +292,6 @@ class parsing_driver : public parser_actions {
     auto struct_node = std::make_unique<t_struct>(program, std::move(name));
     struct_node->set_src_range(range);
     set_fields(*struct_node, std::move(fields));
-    struct_node->set_lineno(get_lineno(range.begin));
     return struct_node;
   }
 
@@ -322,7 +300,6 @@ class parsing_driver : public parser_actions {
     auto union_node = std::make_unique<t_union>(program, std::move(name));
     union_node->set_src_range(range);
     set_fields(*union_node, std::move(fields));
-    union_node->set_lineno(get_lineno(range.begin));
     return union_node;
   }
 
@@ -339,7 +316,6 @@ class parsing_driver : public parser_actions {
     exception->set_kind(kind);
     exception->set_blame(blame);
     set_fields(*exception, std::move(fields));
-    exception->set_lineno(get_lineno(range.begin));
     return exception;
   }
 
@@ -349,7 +325,7 @@ class parsing_driver : public parser_actions {
       boost::optional<int64_t> id,
       t_field_qualifier qual,
       t_type_ref type,
-      source_location name_loc,
+      source_location,
       std::string name,
       std::unique_ptr<t_const_value> value,
       std::unique_ptr<t_annotations> annotations,
@@ -362,7 +338,6 @@ class parsing_driver : public parser_actions {
     if (mode == parsing_mode::PROGRAM) {
       field->set_default_value(std::move(value));
     }
-    field->set_lineno(get_lineno(name_loc));
     field->set_src_range(range);
     set_attributes(*field, std::move(attrs), std::move(annotations), range);
     if (doc) {
@@ -387,26 +362,26 @@ class parsing_driver : public parser_actions {
   std::unique_ptr<t_enum> on_enum(
       source_range range, std::string name, t_enum_value_list values) override {
     auto enum_node = std::make_unique<t_enum>(program, std::move(name));
+    enum_node->set_src_range(range);
     enum_node->set_values(std::move(values));
-    enum_node->set_lineno(get_lineno(range.begin));
     return enum_node;
   }
 
   std::unique_ptr<t_enum_value> on_enum_value(
       source_range range,
       std::unique_ptr<stmt_attrs> attrs,
-      source_location name_loc,
+      source_location,
       std::string name,
       int64_t* value,
       std::unique_ptr<t_annotations> annotations,
       boost::optional<comment> doc) override {
     auto enum_value = std::make_unique<t_enum_value>(std::move(name));
+    enum_value->set_src_range(range);
     set_attributes(
         *enum_value, std::move(attrs), std::move(annotations), range);
     if (value) {
       enum_value->set_value(to_enum_value(range.begin, *value));
     }
-    enum_value->set_lineno(get_lineno(name_loc));
     if (doc) {
       set_doctext(*enum_value, std::move(doc));
     }
@@ -420,7 +395,7 @@ class parsing_driver : public parser_actions {
       std::unique_ptr<t_const_value> value) override {
     auto const_node = std::make_unique<t_const>(
         program, std::move(type), std::move(name), std::move(value));
-    const_node->set_lineno(get_lineno(range.begin));
+    const_node->set_src_range(range);
     return const_node;
   }
 
@@ -471,9 +446,7 @@ class parsing_driver : public parser_actions {
     return const_value;
   }
 
-  int64_t on_integer(sign s, uint64_t value) override {
-    return to_int(value, s == sign::minus);
-  }
+  int64_t on_integer(source_range range, sign s, uint64_t value) override;
 
   [[noreturn]] void on_error() override { end_parsing(); }
 
@@ -523,11 +496,6 @@ class parsing_driver : public parser_actions {
   template <typename... T>
   void error(source_location loc, fmt::format_string<T...> msg, T&&... args) {
     ctx_.report(loc, diagnostic_level::error, msg, std::forward<T>(args)...);
-  }
-
-  [[noreturn]] void end_parsing(fmt::string_view msg) {
-    error(location(), "{}", msg);
-    end_parsing();
   }
 
   [[noreturn]] void end_parsing();
@@ -627,7 +595,6 @@ class parsing_driver : public parser_actions {
   void add_def(std::unique_ptr<t_named> node);
 
   void add_include(std::string name, const source_range& range);
-  void set_package(std::string name, const source_range& range);
 
   t_field_id to_field_id(source_location loc, int64_t value) {
     return narrow_int<t_field_id>(loc, value, "field ids");
@@ -638,29 +605,19 @@ class parsing_driver : public parser_actions {
   std::unique_ptr<t_const_value> to_const_value(
       source_location loc, int64_t value);
 
-  int64_t to_int(uint64_t val, bool negative = false);
-
-  const t_service* find_service(const std::string& name);
   const t_const* find_const(source_location loc, const std::string& name);
 
   std::unique_ptr<t_const_value> copy_const_value(
       source_location loc, const std::string& name);
 
   void set_parsed_definition();
-  void validate_header_location();
-  void validate_header_annotations(
-      std::unique_ptr<stmt_attrs> statement_attrs,
-      std::unique_ptr<t_annotations> annotations);
   void set_program_annotations(
       std::unique_ptr<stmt_attrs> statement_attrs,
       std::unique_ptr<t_annotations> annotations,
       const source_range& loc);
 
  private:
-  source_manager* source_mgr_;
-  class lex_handler_impl;
-  std::unique_ptr<lex_handler_impl> lex_handler_;
-  std::unique_ptr<lexer> lexer_;
+  source_manager& source_mgr_;
 
   std::set<std::string> already_parsed_paths_;
   std::set<std::string> circular_deps_;
@@ -674,6 +631,8 @@ class parsing_driver : public parser_actions {
    * Parse a single .thrift file. The file to parse is stored in params.program.
    */
   void parse_file();
+
+  void validate_header_location(source_location loc);
 
   // Adds an unnamed typedef to the program
   // TODO(afuller): Remove the need for these by an explicit t_type_ref node
@@ -706,9 +665,6 @@ class parsing_driver : public parser_actions {
     }
     return value;
   }
-
-  // Returns the current source location, see lexer::location.
-  source_location location() const;
 };
 
 } // namespace compiler

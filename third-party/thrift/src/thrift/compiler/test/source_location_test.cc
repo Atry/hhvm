@@ -15,6 +15,7 @@
  */
 
 #include <folly/experimental/TestUtil.h>
+#include <folly/portability/GMock.h>
 #include <folly/portability/GTest.h>
 #include <thrift/compiler/source_location.h>
 
@@ -32,6 +33,17 @@ TEST(SourceLocationTest, add_file) {
   EXPECT_EQ(loc.line(), 1);
   EXPECT_EQ(loc.column(), 1);
   EXPECT_EQ(fmt::string_view(text.c_str(), text.size() + 1), source.text);
+}
+
+TEST(SourceLocationTest, report_file_name_on_error) {
+  auto sm = source_manager();
+  auto message = std::string();
+  try {
+    sm.add_file("nonexistent");
+  } catch (const std::runtime_error& e) {
+    message = e.what();
+  }
+  EXPECT_THAT(message, testing::HasSubstr("nonexistent"));
 }
 
 TEST(SourceLocationTest, add_string) {
@@ -79,6 +91,16 @@ TEST(SourceLocationTest, compare) {
   loc = loc + 1;
   EXPECT_FALSE(source.start == loc);
   EXPECT_TRUE(source.start != loc);
+}
+
+TEST(SourceLocationTest, offset) {
+  auto sm = source_manager();
+  auto source = sm.add_string("path/to/file", "test");
+  auto loc = source.start;
+  EXPECT_EQ(loc.offset(), 0);
+  loc = loc + 2;
+  EXPECT_EQ(loc.offset(), 2);
+  EXPECT_EQ(source_location().offset(), 0);
 }
 
 TEST(SourceLocationTest, multi_line) {
