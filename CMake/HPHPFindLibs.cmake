@@ -179,6 +179,9 @@ if (GOOGLE_CPU_PROFILER_ENABLED)
   add_definitions(-DGOOGLE_CPU_PROFILER=1)
 endif()
 
+# Gflags
+find_package(Gflags)
+
 # HHProf
 if (JEMALLOC_ENABLED AND ENABLE_HHPROF)
   add_definitions(-DENABLE_HHPROF=1)
@@ -356,6 +359,10 @@ macro(hphp_link target)
   endif()
 
   target_link_libraries(${target} ${VISIBILITY} libsodium)
+
+  if (GFLAGS_FOUND)
+    target_link_libraries(${target} ${VISIBILITY} ${LIBGFLAGS_LIBRARY})
+  endif()
 
   target_link_libraries(${target} ${VISIBILITY} ${PCRE_LIBRARY})
   target_link_libraries(${target} ${VISIBILITY} ${ICU_DATA_LIBRARIES} ${ICU_I18N_LIBRARIES} ${ICU_LIBRARIES})
