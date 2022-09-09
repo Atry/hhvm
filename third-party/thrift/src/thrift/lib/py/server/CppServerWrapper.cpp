@@ -66,7 +66,7 @@ object makePythonHeaders(
   for (const auto& it : cppheaders) {
     headers[it.first] = it.second;
   }
-  headers[apache::thrift::THeader::CLIENT_TIMEOUT_HEADER] =
+  headers[(std::string)apache::thrift::THeader::CLIENT_TIMEOUT_HEADER] =
       folly::to<std::string>(
           std::chrono::milliseconds(context->getRequestTimeout()).count());
   return headers;
@@ -298,7 +298,7 @@ class PythonAsyncProcessor : public AsyncProcessor {
   }
 
   // Create a task and add it to thread manager's queue. Essentially the same
-  // as GeneratedAsyncProcessor's processInThread method.
+  // as GeneratedAsyncProcessorBase's processInThread method.
   void processSerializedRequest(
       ResponseChannelRequest::UniquePtr req,
       apache::thrift::SerializedRequest&& serializedRequest,

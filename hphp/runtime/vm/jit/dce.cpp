@@ -426,7 +426,6 @@ bool canDCE(const IRInstruction& inst) {
   case LdFuncCached:
   case LookupFuncCached:
   case AllocObj:
-  case AllocObjReified:
   case NewClsMeth:
   case FuncCred:
   case InitProps:
@@ -533,6 +532,7 @@ bool canDCE(const IRInstruction& inst) {
   case RaiseCoeffectsFunParamCoeffectRulesViolation:
   case RaiseStrToClassNotice:
   case RaiseModuleBoundaryViolation:
+  case RaiseModulePropertyViolation:
   case RaiseImplicitContextStateInvalid:
   case CheckClsMethFunc:
   case CheckClsReifiedGenericMismatch:
@@ -1261,7 +1261,17 @@ void killInstrAdjustRC(
   for (auto dec : decs) {
     auto replaced = dec->src(0) != inst->dst();
     auto srcIx = 0;
-    if (!dec->is(DecReleaseCheck) && anyRemaining) {
+    if (dec->is(DecReleaseCheck)) {
+      if (inst->is(ConstructClosure) && inst->src(0)->type().maybe(TCounted)) {
+        assertx(!replaced);
+        assertx(anyRemaining);
+        assertx(inst->mayMoveReference(0));
+
+        // While the closure is going to be released via ReleaseShallow it will
+        // still be responsible for releasing the captured context.
+        insertDecRef(dec, inst->src(0));
+      }
+    } else if (anyRemaining) {
       assertx(dec->is(DecRef));
       // The remaining inputs might be moved, so may need to survive
       // until this instruction is decreffed
@@ -1343,28 +1353,14 @@ void fullDCE(IRUnit& unit) {
       IRInstruction* srcInst = src->inst();
       if (srcInst->op() == DefConst) return;
 
-
-      auto const isPassthrough = [] (IRInstruction* inst) {
-        return inst->is(LdPropAddr);
-      };
-      auto const canonicalize = [&isPassthrough] (SSATmp* src) {
-        while (isPassthrough(src->inst())) {
-          src = src->inst()->src(0);
-        }
-        return src;
-      };
-      auto const canonSrc = canonicalize(src);
-      auto const canonSrcInst = canonSrc->inst();
-      if (canonSrcInst->producesReference() && canDCE(*canonSrcInst)) {
-        ++uses[canonSrc];
+      if (srcInst->producesReference() && canDCE(*srcInst)) {
+        ++uses[src];
         if (inst->is(DecRef, DecReleaseCheck)) {
-          rcInsts[canonSrcInst].decs.emplace_back(inst);
+          rcInsts[srcInst].decs.emplace_back(inst);
         }
-        if (inst->is(InitVecElem, InitDictElem,
-                     InitStructElem, InitStructPositions,
-                     ReleaseShallow, StClosureArg, StMem)
-            || isPassthrough(inst)) {
-          if (ix == 0) rcInsts[canonSrcInst].aux.emplace_back(inst);
+        if (inst->is(InitVecElem, InitDictElem, InitStructElem,
+                     InitStructPositions, ReleaseShallow, StClosureArg)) {
+          if (ix == 0) rcInsts[srcInst].aux.emplace_back(inst);
         }
       }
 

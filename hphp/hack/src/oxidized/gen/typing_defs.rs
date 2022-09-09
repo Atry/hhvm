@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<a46644fcd340909833f0653c2116ae7a>>
+// @generated SignedSource<<4a91ebe6d55c566504fd8e5e73cf19db>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -276,8 +276,8 @@ pub enum ModuleReference {
 #[repr(C)]
 pub struct ModuleDefType {
     pub pos: pos_or_decl::PosOrDecl,
-    pub exports: Vec<ModuleReference>,
-    pub imports: Vec<ModuleReference>,
+    pub exports: Option<Vec<ModuleReference>>,
+    pub imports: Option<Vec<ModuleReference>>,
 }
 
 /// The position is that of the hint in the `use` / `implements` AST node
@@ -496,7 +496,7 @@ pub struct EnumType {
 pub struct TypedefType {
     pub module: Option<ast_defs::Id>,
     pub pos: pos_or_decl::PosOrDecl,
-    pub vis: aast::TypedefVisibility,
+    pub vis: ast_defs::TypedefVisibility,
     pub tparams: Vec<Tparam>,
     pub constraint: Option<Ty>,
     pub type_: Ty,

@@ -16,8 +16,9 @@
 
 #include <vector>
 
+#include <folly/Benchmark.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <folly/portability/GTest.h>
-#include <folly/synchronization/Baton.h>
 
 #include <thrift/lib/cpp/transport/THeader.h>
 #include <thrift/lib/cpp2/server/RoundRobinRequestPile.h>
@@ -26,61 +27,106 @@
 #include <thrift/lib/cpp2/test/gen-cpp2/TestServiceAsyncClient.h>
 #include <thrift/lib/cpp2/util/ScopedServerInterfaceThread.h>
 
+#include "common/init/Init.h"
+
 using namespace std;
 using namespace apache::thrift;
 using namespace apache::thrift::test;
 using namespace apache::thrift::transport;
 using namespace apache::thrift::concurrency;
 
-TEST(RoundRobinRequestPileTest, NormalCases) {
-  using Func =
-      std::function<std::pair<unsigned, unsigned>(const ServerRequest&)>;
+namespace {
 
+ServerRequest getRequestObj(Cpp2RequestContext* ctx) {
+  ServerRequest req(
+      nullptr /* ResponseChannelRequest::UniquePtr  */,
+      SerializedCompressedRequest(std::unique_ptr<folly::IOBuf>{}),
+      ctx,
+      static_cast<protocol::PROTOCOL_TYPES>(0),
+      nullptr, /* requestContext  */
+      nullptr, /* asyncProcessor  */
+      nullptr /* methodMetadata  */);
+  return req;
+}
+
+Cpp2RequestContext* getContext(
+    int pri,
+    int bucket,
+    vector<unique_ptr<THeader>>& tHeaderStorage,
+    vector<unique_ptr<Cpp2RequestContext>>& contextStorage,
+    std::mutex* lock = nullptr) {
+  if (lock) {
+    lock->lock();
+  }
+  tHeaderStorage.emplace_back(new THeader);
+  auto headerSize = tHeaderStorage.size();
+  auto headerPtr = tHeaderStorage[headerSize - 1].get();
+
+  contextStorage.emplace_back(new Cpp2RequestContext(nullptr, headerPtr));
+  auto ctxSize = contextStorage.size();
+  auto ctx = contextStorage[ctxSize - 1].get();
+
+  if (lock) {
+    lock->unlock();
+  }
+
+  auto header = ctx->getHeader();
+  THeader::StringToStringMap map;
+  map["PRIORITY"] = folly::to<std::string>(pri);
+  map["BUCKET"] = folly::to<std::string>(bucket);
+  header->setReadHeaders(std::move(map));
+  return ctx;
+}
+
+ServerRequest getServerRequest(
+    int pri,
+    int bucket,
+    vector<unique_ptr<THeader>>& tHeaderStorage,
+    vector<unique_ptr<Cpp2RequestContext>>& contextStorage,
+    std::mutex* lock = nullptr) {
+  return getRequestObj(
+      getContext(pri, bucket, tHeaderStorage, contextStorage, lock));
+}
+
+std::function<std::pair<unsigned, unsigned>(const ServerRequest&)>
+getScopeFunc() {
+  std::function<std::pair<unsigned, unsigned>(const ServerRequest&)> scopeFunc =
+      [](const ServerRequest& request) {
+        auto ctx = request.requestContext();
+        auto headers = ctx->getHeaders();
+        auto priIter = headers.find("PRIORITY");
+        unsigned prio = folly::to<unsigned>(priIter->second);
+        auto bucketIter = headers.find("BUCKET");
+        unsigned bucket = folly::to<unsigned>(bucketIter->second);
+
+        return make_pair(prio, bucket);
+      };
+
+  return scopeFunc;
+}
+
+void checkResult(RoundRobinRequestPile& pile, int pri, int bucket) {
+  auto [req, _] = pile.dequeue();
+  auto ctx = req->requestContext();
+
+  auto headers = ctx->getHeaders();
+  auto priIter = headers.find("PRIORITY");
+  unsigned prio = folly::to<unsigned>(priIter->second);
+  auto bucketIter = headers.find("BUCKET");
+  unsigned bucketTmp = folly::to<unsigned>(bucketIter->second);
+
+  EXPECT_EQ(prio, pri);
+  EXPECT_EQ(bucketTmp, bucket);
+}
+
+} // namespace
+
+TEST(RoundRobinRequestPileTest, NormalCases) {
   vector<unique_ptr<THeader>> tHeaderStorage;
   vector<unique_ptr<Cpp2RequestContext>> contextStorage;
 
-  auto getRequestObj = [](Cpp2RequestContext* ctx) {
-    ServerRequest req(
-        nullptr /* ResponseChannelRequest::UniquePtr  */,
-        SerializedCompressedRequest(std::unique_ptr<folly::IOBuf>{}),
-        ctx,
-        static_cast<protocol::PROTOCOL_TYPES>(0),
-        nullptr, /* requestContext  */
-        nullptr, /* asyncProcessor  */
-        nullptr /* methodMetadata  */);
-    return req;
-  };
-
-  auto getContext = [&](int pri, int bucket) {
-    tHeaderStorage.emplace_back(new THeader);
-    auto headerSize = tHeaderStorage.size();
-    auto headerPtr = tHeaderStorage[headerSize - 1].get();
-
-    contextStorage.emplace_back(new Cpp2RequestContext(nullptr, headerPtr));
-    auto ctxSize = contextStorage.size();
-    auto ctx = contextStorage[ctxSize - 1].get();
-
-    auto header = ctx->getHeader();
-    THeader::StringToStringMap map;
-    map["PRIORITY"] = folly::to<std::string>(pri);
-    map["BUCKET"] = folly::to<std::string>(bucket);
-    header->setReadHeaders(std::move(map));
-    return ctx;
-  };
-
   auto getRequest = [&](int pri, int bucket) {
-    return getRequestObj(getContext(pri, bucket));
-  };
-
-  Func scopeFunc = [](const ServerRequest& request) {
-    auto ctx = request.requestContext();
-    auto headers = ctx->getHeaders();
-    auto priIter = headers.find("PRIORITY");
-    unsigned prio = folly::to<unsigned>(priIter->second);
-    auto bucketIter = headers.find("BUCKET");
-    unsigned bucket = folly::to<unsigned>(bucketIter->second);
-
-    return make_pair(prio, bucket);
+    return getServerRequest(pri, bucket, tHeaderStorage, contextStorage);
   };
 
   RoundRobinRequestPile::Options opts;
@@ -88,22 +134,10 @@ TEST(RoundRobinRequestPileTest, NormalCases) {
   for (int i = 0; i < 5; ++i) {
     opts.setNumBucketsPerPriority(i, 10);
   }
-  opts.pileSelectionFunction = scopeFunc;
+  opts.pileSelectionFunction = getScopeFunc();
   RoundRobinRequestPile pile(opts);
 
-  auto check = [&pile](int pri, int bucket) {
-    auto [req, _] = pile.dequeue();
-    auto ctx = req->requestContext();
-
-    auto headers = ctx->getHeaders();
-    auto priIter = headers.find("PRIORITY");
-    unsigned prio = folly::to<unsigned>(priIter->second);
-    auto bucketIter = headers.find("BUCKET");
-    unsigned bucketTmp = folly::to<unsigned>(bucketIter->second);
-
-    EXPECT_EQ(prio, pri);
-    EXPECT_EQ(bucketTmp, bucket);
-  };
+  auto check = [&pile](int pri, int bucket) { checkResult(pile, pri, bucket); };
 
   pile.enqueue(getRequest(0, 0));
   pile.enqueue(getRequest(0, 0));
@@ -174,75 +208,20 @@ TEST(RoundRobinRequestPileTest, NormalCases) {
 }
 
 TEST(RoundRobinRequestPileTest, SingleBucket) {
-  using Func =
-      std::function<std::pair<unsigned, unsigned>(const ServerRequest&)>;
-
   vector<unique_ptr<THeader>> tHeaderStorage;
   vector<unique_ptr<Cpp2RequestContext>> contextStorage;
 
-  auto getRequestObj = [](Cpp2RequestContext* ctx) {
-    ServerRequest req(
-        nullptr /* ResponseChannelRequest::UniquePtr  */,
-        SerializedCompressedRequest(std::unique_ptr<folly::IOBuf>{}),
-        ctx,
-        static_cast<protocol::PROTOCOL_TYPES>(0),
-        nullptr, /* requestContext  */
-        nullptr, /* asyncProcessor  */
-        nullptr /* methodMetadata  */);
-    return req;
-  };
-
-  auto getContext = [&](int pri, int bucket) {
-    tHeaderStorage.emplace_back(new THeader);
-    auto headerSize = tHeaderStorage.size();
-    auto headerPtr = tHeaderStorage[headerSize - 1].get();
-
-    contextStorage.emplace_back(new Cpp2RequestContext(nullptr, headerPtr));
-    auto ctxSize = contextStorage.size();
-    auto ctx = contextStorage[ctxSize - 1].get();
-
-    auto header = ctx->getHeader();
-    THeader::StringToStringMap map;
-    map["PRIORITY"] = folly::to<std::string>(pri);
-    map["BUCKET"] = folly::to<std::string>(bucket);
-    header->setReadHeaders(std::move(map));
-    return ctx;
-  };
-
   auto getRequest = [&](int pri, int bucket) {
-    return getRequestObj(getContext(pri, bucket));
-  };
-
-  Func scopeFunc = [](const ServerRequest& request) {
-    auto ctx = request.requestContext();
-    auto headers = ctx->getHeaders();
-    auto priIter = headers.find("PRIORITY");
-    unsigned prio = folly::to<unsigned>(priIter->second);
-    auto bucketIter = headers.find("BUCKET");
-    unsigned bucket = folly::to<unsigned>(bucketIter->second);
-
-    return make_pair(prio, bucket);
+    return getServerRequest(pri, bucket, tHeaderStorage, contextStorage);
   };
 
   RoundRobinRequestPile::Options opts;
   opts.setNumPriorities(1);
   opts.setNumBucketsPerPriority(0, 1);
-  opts.pileSelectionFunction = scopeFunc;
+  opts.pileSelectionFunction = getScopeFunc();
   RoundRobinRequestPile pile(opts);
 
-  auto check = [&pile](int pri, int bucket) {
-    auto [req, _] = pile.dequeue();
-    auto ctx = req->requestContext();
-
-    auto headers = ctx->getHeaders();
-    auto priIter = headers.find("PRIORITY");
-    unsigned prio = folly::to<unsigned>(priIter->second);
-    auto bucketIter = headers.find("BUCKET");
-    unsigned bucketTmp = folly::to<unsigned>(bucketIter->second);
-
-    EXPECT_EQ(prio, pri);
-    EXPECT_EQ(bucketTmp, bucket);
-  };
+  auto check = [&pile](int pri, int bucket) { checkResult(pile, pri, bucket); };
 
   pile.enqueue(getRequest(0, 0));
   pile.enqueue(getRequest(0, 0));
@@ -291,4 +270,136 @@ TEST(RoundRobinRequestPileTest, requestCount) {
   EXPECT_EQ(rpSet.numQueued(), 1);
 
   cc.setExecutionLimitRequests(1);
+}
+
+/*
+============================================================================
+  [...]er/test/RoundRobinRequestPileTest.cpp     relative  time/iter   iters/s
+  ============================================================================
+  DefaultPerf                                                 16.25s    61.52m
+  RoundRobinBehavior                                          11.00s    90.88m
+*/
+BENCHMARK(DefaultPerf) {
+  // This benchmark is a simple vanilla case
+  // where we have a RoundRobinRequestPile with only
+  // one priority and one bucket without any limit
+  vector<unique_ptr<THeader>> tHeaderStorage;
+  vector<unique_ptr<Cpp2RequestContext>> contextStorage;
+  std::mutex lock;
+
+  auto getRequest = [&](int pri, int bucket) {
+    return getServerRequest(pri, bucket, tHeaderStorage, contextStorage, &lock);
+  };
+
+  // single bucket, unlimited request pile, with control on
+  RoundRobinRequestPile::Options opts;
+  opts.setNumPriorities(1);
+  opts.setNumBucketsPerPriority(0, 1);
+  opts.pileSelectionFunction = getScopeFunc();
+  RoundRobinRequestPile pile(opts);
+
+  auto numThreads = std::thread::hardware_concurrency();
+  unsigned numRoundEachWorker = 1000;
+
+  folly::CPUThreadPoolExecutor producer(numThreads);
+  folly::CPUThreadPoolExecutor consumer(numThreads);
+
+  folly::relaxed_atomic<unsigned> counter{0};
+
+  auto producerFunc = [&]() {
+    for (unsigned i = 0; i < numRoundEachWorker; ++i) {
+      pile.enqueue(getRequest(0, 0));
+    }
+  };
+
+  for (unsigned i = 0; i < numThreads; ++i) {
+    producer.add(producerFunc);
+  }
+
+  auto consumerFunc = [&]() {
+    while (counter.load() != numThreads * numRoundEachWorker) {
+      auto [req, _] = pile.dequeue();
+      if (req) {
+        ++counter;
+      }
+    }
+  };
+
+  for (unsigned i = 0; i < numThreads; ++i) {
+    consumer.add(consumerFunc);
+  }
+
+  producer.join();
+  consumer.join();
+}
+
+/*
+============================================================================
+  [...]er/test/RoundRobinRequestPileTest.cpp     relative  time/iter   iters/s
+  ============================================================================
+  DefaultPerf                                                 10.67s    93.69m
+  RoundRobinBehavior                                          11.00s    90.88m
+*/
+BENCHMARK(RoundRobinBehavior) {
+  vector<unique_ptr<THeader>> tHeaderStorage;
+  vector<unique_ptr<Cpp2RequestContext>> contextStorage;
+  std::mutex lock;
+
+  auto getRequest = [&](int pri, int bucket) {
+    return getServerRequest(pri, bucket, tHeaderStorage, contextStorage, &lock);
+  };
+
+  unsigned numBuckets = 100;
+  unsigned numRoundsPerWorker = 10;
+  auto numThreads = std::thread::hardware_concurrency();
+
+  // single bucket, unlimited request pile, with control on
+  RoundRobinRequestPile::Options opts;
+  opts.setNumPriorities(1);
+  opts.setNumBucketsPerPriority(0, numBuckets);
+  opts.pileSelectionFunction = getScopeFunc();
+  RoundRobinRequestPile pile(opts);
+
+  folly::CPUThreadPoolExecutor producer(numThreads);
+  folly::CPUThreadPoolExecutor consumer(numThreads);
+
+  folly::relaxed_atomic<unsigned> counter{0};
+
+  auto producerFunc = [&]() {
+    for (unsigned i = 0; i < numRoundsPerWorker; ++i) {
+      for (unsigned j = 0; j < numBuckets; ++j) {
+        pile.enqueue(getRequest(0, j));
+      }
+    }
+  };
+
+  for (unsigned i = 0; i < numThreads; ++i) {
+    producer.add(producerFunc);
+  }
+
+  auto sum = numThreads * numRoundsPerWorker * numBuckets;
+
+  auto consumerFunc = [&]() {
+    while (counter.load() != sum) {
+      auto [req, _] = pile.dequeue();
+      if (req) {
+        ++counter;
+      }
+    }
+  };
+
+  for (unsigned i = 0; i < numThreads; ++i) {
+    consumer.add(consumerFunc);
+  }
+
+  producer.join();
+  consumer.join();
+}
+
+int main(int argc, char** argv) {
+  testing::InitGoogleTest(&argc, argv);
+  facebook::initFacebook(&argc, &argv);
+  auto ret = RUN_ALL_TESTS();
+  folly::runBenchmarks();
+  return ret;
 }

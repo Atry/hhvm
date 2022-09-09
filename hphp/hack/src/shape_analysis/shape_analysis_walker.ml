@@ -274,7 +274,7 @@ and expr_ (env : env) ((ty, pos, e) : T.expr) : env * entity =
           else
             let inter_constraint_ =
               decorate ~origin:__LINE__
-              @@ HT.Arg ((f_id, arg_idx, pos), arg_entity_)
+              @@ HT.Arg (((pos, f_id), arg_idx), arg_entity_)
             in
             Env.add_inter_constraint env inter_constraint_
         in
@@ -326,6 +326,16 @@ and expr_ (env : env) ((ty, pos, e) : T.expr) : env * entity =
     let (env, _) = expr_ env e1 in
     let (env, _) = expr_ env e2 in
     (env, None)
+  | A.Id name ->
+    let constr_ =
+      {
+        hack_pos = fst name;
+        origin = __LINE__;
+        constraint_ = HT.Identifier name;
+      }
+    in
+    let env = Env.add_inter_constraint env constr_ in
+    (env, Some (Inter (HT.Identifier name)))
   | _ ->
     let env = not_yet_supported env pos ("expression: " ^ Utils.expr_name e) in
     (env, None)
@@ -486,25 +496,32 @@ and stmt (env : env) ((pos, stmt) : T.stmt) : env =
 and block (env : env) : T.block -> env = List.fold ~init:env ~f:stmt
 
 let decl_hint kind tast_env ((ty, hint) : T.type_hint) :
-    constraint_ decorated list * entity =
+    (constraint_ decorated list * inter_constraint_ decorated list) * entity =
   if is_suitable_target_ty tast_env ty then
     let hint_pos = dict_pos_of_hint hint in
     let entity_ =
       match kind with
-      | `Parameter (id, idx) -> Inter (HT.Param (id, idx, hint_pos))
+      | `Parameter (id, idx) -> Inter (HT.Param ((hint_pos, id), idx))
       | `Return -> Literal hint_pos
+    in
+    let decorate ~origin constraint_ =
+      { hack_pos = hint_pos; origin; constraint_ }
+    in
+    let inter_constraints =
+      match kind with
+      | `Parameter (id, idx) ->
+        [decorate ~origin:__LINE__ @@ HT.Param ((hint_pos, id), idx)]
+      | `Return -> []
     in
     let kind =
       match kind with
       | `Parameter _ -> Parameter
       | `Return -> Return
     in
-    let decorate ~origin constraint_ =
-      { hack_pos = hint_pos; origin; constraint_ }
-    in
     let marker_constraint =
       decorate ~origin:__LINE__ @@ Marks (kind, hint_pos)
     in
+
     let constraints = [marker_constraint] in
     let constraints =
       when_local_mode tast_env ~default:constraints @@ fun () ->
@@ -513,35 +530,44 @@ let decl_hint kind tast_env ((ty, hint) : T.type_hint) :
       in
       invalidation_constraint :: constraints
     in
-    (constraints, Some entity_)
+    ((constraints, inter_constraints), Some entity_)
   else
-    ([], None)
+    (([], []), None)
 
 let init_params id tast_env (params : T.fun_param list) :
-    constraint_ decorated list * entity LMap.t =
+    (constraint_ decorated list * inter_constraint_ decorated list)
+    * entity LMap.t =
   let add_param
       idx
-      (constraints, lmap)
+      ((intra_constraints, inter_constraints), lmap)
       A.{ param_name; param_type_hint; param_is_variadic; _ } =
     if param_is_variadic then
       (* TODO(T125878781): Handle variadic paramseters *)
-      (constraints, lmap)
+      ((intra_constraints, inter_constraints), lmap)
     else
-      let (new_constraints, entity) =
+      let ((new_intra_constraints, new_inter_constraints), entity) =
         decl_hint (`Parameter (id, idx)) tast_env param_type_hint
       in
       let param_lid = Local_id.make_unscoped param_name in
       let lmap = LMap.add param_lid entity lmap in
-      let constraints = new_constraints @ constraints in
-      (constraints, lmap)
+      let intra_constraints = new_intra_constraints @ intra_constraints in
+      let inter_constraints = new_inter_constraints @ inter_constraints in
+      ((intra_constraints, inter_constraints), lmap)
   in
-  List.foldi ~f:add_param ~init:([], LMap.empty) params
+  List.foldi ~f:add_param ~init:(([], []), LMap.empty) params
 
 let callable id tast_env params ~return body =
-  let (param_constraints, param_env) = init_params id tast_env params in
-  let (return_constraints, return) = decl_hint `Return tast_env return in
-  let constraints = return_constraints @ param_constraints in
-  let env = Env.init tast_env constraints [] param_env ~return in
+  let ((param_intra_constraints, param_inter_constraints), param_env) =
+    init_params id tast_env params
+  in
+  let ((return_intra_constraints, return_inter_constraints), return) =
+    decl_hint `Return tast_env return
+  in
+  let intra_constraints = return_intra_constraints @ param_intra_constraints in
+  let inter_constraints = return_inter_constraints @ param_inter_constraints in
+  let env =
+    Env.init tast_env intra_constraints inter_constraints param_env ~return
+  in
   let env = block env body.A.fb_ast in
   ((env.constraints, env.inter_constraints), env.errors)
 
@@ -560,6 +586,50 @@ let program (ctx : Provider_context.t) (tast : Tast.program) =
         (id, callable id tast_env m_params ~return:m_ret m_body)
       in
       List.map ~f:handle_method c_methods
+    | A.Constant A.{ cst_name; cst_value; cst_type; _ } ->
+      let hint_pos = dict_pos_of_hint cst_type in
+      let (env, ent) =
+        expr_ (Env.init tast_env [] [] ~return:None LMap.empty) cst_value
+      in
+      let marker_constraint =
+        {
+          hack_pos = hint_pos;
+          origin = __LINE__;
+          constraint_ = Marks (Constant, hint_pos);
+        }
+      in
+      let env = Env.add_constraint env marker_constraint in
+      let constant_constraint =
+        {
+          hack_pos = fst cst_name;
+          origin = __LINE__;
+          constraint_ = HT.Constant (hint_pos, snd cst_name);
+        }
+      in
+      let env = Env.add_inter_constraint env constant_constraint in
+      let env =
+        match ent with
+        | Some ent_ ->
+          let subset_constr =
+            {
+              hack_pos = fst cst_name;
+              origin = __LINE__;
+              constraint_ =
+                Subsets (ent_, Inter (HT.Constant (hint_pos, snd cst_name)));
+            }
+          in
+          let initial_constr =
+            {
+              hack_pos = fst cst_name;
+              origin = __LINE__;
+              constraint_ = HT.ConstantInitial ent_;
+            }
+          in
+          let env = Env.add_constraint env subset_constr in
+          Env.add_inter_constraint env initial_constr
+        | None -> env
+      in
+      [(snd cst_name, ((env.constraints, env.inter_constraints), env.errors))]
     | _ -> failwith "A definition is not yet handled"
   in
   List.concat_map ~f:def tast |> SMap.of_list

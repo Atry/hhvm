@@ -23,6 +23,8 @@
 
 #include <boost/filesystem.hpp>
 
+#include <thrift/compiler/ast/t_include.h>
+#include <thrift/compiler/ast/t_type.h>
 #include <thrift/compiler/generate/json.h>
 #include <thrift/compiler/generate/t_concat_generator.h>
 
@@ -51,6 +53,7 @@ class t_json_generator : public t_concat_generator {
    * Program-level generation functions
    */
 
+  void generate_include(const t_program* included_program);
   void generate_typedef(const t_typedef* ttypedef) override;
   void generate_enum(const t_enum* tenum) override;
   void generate_const(const t_const* tconst) override;
@@ -60,6 +63,7 @@ class t_json_generator : public t_concat_generator {
   void generate_xception(const t_struct* txception) override;
 
   void print_type(const t_type* ttype);
+  void print_name(const string& name);
   void print_const_value(const t_const_value* tvalue);
   void print_const_key(t_const_value* tvalue);
   void print_lineno(const t_node& node);
@@ -122,6 +126,23 @@ void t_json_generator::generate_program() {
     indent_up();
     auto consts = program_->consts();
     generate_consts(consts);
+    f_out_ << endl;
+    indent_down();
+    indent(f_out_) << "}";
+  }
+
+  if (!program_->includes().empty()) {
+    f_out_ << "," << endl << indent() << "\"includes\": {" << endl;
+    indent_up();
+    // Generate includes
+    auto includes = program_->get_included_programs();
+    for (auto in_iter = includes.begin(); in_iter != includes.end();
+         ++in_iter) {
+      if (in_iter != includes.begin()) {
+        f_out_ << "," << endl;
+      }
+      generate_include(*in_iter);
+    }
     f_out_ << endl;
     indent_down();
     indent(f_out_) << "}";
@@ -327,6 +348,11 @@ void t_json_generator::print_type(const t_type* ttype) {
   indent(f_out_) << "\"spec_args\" : " << type_to_spec_args(ttype);
 }
 
+void t_json_generator::print_name(const string& name) {
+  f_out_ << indent() << "\"name\" : "
+         << "\"" << name << "\"," << endl;
+}
+
 /**
  * Prints out a JSON representation of the provided constant map key.
  * The JSON spec allows for strings, and nothing else.
@@ -486,6 +512,22 @@ void t_json_generator::print_node_annotations(
       f_out_ << "," << endl;
     }
   }
+}
+
+/**
+ * Generates an include.
+ *
+ * @param tinclude The include statement
+ */
+void t_json_generator::generate_include(const t_program* included_program) {
+  indent(f_out_) << "\"" << included_program->get_name() << "\" : {" << endl;
+  indent_up();
+  indent(f_out_) << "\"path\" : \""
+                 << included_program->include_prefix() +
+          included_program->name() + ".thrift"
+                 << "\"" << endl;
+  indent_down();
+  indent(f_out_) << "}";
 }
 
 /**
@@ -702,6 +744,7 @@ void t_json_generator::generate_service(const t_service* tservice) {
         }
         indent(f_out_) << "{" << endl;
         indent_up();
+        print_name((*arg_iter)->get_name());
         print_type((*arg_iter)->get_type());
         if ((*arg_iter)->get_value() != nullptr) {
           f_out_ << "," << endl << indent() << "\"value\" : ";

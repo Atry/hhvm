@@ -17,9 +17,9 @@
 #pragma once
 
 #include <type_traits>
+
 #include <folly/ConstexprMath.h>
 #include <folly/lang/Bits.h>
-#include <thrift/lib/cpp2/type/detail/TypeInfo.h>
 
 namespace apache {
 namespace thrift {
@@ -29,12 +29,13 @@ namespace detail {
 
 // A pointer for a type that has sufficent alignment to store information
 // in the lower bits.
-template <typename T, size_t Bits = folly::constexpr_log2(alignof(T))>
+template <
+    typename T,
+    size_t Bits = folly::constexpr_log2(alignof(T)),
+    size_t MaxBits = folly::constexpr_log2(alignof(T))>
 class AlignedPtr {
  public:
-  static_assert(
-      Bits > 0 && Bits <= folly::constexpr_log2(alignof(T)),
-      "insufficent alignment");
+  static_assert(Bits > 0 && Bits <= MaxBits, "insufficent alignment");
   constexpr static std::uintptr_t kMask = ~std::uintptr_t{} << Bits;
 
   constexpr AlignedPtr() noexcept = default;
@@ -46,6 +47,25 @@ class AlignedPtr {
   }
 
   T* get() const noexcept { return reinterpret_cast<T*>(ptr_ & kMask); }
+
+  std::uintptr_t getTag() const noexcept { return ptr_ & ~kMask; }
+
+  void clear() noexcept { ptr_ = 0; }
+
+  void clearTag() noexcept { ptr_ &= kMask; }
+
+  void set(T* ptr, std::uintptr_t tagBits = {}) {
+    assert(
+        reinterpret_cast<std::uintptr_t>(ptr) ==
+        (reinterpret_cast<std::uintptr_t>(ptr) & kMask));
+    assert(tagBits == (tagBits & ~kMask));
+    ptr_ = reinterpret_cast<std::uintptr_t>(ptr) | tagBits;
+  }
+
+  void setTag(std::uintptr_t tagBits) {
+    assert(tagBits == (tagBits & ~kMask));
+    ptr_ = (ptr_ & kMask) | tagBits;
+  }
 
   template <size_t Bit>
   constexpr bool get() const noexcept {

@@ -16,6 +16,8 @@
 
 #include <thrift/lib/cpp2/protocol/Patch.h>
 
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include <fmt/core.h>
@@ -23,6 +25,7 @@
 #include <folly/io/IOBufQueue.h>
 #include <folly/lang/Exception.h>
 #include <thrift/lib/cpp/util/EnumUtils.h>
+#include <thrift/lib/cpp/util/SaturatingMath.h>
 #include <thrift/lib/cpp/util/VarintUtils.h>
 #include <thrift/lib/cpp2/FieldMask.h>
 #include <thrift/lib/cpp2/op/Get.h>
@@ -115,7 +118,7 @@ void applyNumericPatch(const Object& patch, T& value) {
   }
 
   if (auto* arg = findOp(patch, PatchOp::Add)) {
-    value += argAs<Tag>(*arg);
+    value = util::add_saturating<T>(value, argAs<Tag>(*arg));
   }
 }
 
@@ -282,7 +285,7 @@ void ApplyPatch::operator()(
       auto& to_add = *add->setValue_ref();
       for (const auto& element : to_add) {
         if (std::find(value.begin(), value.end(), element) == value.end()) {
-          value.push_back(element);
+          value.insert(value.begin(), element);
         }
       }
     } else {
@@ -499,24 +502,23 @@ Mask extractMaskFromPatch(const protocol::Object& patch) {
   if (findOp(patch, PatchOp::Assign)) {
     return allMask();
   }
-  // All other operators are noop if they have the intrinsic default value.
-  if (isIntrinsicDefault(patch)) {
-    return noneMask();
-  }
   // If Clear or Add, it is modified if not intristic default.
   for (auto op : {PatchOp::Clear, PatchOp::Add}) {
-    if (findOp(patch, op)) {
-      return allMask();
+    if (auto* value = findOp(patch, op)) {
+      if (!isIntrinsicDefault(*value)) {
+        return allMask();
+      }
     }
   }
 
-  Mask mask;
+  Mask mask = noneMask();
   // Put should return allMask if not a map patch. Otherwise add keys to mask.
   if (auto* value = findOp(patch, PatchOp::Put)) {
-    if (!value->mapValue_ref()) {
+    if (value->mapValue_ref()) {
+      insertFieldsToMask(mask, *value, false);
+    } else if (!isIntrinsicDefault(*value)) {
       return allMask();
     }
-    insertFieldsToMask(mask, *value, false);
   }
   // Remove always adds keys to map mask. All types (list, set, and map) use
   // a set for Remove, so they are indistinguishable.

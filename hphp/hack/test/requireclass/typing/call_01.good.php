@@ -16,5 +16,4 @@ final class C {
   use T;
 
   public function bar(): void { }
-
 }

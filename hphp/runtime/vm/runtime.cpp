@@ -26,10 +26,10 @@
 #include "hphp/runtime/ext/std/ext_std_closure.h"
 #include "hphp/runtime/ext/generator/ext_generator.h"
 #include "hphp/runtime/vm/bytecode.h"
+#include "hphp/util/conv-10.h"
 #include "hphp/util/trace.h"
 #include "hphp/util/text-util.h"
 #include "hphp/runtime/vm/jit/translator-inline.h"
-#include "hphp/runtime/base/zend-functions.h"
 #include "hphp/runtime/ext/string/ext_string.h"
 
 #include <folly/tracing/StaticTracepoint.h>
@@ -427,7 +427,8 @@ namespace {
 void moduleBoundaryViolationImpl(
   std::string symbol,
   const StringData* symbolModule,
-  const StringData* fromModule
+  const StringData* fromModule,
+  bool soft
 ) {
   assertx(RO::EvalEnforceModules);
   // Internal symbols must always have a module
@@ -443,13 +444,30 @@ void moduleBoundaryViolationImpl(
       ? folly::sformat("module {}", fromModule)
       : "outside of a module"
   );
-  if (RO::EvalEnforceModules > 1) {
+  if (RO::EvalEnforceModules > 1 && !soft) {
     SystemLib::throwModuleBoundaryViolationExceptionObject(errMsg);
   }
   raise_warning(errMsg);
 }
 
 } // namespace
+
+void raiseModuleBoundaryViolation(const Class* cls,
+                                  const StringData* prop,
+                                  const StringData* callerModule) {
+  if (!RO::EvalEnforceModules) return;
+  assertx(cls);
+  assertx(prop);
+  auto const propSlot = cls->lookupDeclProp(prop);
+  auto const attrs = cls->declProperties()[propSlot].attrs;
+  assertx(attrs & AttrInternal);
+  return moduleBoundaryViolationImpl(
+    folly::sformat("property {}::${}", cls->name(), prop->data()),
+    cls->moduleName(),
+    callerModule,
+    attrs & AttrInternalSoft
+  );
+}
 
 void raiseModuleBoundaryViolation(const Class* ctx,
                                   const Func* callee,
@@ -463,7 +481,8 @@ void raiseModuleBoundaryViolation(const Class* ctx,
     ctx ? folly::sformat("method {}::{}", ctx->name(), callee->name())
         : folly::sformat("function {}", callee->name()),
     callee->moduleName(),
-    callerModule
+    callerModule,
+    callee->attrs() & AttrInternalSoft
   );
 }
 
@@ -476,7 +495,8 @@ void raiseModuleBoundaryViolation(const Class* cls,
   return moduleBoundaryViolationImpl(
     folly::sformat("class {}", cls->name()),
     cls->moduleName(),
-    callerModule
+    callerModule,
+    cls->attrs() & AttrInternalSoft
   );
 }
 

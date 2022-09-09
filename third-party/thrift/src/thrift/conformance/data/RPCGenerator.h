@@ -20,6 +20,7 @@
 namespace apache::thrift::conformance::data {
 
 TestSuite createRPCServerTestSuite();
+TestSuite createBasicRPCServerTestSuite();
 TestSuite createRPCClientTestSuite();
 
 } // namespace apache::thrift::conformance::data

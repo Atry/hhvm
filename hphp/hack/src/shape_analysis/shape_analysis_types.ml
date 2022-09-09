@@ -60,6 +60,7 @@ type marker_kind =
   | Parameter
   | Return
   | Debug
+  | Constant
 [@@deriving ord, show { with_path = false }]
 
 module Codemod = struct
@@ -86,7 +87,7 @@ type constraint_ =
   | Subsets of entity_ * entity_
 [@@deriving ord]
 
-type inter_constraint_ = entity_ HT.inter_constraint_
+type inter_constraint_ = entity_ HT.inter_constraint_ [@@deriving ord]
 
 type shape_result =
   | Shape_like_dict of Pos.t * marker_kind * shape_keys
@@ -147,3 +148,4 @@ end)
 type event = string * (shape_result, Error.t) Either.t
 
 type any_constraint = (constraint_, inter_constraint_) HT.any_constraint_
+[@@deriving ord]

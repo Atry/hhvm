@@ -37,7 +37,7 @@ except ImportError:
 all_structs = []
 UTF8STRINGS = bool(0) or sys.version_info.major >= 3
 
-__all__ = ['UTF8STRINGS', 'PatchOp', 'GeneratePatch', 'GenerateOptionalPatch', 'BoolPatch', 'BytePatch', 'I16Patch', 'I32Patch', 'I64Patch', 'FloatPatch', 'DoublePatch', 'StringPatch', 'BinaryPatch', 'OptionalBoolPatch', 'OptionalBytePatch', 'OptionalI16Patch', 'OptionalI32Patch', 'OptionalI64Patch', 'OptionalFloatPatch', 'OptionalDoublePatch', 'OptionalStringPatch', 'OptionalBinaryPatch']
+__all__ = ['UTF8STRINGS', 'PatchOp', 'GeneratePatch', 'BoolPatch', 'BytePatch', 'I16Patch', 'I32Patch', 'I64Patch', 'FloatPatch', 'DoublePatch', 'StringPatch', 'BinaryPatch']
 
 class PatchOp:
   """
@@ -174,92 +174,6 @@ class GeneratePatch:
   def _to_py_deprecated(self):
     return self
 
-class GenerateOptionalPatch:
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('GenerateOptionalPatch')
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.GenerateOptionalPatch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.GenerateOptionalPatch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
 class BoolPatch:
   """
   A patch for a boolean value.
@@ -268,6 +182,7 @@ class BoolPatch:
    - assign: Assign to a given value.
   
   If set, all other patch operations are ignored.
+   - clear: Clear any set value.
    - invert: If the bool value should be inverted.
   """
 
@@ -296,6 +211,11 @@ class BoolPatch:
           self.assign = iprot.readBool()
         else:
           iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.BOOL:
+          self.clear = iprot.readBool()
+        else:
+          iprot.skip(ftype)
       elif fid == 9:
         if ftype == TType.BOOL:
           self.invert = iprot.readBool()
@@ -318,6 +238,10 @@ class BoolPatch:
       oprot.writeFieldBegin('assign', TType.BOOL, 1)
       oprot.writeBool(self.assign)
       oprot.writeFieldEnd()
+    if self.clear != None:
+      oprot.writeFieldBegin('clear', TType.BOOL, 2)
+      oprot.writeBool(self.clear)
+      oprot.writeFieldEnd()
     if self.invert != None:
       oprot.writeFieldBegin('invert', TType.BOOL, 9)
       oprot.writeBool(self.invert)
@@ -339,6 +263,8 @@ class BoolPatch:
       json_obj = loads(json)
     if 'assign' in json_obj and json_obj['assign'] is not None:
       self.assign = json_obj['assign']
+    if 'clear' in json_obj and json_obj['clear'] is not None:
+      self.clear = json_obj['clear']
     if 'invert' in json_obj and json_obj['invert'] is not None:
       self.invert = json_obj['invert']
 
@@ -349,6 +275,10 @@ class BoolPatch:
       value = pprint.pformat(self.assign, indent=0)
       value = padding.join(value.splitlines(True))
       L.append('    assign=%s' % (value))
+    if self.clear is not None:
+      value = pprint.pformat(self.clear, indent=0)
+      value = padding.join(value.splitlines(True))
+      L.append('    clear=%s' % (value))
     if self.invert is not None:
       value = pprint.pformat(self.invert, indent=0)
       value = padding.join(value.splitlines(True))
@@ -367,6 +297,7 @@ class BoolPatch:
   def __dir__(self):
     return (
       'assign',
+      'clear',
       'invert',
     )
 
@@ -396,6 +327,7 @@ class BytePatch:
    - assign: Assign to a given value.
   
   If set, all other patch operations are ignored.
+   - clear: Clear any set value.
    - add: Add to a given value.
   """
 
@@ -424,6 +356,11 @@ class BytePatch:
           self.assign = iprot.readByte()
         else:
           iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.BOOL:
+          self.clear = iprot.readBool()
+        else:
+          iprot.skip(ftype)
       elif fid == 8:
         if ftype == TType.BYTE:
           self.add = iprot.readByte()
@@ -445,6 +382,10 @@ class BytePatch:
     if self.assign != None:
       oprot.writeFieldBegin('assign', TType.BYTE, 1)
       oprot.writeByte(self.assign)
+      oprot.writeFieldEnd()
+    if self.clear != None:
+      oprot.writeFieldBegin('clear', TType.BOOL, 2)
+      oprot.writeBool(self.clear)
       oprot.writeFieldEnd()
     if self.add != None:
       oprot.writeFieldBegin('add', TType.BYTE, 8)
@@ -469,6 +410,8 @@ class BytePatch:
       self.assign = json_obj['assign']
       if self.assign > 0x7f or self.assign < -0x80:
         raise TProtocolException(TProtocolException.INVALID_DATA, 'number exceeds limit in field')
+    if 'clear' in json_obj and json_obj['clear'] is not None:
+      self.clear = json_obj['clear']
     if 'add' in json_obj and json_obj['add'] is not None:
       self.add = json_obj['add']
       if self.add > 0x7f or self.add < -0x80:
@@ -481,6 +424,10 @@ class BytePatch:
       value = pprint.pformat(self.assign, indent=0)
       value = padding.join(value.splitlines(True))
       L.append('    assign=%s' % (value))
+    if self.clear is not None:
+      value = pprint.pformat(self.clear, indent=0)
+      value = padding.join(value.splitlines(True))
+      L.append('    clear=%s' % (value))
     if self.add is not None:
       value = pprint.pformat(self.add, indent=0)
       value = padding.join(value.splitlines(True))
@@ -499,6 +446,7 @@ class BytePatch:
   def __dir__(self):
     return (
       'assign',
+      'clear',
       'add',
     )
 
@@ -528,6 +476,7 @@ class I16Patch:
    - assign: Assign to a given value.
   
   If set, all other patch operations are ignored.
+   - clear: Clear any set value.
    - add: Add to a given value.
   """
 
@@ -556,6 +505,11 @@ class I16Patch:
           self.assign = iprot.readI16()
         else:
           iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.BOOL:
+          self.clear = iprot.readBool()
+        else:
+          iprot.skip(ftype)
       elif fid == 8:
         if ftype == TType.I16:
           self.add = iprot.readI16()
@@ -577,6 +531,10 @@ class I16Patch:
     if self.assign != None:
       oprot.writeFieldBegin('assign', TType.I16, 1)
       oprot.writeI16(self.assign)
+      oprot.writeFieldEnd()
+    if self.clear != None:
+      oprot.writeFieldBegin('clear', TType.BOOL, 2)
+      oprot.writeBool(self.clear)
       oprot.writeFieldEnd()
     if self.add != None:
       oprot.writeFieldBegin('add', TType.I16, 8)
@@ -601,6 +559,8 @@ class I16Patch:
       self.assign = json_obj['assign']
       if self.assign > 0x7fff or self.assign < -0x8000:
         raise TProtocolException(TProtocolException.INVALID_DATA, 'number exceeds limit in field')
+    if 'clear' in json_obj and json_obj['clear'] is not None:
+      self.clear = json_obj['clear']
     if 'add' in json_obj and json_obj['add'] is not None:
       self.add = json_obj['add']
       if self.add > 0x7fff or self.add < -0x8000:
@@ -613,6 +573,10 @@ class I16Patch:
       value = pprint.pformat(self.assign, indent=0)
       value = padding.join(value.splitlines(True))
       L.append('    assign=%s' % (value))
+    if self.clear is not None:
+      value = pprint.pformat(self.clear, indent=0)
+      value = padding.join(value.splitlines(True))
+      L.append('    clear=%s' % (value))
     if self.add is not None:
       value = pprint.pformat(self.add, indent=0)
       value = padding.join(value.splitlines(True))
@@ -631,6 +595,7 @@ class I16Patch:
   def __dir__(self):
     return (
       'assign',
+      'clear',
       'add',
     )
 
@@ -660,6 +625,7 @@ class I32Patch:
    - assign: Assign to a given value.
   
   If set, all other patch operations are ignored.
+   - clear: Clear any set value.
    - add: Add to a given value.
   """
 
@@ -688,6 +654,11 @@ class I32Patch:
           self.assign = iprot.readI32()
         else:
           iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.BOOL:
+          self.clear = iprot.readBool()
+        else:
+          iprot.skip(ftype)
       elif fid == 8:
         if ftype == TType.I32:
           self.add = iprot.readI32()
@@ -709,6 +680,10 @@ class I32Patch:
     if self.assign != None:
       oprot.writeFieldBegin('assign', TType.I32, 1)
       oprot.writeI32(self.assign)
+      oprot.writeFieldEnd()
+    if self.clear != None:
+      oprot.writeFieldBegin('clear', TType.BOOL, 2)
+      oprot.writeBool(self.clear)
       oprot.writeFieldEnd()
     if self.add != None:
       oprot.writeFieldBegin('add', TType.I32, 8)
@@ -733,6 +708,8 @@ class I32Patch:
       self.assign = json_obj['assign']
       if self.assign > 0x7fffffff or self.assign < -0x80000000:
         raise TProtocolException(TProtocolException.INVALID_DATA, 'number exceeds limit in field')
+    if 'clear' in json_obj and json_obj['clear'] is not None:
+      self.clear = json_obj['clear']
     if 'add' in json_obj and json_obj['add'] is not None:
       self.add = json_obj['add']
       if self.add > 0x7fffffff or self.add < -0x80000000:
@@ -745,6 +722,10 @@ class I32Patch:
       value = pprint.pformat(self.assign, indent=0)
       value = padding.join(value.splitlines(True))
       L.append('    assign=%s' % (value))
+    if self.clear is not None:
+      value = pprint.pformat(self.clear, indent=0)
+      value = padding.join(value.splitlines(True))
+      L.append('    clear=%s' % (value))
     if self.add is not None:
       value = pprint.pformat(self.add, indent=0)
       value = padding.join(value.splitlines(True))
@@ -763,6 +744,7 @@ class I32Patch:
   def __dir__(self):
     return (
       'assign',
+      'clear',
       'add',
     )
 
@@ -792,6 +774,7 @@ class I64Patch:
    - assign: Assign to a given value.
   
   If set, all other patch operations are ignored.
+   - clear: Clear any set value.
    - add: Add to a given value.
   """
 
@@ -820,6 +803,11 @@ class I64Patch:
           self.assign = iprot.readI64()
         else:
           iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.BOOL:
+          self.clear = iprot.readBool()
+        else:
+          iprot.skip(ftype)
       elif fid == 8:
         if ftype == TType.I64:
           self.add = iprot.readI64()
@@ -842,6 +830,10 @@ class I64Patch:
       oprot.writeFieldBegin('assign', TType.I64, 1)
       oprot.writeI64(self.assign)
       oprot.writeFieldEnd()
+    if self.clear != None:
+      oprot.writeFieldBegin('clear', TType.BOOL, 2)
+      oprot.writeBool(self.clear)
+      oprot.writeFieldEnd()
     if self.add != None:
       oprot.writeFieldBegin('add', TType.I64, 8)
       oprot.writeI64(self.add)
@@ -863,6 +855,8 @@ class I64Patch:
       json_obj = loads(json)
     if 'assign' in json_obj and json_obj['assign'] is not None:
       self.assign = long(json_obj['assign'])
+    if 'clear' in json_obj and json_obj['clear'] is not None:
+      self.clear = json_obj['clear']
     if 'add' in json_obj and json_obj['add'] is not None:
       self.add = long(json_obj['add'])
 
@@ -873,6 +867,10 @@ class I64Patch:
       value = pprint.pformat(self.assign, indent=0)
       value = padding.join(value.splitlines(True))
       L.append('    assign=%s' % (value))
+    if self.clear is not None:
+      value = pprint.pformat(self.clear, indent=0)
+      value = padding.join(value.splitlines(True))
+      L.append('    clear=%s' % (value))
     if self.add is not None:
       value = pprint.pformat(self.add, indent=0)
       value = padding.join(value.splitlines(True))
@@ -891,6 +889,7 @@ class I64Patch:
   def __dir__(self):
     return (
       'assign',
+      'clear',
       'add',
     )
 
@@ -920,6 +919,7 @@ class FloatPatch:
    - assign: Assign to a given value.
   
   If set, all other patch operations are ignored.
+   - clear: Clear any set value.
    - add: Add to a given value.
   """
 
@@ -948,6 +948,11 @@ class FloatPatch:
           self.assign = iprot.readFloat()
         else:
           iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.BOOL:
+          self.clear = iprot.readBool()
+        else:
+          iprot.skip(ftype)
       elif fid == 8:
         if ftype == TType.FLOAT:
           self.add = iprot.readFloat()
@@ -970,6 +975,10 @@ class FloatPatch:
       oprot.writeFieldBegin('assign', TType.FLOAT, 1)
       oprot.writeFloat(self.assign)
       oprot.writeFieldEnd()
+    if self.clear != None:
+      oprot.writeFieldBegin('clear', TType.BOOL, 2)
+      oprot.writeBool(self.clear)
+      oprot.writeFieldEnd()
     if self.add != None:
       oprot.writeFieldBegin('add', TType.FLOAT, 8)
       oprot.writeFloat(self.add)
@@ -991,6 +1000,8 @@ class FloatPatch:
       json_obj = loads(json)
     if 'assign' in json_obj and json_obj['assign'] is not None:
       self.assign = float(json_obj['assign'])
+    if 'clear' in json_obj and json_obj['clear'] is not None:
+      self.clear = json_obj['clear']
     if 'add' in json_obj and json_obj['add'] is not None:
       self.add = float(json_obj['add'])
 
@@ -1001,6 +1012,10 @@ class FloatPatch:
       value = pprint.pformat(self.assign, indent=0)
       value = padding.join(value.splitlines(True))
       L.append('    assign=%s' % (value))
+    if self.clear is not None:
+      value = pprint.pformat(self.clear, indent=0)
+      value = padding.join(value.splitlines(True))
+      L.append('    clear=%s' % (value))
     if self.add is not None:
       value = pprint.pformat(self.add, indent=0)
       value = padding.join(value.splitlines(True))
@@ -1019,6 +1034,7 @@ class FloatPatch:
   def __dir__(self):
     return (
       'assign',
+      'clear',
       'add',
     )
 
@@ -1048,6 +1064,7 @@ class DoublePatch:
    - assign: Assign to a given value.
   
   If set, all other patch operations are ignored.
+   - clear: Clear any set value.
    - add: Add to a given value.
   """
 
@@ -1076,6 +1093,11 @@ class DoublePatch:
           self.assign = iprot.readDouble()
         else:
           iprot.skip(ftype)
+      elif fid == 2:
+        if ftype == TType.BOOL:
+          self.clear = iprot.readBool()
+        else:
+          iprot.skip(ftype)
       elif fid == 8:
         if ftype == TType.DOUBLE:
           self.add = iprot.readDouble()
@@ -1098,6 +1120,10 @@ class DoublePatch:
       oprot.writeFieldBegin('assign', TType.DOUBLE, 1)
       oprot.writeDouble(self.assign)
       oprot.writeFieldEnd()
+    if self.clear != None:
+      oprot.writeFieldBegin('clear', TType.BOOL, 2)
+      oprot.writeBool(self.clear)
+      oprot.writeFieldEnd()
     if self.add != None:
       oprot.writeFieldBegin('add', TType.DOUBLE, 8)
       oprot.writeDouble(self.add)
@@ -1119,6 +1145,8 @@ class DoublePatch:
       json_obj = loads(json)
     if 'assign' in json_obj and json_obj['assign'] is not None:
       self.assign = float(json_obj['assign'])
+    if 'clear' in json_obj and json_obj['clear'] is not None:
+      self.clear = json_obj['clear']
     if 'add' in json_obj and json_obj['add'] is not None:
       self.add = float(json_obj['add'])
 
@@ -1129,6 +1157,10 @@ class DoublePatch:
       value = pprint.pformat(self.assign, indent=0)
       value = padding.join(value.splitlines(True))
       L.append('    assign=%s' % (value))
+    if self.clear is not None:
+      value = pprint.pformat(self.clear, indent=0)
+      value = padding.join(value.splitlines(True))
+      L.append('    clear=%s' % (value))
     if self.add is not None:
       value = pprint.pformat(self.add, indent=0)
       value = padding.join(value.splitlines(True))
@@ -1147,6 +1179,7 @@ class DoublePatch:
   def __dir__(self):
     return (
       'assign',
+      'clear',
       'add',
     )
 
@@ -1492,1470 +1525,6 @@ class BinaryPatch:
   def _to_py_deprecated(self):
     return self
 
-class OptionalBoolPatch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = BoolPatch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.BOOL:
-          self.ensure = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = BoolPatch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalBoolPatch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.BOOL, 4)
-      oprot.writeBool(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = BoolPatch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = json_obj['ensure']
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = BoolPatch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalBoolPatch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalBoolPatch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalBytePatch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = BytePatch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.BYTE:
-          self.ensure = iprot.readByte()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = BytePatch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalBytePatch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.BYTE, 4)
-      oprot.writeByte(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = BytePatch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = json_obj['ensure']
-      if self.ensure > 0x7f or self.ensure < -0x80:
-        raise TProtocolException(TProtocolException.INVALID_DATA, 'number exceeds limit in field')
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = BytePatch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalBytePatch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalBytePatch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalI16Patch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = I16Patch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.I16:
-          self.ensure = iprot.readI16()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = I16Patch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalI16Patch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.I16, 4)
-      oprot.writeI16(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = I16Patch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = json_obj['ensure']
-      if self.ensure > 0x7fff or self.ensure < -0x8000:
-        raise TProtocolException(TProtocolException.INVALID_DATA, 'number exceeds limit in field')
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = I16Patch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalI16Patch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalI16Patch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalI32Patch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = I32Patch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.I32:
-          self.ensure = iprot.readI32()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = I32Patch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalI32Patch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.I32, 4)
-      oprot.writeI32(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = I32Patch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = json_obj['ensure']
-      if self.ensure > 0x7fffffff or self.ensure < -0x80000000:
-        raise TProtocolException(TProtocolException.INVALID_DATA, 'number exceeds limit in field')
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = I32Patch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalI32Patch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalI32Patch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalI64Patch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = I64Patch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.I64:
-          self.ensure = iprot.readI64()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = I64Patch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalI64Patch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.I64, 4)
-      oprot.writeI64(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = I64Patch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = long(json_obj['ensure'])
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = I64Patch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalI64Patch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalI64Patch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalFloatPatch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = FloatPatch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.FLOAT:
-          self.ensure = iprot.readFloat()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = FloatPatch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalFloatPatch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.FLOAT, 4)
-      oprot.writeFloat(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = FloatPatch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = float(json_obj['ensure'])
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = FloatPatch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalFloatPatch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalFloatPatch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalDoublePatch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = DoublePatch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.DOUBLE:
-          self.ensure = iprot.readDouble()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = DoublePatch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalDoublePatch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.DOUBLE, 4)
-      oprot.writeDouble(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = DoublePatch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = float(json_obj['ensure'])
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = DoublePatch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalDoublePatch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalDoublePatch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalStringPatch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = StringPatch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.STRING:
-          self.ensure = iprot.readString().decode('utf-8') if UTF8STRINGS else iprot.readString()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = StringPatch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalStringPatch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.STRING, 4)
-      oprot.writeString(self.ensure.encode('utf-8')) if UTF8STRINGS and not isinstance(self.ensure, bytes) else oprot.writeString(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = StringPatch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = json_obj['ensure']
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = StringPatch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalStringPatch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalStringPatch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
-class OptionalBinaryPatch:
-  """
-  Attributes:
-   - clear: Clears any set value. Applies first.
-   - patchPrior: Patches any previously set values. Applies second.
-   - ensure: Assigns the value, if not already set to the same field. Applies third.
-   - patch: Patches any set value, including newly set values. Applies last.
-  """
-
-  thrift_spec = None
-  thrift_field_annotations = None
-  thrift_struct_annotations = None
-  __init__ = None
-  @staticmethod
-  def isUnion():
-    return False
-
-  def read(self, iprot):
-    if (isinstance(iprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0)
-      return
-    if (isinstance(iprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(iprot, THeaderProtocol.THeaderProtocolAccelerate) and iprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and isinstance(iprot.trans, TTransport.CReadableTransport) and self.thrift_spec is not None and fastproto is not None:
-      fastproto.decode(self, iprot.trans, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2)
-      return
-    iprot.readStructBegin()
-    while True:
-      (fname, ftype, fid) = iprot.readFieldBegin()
-      if ftype == TType.STOP:
-        break
-      if fid == 2:
-        if ftype == TType.BOOL:
-          self.clear = iprot.readBool()
-        else:
-          iprot.skip(ftype)
-      elif fid == 3:
-        if ftype == TType.STRUCT:
-          self.patchPrior = BinaryPatch()
-          self.patchPrior.read(iprot)
-        else:
-          iprot.skip(ftype)
-      elif fid == 4:
-        if ftype == TType.STRING:
-          self.ensure = iprot.readString()
-        else:
-          iprot.skip(ftype)
-      elif fid == 6:
-        if ftype == TType.STRUCT:
-          self.patch = BinaryPatch()
-          self.patch.read(iprot)
-        else:
-          iprot.skip(ftype)
-      else:
-        iprot.skip(ftype)
-      iprot.readFieldEnd()
-    iprot.readStructEnd()
-
-  def write(self, oprot):
-    if (isinstance(oprot, TBinaryProtocol.TBinaryProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_BINARY_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=0))
-      return
-    if (isinstance(oprot, TCompactProtocol.TCompactProtocolAccelerated) or (isinstance(oprot, THeaderProtocol.THeaderProtocolAccelerate) and oprot.get_protocol_id() == THeaderProtocol.THeaderProtocol.T_COMPACT_PROTOCOL)) and self.thrift_spec is not None and fastproto is not None:
-      oprot.trans.write(fastproto.encode(self, [self.__class__, self.thrift_spec, False], utf8strings=UTF8STRINGS, protoid=2))
-      return
-    oprot.writeStructBegin('OptionalBinaryPatch')
-    if self.clear != None:
-      oprot.writeFieldBegin('clear', TType.BOOL, 2)
-      oprot.writeBool(self.clear)
-      oprot.writeFieldEnd()
-    if self.patchPrior != None:
-      oprot.writeFieldBegin('patchPrior', TType.STRUCT, 3)
-      self.patchPrior.write(oprot)
-      oprot.writeFieldEnd()
-    if self.ensure != None:
-      oprot.writeFieldBegin('ensure', TType.STRING, 4)
-      oprot.writeString(self.ensure)
-      oprot.writeFieldEnd()
-    if self.patch != None:
-      oprot.writeFieldBegin('patch', TType.STRUCT, 6)
-      self.patch.write(oprot)
-      oprot.writeFieldEnd()
-    oprot.writeFieldStop()
-    oprot.writeStructEnd()
-
-  def readFromJson(self, json, is_text=True, **kwargs):
-    relax_enum_validation = bool(kwargs.pop('relax_enum_validation', False))
-    set_cls = kwargs.pop('custom_set_cls', set)
-    dict_cls = kwargs.pop('custom_dict_cls', dict)
-    if kwargs:
-        extra_kwargs = ', '.join(kwargs.keys())
-        raise ValueError(
-            'Unexpected keyword arguments: ' + extra_kwargs
-        )
-    json_obj = json
-    if is_text:
-      json_obj = loads(json)
-    if 'clear' in json_obj and json_obj['clear'] is not None:
-      self.clear = json_obj['clear']
-    if 'patchPrior' in json_obj and json_obj['patchPrior'] is not None:
-      self.patchPrior = BinaryPatch()
-      self.patchPrior.readFromJson(json_obj['patchPrior'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-    if 'ensure' in json_obj and json_obj['ensure'] is not None:
-      self.ensure = json_obj['ensure']
-    if 'patch' in json_obj and json_obj['patch'] is not None:
-      self.patch = BinaryPatch()
-      self.patch.readFromJson(json_obj['patch'], is_text=False, relax_enum_validation=relax_enum_validation, custom_set_cls=set_cls, custom_dict_cls=dict_cls)
-
-  def __repr__(self):
-    L = []
-    padding = ' ' * 4
-    if self.clear is not None:
-      value = pprint.pformat(self.clear, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    clear=%s' % (value))
-    if self.patchPrior is not None:
-      value = pprint.pformat(self.patchPrior, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patchPrior=%s' % (value))
-    if self.ensure is not None:
-      value = pprint.pformat(self.ensure, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    ensure=%s' % (value))
-    if self.patch is not None:
-      value = pprint.pformat(self.patch, indent=0)
-      value = padding.join(value.splitlines(True))
-      L.append('    patch=%s' % (value))
-    return "%s(%s)" % (self.__class__.__name__, "\n" + ",\n".join(L) if L else '')
-
-  def __eq__(self, other):
-    if not isinstance(other, self.__class__):
-      return False
-
-    return self.__dict__ == other.__dict__ 
-
-  def __ne__(self, other):
-    return not (self == other)
-
-  def __dir__(self):
-    return (
-      'clear',
-      'patchPrior',
-      'ensure',
-      'patch',
-    )
-
-  # Override the __hash__ function for Python3 - t10434117
-  __hash__ = object.__hash__
-
-  def _to_python(self):
-    import importlib
-    import thrift.python.converter
-    python_types = importlib.import_module("apache.thrift.op.patch.thrift_types")
-    return thrift.python.converter.to_python_struct(python_types.OptionalBinaryPatch, self)
-
-  def _to_py3(self):
-    import importlib
-    import thrift.py3.converter
-    py3_types = importlib.import_module("apache.thrift.op.patch.types")
-    return thrift.py3.converter.to_py3_struct(py3_types.OptionalBinaryPatch, self)
-
-  def _to_py_deprecated(self):
-    return self
-
 all_structs.append(GeneratePatch)
 GeneratePatch.thrift_spec = (
 )
@@ -2965,20 +1534,11 @@ GeneratePatch.thrift_struct_annotations = {
 GeneratePatch.thrift_field_annotations = {
 }
 
-all_structs.append(GenerateOptionalPatch)
-GenerateOptionalPatch.thrift_spec = (
-)
-
-GenerateOptionalPatch.thrift_struct_annotations = {
-}
-GenerateOptionalPatch.thrift_field_annotations = {
-}
-
 all_structs.append(BoolPatch)
 BoolPatch.thrift_spec = (
   None, # 0
   (1, TType.BOOL, 'assign', None, None, 1, ), # 1
-  None, # 2
+  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
   None, # 3
   None, # 4
   None, # 5
@@ -2993,14 +1553,16 @@ BoolPatch.thrift_struct_annotations = {
 BoolPatch.thrift_field_annotations = {
 }
 
-def BoolPatch__init__(self, assign=None, invert=None,):
+def BoolPatch__init__(self, assign=None, clear=None, invert=None,):
   self.assign = assign
+  self.clear = clear
   self.invert = invert
 
 BoolPatch.__init__ = BoolPatch__init__
 
 def BoolPatch__setstate__(self, state):
   state.setdefault('assign', None)
+  state.setdefault('clear', None)
   state.setdefault('invert', None)
   self.__dict__ = state
 
@@ -3011,7 +1573,7 @@ all_structs.append(BytePatch)
 BytePatch.thrift_spec = (
   None, # 0
   (1, TType.BYTE, 'assign', None, None, 1, ), # 1
-  None, # 2
+  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
   None, # 3
   None, # 4
   None, # 5
@@ -3025,14 +1587,16 @@ BytePatch.thrift_struct_annotations = {
 BytePatch.thrift_field_annotations = {
 }
 
-def BytePatch__init__(self, assign=None, add=None,):
+def BytePatch__init__(self, assign=None, clear=None, add=None,):
   self.assign = assign
+  self.clear = clear
   self.add = add
 
 BytePatch.__init__ = BytePatch__init__
 
 def BytePatch__setstate__(self, state):
   state.setdefault('assign', None)
+  state.setdefault('clear', None)
   state.setdefault('add', None)
   self.__dict__ = state
 
@@ -3043,7 +1607,7 @@ all_structs.append(I16Patch)
 I16Patch.thrift_spec = (
   None, # 0
   (1, TType.I16, 'assign', None, None, 1, ), # 1
-  None, # 2
+  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
   None, # 3
   None, # 4
   None, # 5
@@ -3057,14 +1621,16 @@ I16Patch.thrift_struct_annotations = {
 I16Patch.thrift_field_annotations = {
 }
 
-def I16Patch__init__(self, assign=None, add=None,):
+def I16Patch__init__(self, assign=None, clear=None, add=None,):
   self.assign = assign
+  self.clear = clear
   self.add = add
 
 I16Patch.__init__ = I16Patch__init__
 
 def I16Patch__setstate__(self, state):
   state.setdefault('assign', None)
+  state.setdefault('clear', None)
   state.setdefault('add', None)
   self.__dict__ = state
 
@@ -3075,7 +1641,7 @@ all_structs.append(I32Patch)
 I32Patch.thrift_spec = (
   None, # 0
   (1, TType.I32, 'assign', None, None, 1, ), # 1
-  None, # 2
+  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
   None, # 3
   None, # 4
   None, # 5
@@ -3089,14 +1655,16 @@ I32Patch.thrift_struct_annotations = {
 I32Patch.thrift_field_annotations = {
 }
 
-def I32Patch__init__(self, assign=None, add=None,):
+def I32Patch__init__(self, assign=None, clear=None, add=None,):
   self.assign = assign
+  self.clear = clear
   self.add = add
 
 I32Patch.__init__ = I32Patch__init__
 
 def I32Patch__setstate__(self, state):
   state.setdefault('assign', None)
+  state.setdefault('clear', None)
   state.setdefault('add', None)
   self.__dict__ = state
 
@@ -3107,7 +1675,7 @@ all_structs.append(I64Patch)
 I64Patch.thrift_spec = (
   None, # 0
   (1, TType.I64, 'assign', None, None, 1, ), # 1
-  None, # 2
+  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
   None, # 3
   None, # 4
   None, # 5
@@ -3121,14 +1689,16 @@ I64Patch.thrift_struct_annotations = {
 I64Patch.thrift_field_annotations = {
 }
 
-def I64Patch__init__(self, assign=None, add=None,):
+def I64Patch__init__(self, assign=None, clear=None, add=None,):
   self.assign = assign
+  self.clear = clear
   self.add = add
 
 I64Patch.__init__ = I64Patch__init__
 
 def I64Patch__setstate__(self, state):
   state.setdefault('assign', None)
+  state.setdefault('clear', None)
   state.setdefault('add', None)
   self.__dict__ = state
 
@@ -3139,7 +1709,7 @@ all_structs.append(FloatPatch)
 FloatPatch.thrift_spec = (
   None, # 0
   (1, TType.FLOAT, 'assign', None, None, 1, ), # 1
-  None, # 2
+  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
   None, # 3
   None, # 4
   None, # 5
@@ -3153,14 +1723,16 @@ FloatPatch.thrift_struct_annotations = {
 FloatPatch.thrift_field_annotations = {
 }
 
-def FloatPatch__init__(self, assign=None, add=None,):
+def FloatPatch__init__(self, assign=None, clear=None, add=None,):
   self.assign = assign
+  self.clear = clear
   self.add = add
 
 FloatPatch.__init__ = FloatPatch__init__
 
 def FloatPatch__setstate__(self, state):
   state.setdefault('assign', None)
+  state.setdefault('clear', None)
   state.setdefault('add', None)
   self.__dict__ = state
 
@@ -3171,7 +1743,7 @@ all_structs.append(DoublePatch)
 DoublePatch.thrift_spec = (
   None, # 0
   (1, TType.DOUBLE, 'assign', None, None, 1, ), # 1
-  None, # 2
+  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
   None, # 3
   None, # 4
   None, # 5
@@ -3185,14 +1757,16 @@ DoublePatch.thrift_struct_annotations = {
 DoublePatch.thrift_field_annotations = {
 }
 
-def DoublePatch__init__(self, assign=None, add=None,):
+def DoublePatch__init__(self, assign=None, clear=None, add=None,):
   self.assign = assign
+  self.clear = clear
   self.add = add
 
 DoublePatch.__init__ = DoublePatch__init__
 
 def DoublePatch__setstate__(self, state):
   state.setdefault('assign', None)
+  state.setdefault('clear', None)
   state.setdefault('add', None)
   self.__dict__ = state
 
@@ -3272,312 +1846,6 @@ def BinaryPatch__setstate__(self, state):
 
 BinaryPatch.__getstate__ = lambda self: self.__dict__.copy()
 BinaryPatch.__setstate__ = BinaryPatch__setstate__
-
-all_structs.append(OptionalBoolPatch)
-OptionalBoolPatch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [BoolPatch, BoolPatch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.BOOL, 'ensure', None, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [BoolPatch, BoolPatch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalBoolPatch.thrift_struct_annotations = {
-}
-OptionalBoolPatch.thrift_field_annotations = {
-}
-
-def OptionalBoolPatch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalBoolPatch.__init__ = OptionalBoolPatch__init__
-
-def OptionalBoolPatch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalBoolPatch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalBoolPatch.__setstate__ = OptionalBoolPatch__setstate__
-
-all_structs.append(OptionalBytePatch)
-OptionalBytePatch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [BytePatch, BytePatch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.BYTE, 'ensure', None, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [BytePatch, BytePatch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalBytePatch.thrift_struct_annotations = {
-}
-OptionalBytePatch.thrift_field_annotations = {
-}
-
-def OptionalBytePatch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalBytePatch.__init__ = OptionalBytePatch__init__
-
-def OptionalBytePatch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalBytePatch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalBytePatch.__setstate__ = OptionalBytePatch__setstate__
-
-all_structs.append(OptionalI16Patch)
-OptionalI16Patch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [I16Patch, I16Patch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.I16, 'ensure', None, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [I16Patch, I16Patch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalI16Patch.thrift_struct_annotations = {
-}
-OptionalI16Patch.thrift_field_annotations = {
-}
-
-def OptionalI16Patch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalI16Patch.__init__ = OptionalI16Patch__init__
-
-def OptionalI16Patch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalI16Patch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalI16Patch.__setstate__ = OptionalI16Patch__setstate__
-
-all_structs.append(OptionalI32Patch)
-OptionalI32Patch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [I32Patch, I32Patch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.I32, 'ensure', None, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [I32Patch, I32Patch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalI32Patch.thrift_struct_annotations = {
-}
-OptionalI32Patch.thrift_field_annotations = {
-}
-
-def OptionalI32Patch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalI32Patch.__init__ = OptionalI32Patch__init__
-
-def OptionalI32Patch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalI32Patch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalI32Patch.__setstate__ = OptionalI32Patch__setstate__
-
-all_structs.append(OptionalI64Patch)
-OptionalI64Patch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [I64Patch, I64Patch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.I64, 'ensure', None, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [I64Patch, I64Patch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalI64Patch.thrift_struct_annotations = {
-}
-OptionalI64Patch.thrift_field_annotations = {
-}
-
-def OptionalI64Patch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalI64Patch.__init__ = OptionalI64Patch__init__
-
-def OptionalI64Patch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalI64Patch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalI64Patch.__setstate__ = OptionalI64Patch__setstate__
-
-all_structs.append(OptionalFloatPatch)
-OptionalFloatPatch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [FloatPatch, FloatPatch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.FLOAT, 'ensure', None, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [FloatPatch, FloatPatch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalFloatPatch.thrift_struct_annotations = {
-}
-OptionalFloatPatch.thrift_field_annotations = {
-}
-
-def OptionalFloatPatch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalFloatPatch.__init__ = OptionalFloatPatch__init__
-
-def OptionalFloatPatch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalFloatPatch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalFloatPatch.__setstate__ = OptionalFloatPatch__setstate__
-
-all_structs.append(OptionalDoublePatch)
-OptionalDoublePatch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [DoublePatch, DoublePatch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.DOUBLE, 'ensure', None, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [DoublePatch, DoublePatch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalDoublePatch.thrift_struct_annotations = {
-}
-OptionalDoublePatch.thrift_field_annotations = {
-}
-
-def OptionalDoublePatch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalDoublePatch.__init__ = OptionalDoublePatch__init__
-
-def OptionalDoublePatch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalDoublePatch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalDoublePatch.__setstate__ = OptionalDoublePatch__setstate__
-
-all_structs.append(OptionalStringPatch)
-OptionalStringPatch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [StringPatch, StringPatch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.STRING, 'ensure', True, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [StringPatch, StringPatch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalStringPatch.thrift_struct_annotations = {
-}
-OptionalStringPatch.thrift_field_annotations = {
-}
-
-def OptionalStringPatch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalStringPatch.__init__ = OptionalStringPatch__init__
-
-def OptionalStringPatch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalStringPatch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalStringPatch.__setstate__ = OptionalStringPatch__setstate__
-
-all_structs.append(OptionalBinaryPatch)
-OptionalBinaryPatch.thrift_spec = (
-  None, # 0
-  None, # 1
-  (2, TType.BOOL, 'clear', None, None, 2, ), # 2
-  (3, TType.STRUCT, 'patchPrior', [BinaryPatch, BinaryPatch.thrift_spec, False], None, 2, ), # 3
-  (4, TType.STRING, 'ensure', False, None, 1, ), # 4
-  None, # 5
-  (6, TType.STRUCT, 'patch', [BinaryPatch, BinaryPatch.thrift_spec, False], None, 2, ), # 6
-)
-
-OptionalBinaryPatch.thrift_struct_annotations = {
-}
-OptionalBinaryPatch.thrift_field_annotations = {
-}
-
-def OptionalBinaryPatch__init__(self, clear=None, patchPrior=None, ensure=None, patch=None,):
-  self.clear = clear
-  self.patchPrior = patchPrior
-  self.ensure = ensure
-  self.patch = patch
-
-OptionalBinaryPatch.__init__ = OptionalBinaryPatch__init__
-
-def OptionalBinaryPatch__setstate__(self, state):
-  state.setdefault('clear', None)
-  state.setdefault('patchPrior', None)
-  state.setdefault('ensure', None)
-  state.setdefault('patch', None)
-  self.__dict__ = state
-
-OptionalBinaryPatch.__getstate__ = lambda self: self.__dict__.copy()
-OptionalBinaryPatch.__setstate__ = OptionalBinaryPatch__setstate__
 
 fix_spec(all_structs)
 del all_structs

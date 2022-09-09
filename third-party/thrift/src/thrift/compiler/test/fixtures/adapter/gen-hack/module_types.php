@@ -97,7 +97,7 @@ class MyAnnotation implements \IThriftSyncStruct, \IThriftShapishSyncStruct {
         '\thrift\annotation\python\Adapter' => \thrift\annotation\python\Adapter::fromShape(
           shape(
             "name" => "my.module.Adapter2",
-            "typeHint" => "my.another.module.AdaptedType2",
+            "typeHint" => "my.another.module.AdaptedType2[]",
           )
         ),
         '\thrift\annotation\Transitive' => \thrift\annotation\Transitive::fromShape(
@@ -229,6 +229,7 @@ class Foo implements \IThriftSyncStruct, \IThriftShapishSyncStruct {
       'var' => 'binaryField',
       'adapter' => \Adapter1::class,
       'type' => \TType::STRING,
+      'is_binary' => true,
     ),
     9 => shape(
       'var' => 'longField',
@@ -847,7 +848,7 @@ class Foo implements \IThriftSyncStruct, \IThriftShapishSyncStruct {
             '\thrift\annotation\python\Adapter' => \thrift\annotation\python\Adapter::fromShape(
               shape(
                 "name" => "my.Adapter3",
-                "typeHint" => "my.AdaptedType3",
+                "typeHint" => "my.AdaptedType3[]",
               )
             ),
           ],
@@ -1086,6 +1087,7 @@ class Baz implements \IThriftSyncStruct, \IThriftUnion<\thrift\test\BazEnum>, \I
       'union' => true,
       'adapter' => \Adapter1::class,
       'type' => \TType::STRING,
+      'is_binary' => true,
     ),
     9 => shape(
       'var' => 'longField',
@@ -3174,7 +3176,7 @@ class Config implements \IThriftSyncStruct, \IThriftShapishSyncStruct {
         '\thrift\annotation\python\Adapter' => \thrift\annotation\python\Adapter::fromShape(
           shape(
             "name" => "my.ConfigAdapter",
-            "typeHint" => "my.ConfiguredVar",
+            "typeHint" => "my.ConfiguredVar[]",
           )
         ),
         '\thrift\annotation\Transitive' => \thrift\annotation\Transitive::fromShape(

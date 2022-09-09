@@ -183,13 +183,13 @@ class RPCClientConformanceTest : public testing::Test {
  public:
   RPCClientConformanceTest(
       std::string_view clientCmd,
-      const TestSuite* suite,
-      const conformance::Test* test,
-      const TestCase* testCase,
+      const TestSuite& suite,
+      const conformance::Test& test,
+      const TestCase& testCase,
       bool conforming)
-      : suite_(*suite),
-        test_(*test),
-        testCase_(*testCase),
+      : suite_(suite),
+        test_(test),
+        testCase_(testCase),
         conforming_(conforming),
         handler_(std::make_shared<ConformanceVerificationServer>(
             *testCase_.rpc_ref())),
@@ -253,13 +253,17 @@ class RPCClientConformanceTest : public testing::Test {
 
     auto& expectedClientResult = *testCase_.rpc_ref()->clientTestResult();
     if (!equal(*actualClientResult, expectedClientResult)) {
-      return testing::AssertionFailure();
+      return testing::AssertionFailure()
+          << "\nExpected client result: " << jsonify(expectedClientResult)
+          << "\nActual client result: " << jsonify(*actualClientResult);
     }
 
     auto& actualServerResult = handler_->serverResult();
     auto& expectedServerResult = *testCase_.rpc_ref()->serverTestResult();
     if (actualServerResult != expectedServerResult) {
-      return testing::AssertionFailure();
+      return testing::AssertionFailure()
+          << "\nExpected server result: " << jsonify(expectedServerResult)
+          << "\nActual server result: " << jsonify(actualServerResult);
     }
 
     return testing::AssertionSuccess();
@@ -276,15 +280,15 @@ class RPCClientConformanceTest : public testing::Test {
 
 void registerTests(
     std::string_view category,
-    const TestSuite* suite,
+    const TestSuite& suite,
     const std::set<std::string>& nonconforming,
     std::string_view clientCmd,
     const char* file,
     int line) {
-  for (const auto& test : *suite->tests()) {
+  for (const auto& test : *suite.tests()) {
     for (const auto& testCase : *test.testCases()) {
       std::string suiteName =
-          fmt::format("{}/{}/{}", category, *suite->name(), *testCase.name());
+          fmt::format("{}/{}/{}", category, *suite.name(), *testCase.name());
       std::string fullName = fmt::format("{}.{}", suiteName, *test.name());
       bool conforming = nonconforming.find(fullName) == nonconforming.end();
       registerTest(
@@ -294,9 +298,9 @@ void registerTests(
           conforming ? nullptr : "nonconforming",
           file,
           line,
-          [&test, &testCase, suite, clientCmd, conforming]() {
+          [clientCmd, &suite, &test, &testCase, conforming]() {
             return new RPCClientConformanceTest(
-                clientCmd, suite, &test, &testCase, conforming);
+                clientCmd, suite, test, testCase, conforming);
           });
     }
   }

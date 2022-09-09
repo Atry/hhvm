@@ -448,9 +448,12 @@ let produce_results
     let add entity acc =
       match entity with
       | Literal pos
-      | Inter (HT.Param (_, _, pos)) ->
+      | Inter (HT.Param ((pos, _), _)) ->
         Pos.Set.add pos acc
-      | Variable _ -> acc
+      | Variable _
+      | Inter (HT.Constant _)
+      | Inter (HT.Identifier _) ->
+        acc
     in
     EntitySet.fold add dynamic_accesses Pos.Set.empty
   in
@@ -466,7 +469,8 @@ let produce_results
         | Parameter -> false
         | Debug
         | Return
-        | Allocation ->
+        | Allocation
+        | Constant ->
           true)
       static_shape_results
   in
@@ -482,7 +486,9 @@ let produce_results
     let add_entity (entity, key, ty) pos_map =
       match entity with
       | Literal pos
-      | Inter (HT.Param (_, _, pos)) ->
+      | Inter (HT.Param ((pos, _), _))
+      | Inter (HT.Constant (pos, _))
+      | Inter (HT.Identifier (pos, _)) ->
         Pos.Map.update pos (update_entity entity key ty) pos_map
       | Variable _ -> pos_map
     in
@@ -495,7 +501,7 @@ let produce_results
     |> add_known_keys definitely_has_static_accesses ~is_optional:false
   in
 
-  let backward_satic_shape_results =
+  let backward_static_shape_results =
     let add_known_keys = add_known_keys in
     backward_static_shape_results
     |> add_known_keys maybe_needs_static_accesses ~is_optional:true
@@ -503,7 +509,7 @@ let produce_results
   in
 
   let static_shape_results =
-    Pos.Map.union forward_static_shape_results backward_satic_shape_results
+    Pos.Map.union forward_static_shape_results backward_static_shape_results
   in
 
   (* Convert to individual statically accessed dict results *)
@@ -515,43 +521,90 @@ let produce_results
   in
 
   let dynamic_shape_results =
-    markers
-    |> List.map ~f:(fun (_, pos) -> Literal pos)
-    |> EntitySet.of_list
-    |> EntitySet.inter dynamic_accesses
+    dynamic_accesses
+    |> EntitySet.filter (function
+           | Variable _ -> false
+           | _ -> true)
     |> EntitySet.elements
     |> List.map ~f:(fun entity_ -> Dynamically_accessed_dict entity_)
   in
 
   static_shape_results @ dynamic_shape_results
 
-let is_same_entity (param_ent_1 : HT.entity) (ent : entity_) : bool =
-  match ent with
-  | Literal _
-  | Variable _ ->
-    false
-  | Inter param_ent_2 -> HT.equal_entity param_ent_1 param_ent_2
+let embed_entity (ent : HT.entity) : entity_ = Inter ent
 
 let substitute_inter_intra
-    (inter_constr : inter_constraint_) (intra_constr : constraint_) :
-    constraint_ =
+    replace (inter_constr : inter_constraint_) (intra_constr : constraint_) :
+    constraint_ option =
+  let replace_intra intra_constr replace forwards =
+    match intra_constr with
+    | Marks _
+    | Subsets (_, _) ->
+      None
+    | Static_key (variety, certainty, intra_ent_2, key, ty) ->
+      let (variety, certainty) =
+        if forwards then
+          (Needs, Maybe)
+        else
+          (variety, certainty)
+      in
+      Option.map
+        ~f:(fun x -> Static_key (variety, certainty, x, key, ty))
+        (replace intra_ent_2)
+    | Has_dynamic_key intra_ent_2 ->
+      Option.map ~f:(fun x -> Has_dynamic_key x) (replace intra_ent_2)
+  in
   match inter_constr with
   | HT.Arg (param_ent, intra_ent_1) ->
-    let replace intra_ent_2 =
-      if is_same_entity (HT.Param param_ent) intra_ent_2 then
-        intra_ent_1
-      else
-        intra_ent_2
+    let (replace_, forwards) =
+      match replace with
+      | `Backwards replace_ -> (replace_, false)
+      | `Forwards replace_ -> (replace_, true)
     in
-    begin
-      match intra_constr with
-      | Marks _ -> intra_constr
-      | Static_key (variety, source, intra_ent_2, key, ty) ->
-        Static_key (variety, source, replace intra_ent_2, key, ty)
-      | Has_dynamic_key intra_ent_2 -> Has_dynamic_key (replace intra_ent_2)
-      | Subsets (intra_ent_2, intra_ent_3) ->
-        Subsets (replace intra_ent_2, replace intra_ent_3)
-    end
+    let replace intra_ent_2 = replace_ param_ent intra_ent_1 intra_ent_2 in
+    replace_intra intra_constr replace forwards
+  | HT.ConstantInitial ent ->
+    let replace intra_ent_2 =
+      if equal_entity_ ent intra_ent_2 then
+        Some ent
+      else
+        None
+    in
+    replace_intra intra_constr replace false
+  | HT.Identifier ident_ent ->
+    let ent = embed_entity (HT.Identifier ident_ent) in
+    let replace intra_ent_2 =
+      if equal_entity_ ent intra_ent_2 then
+        Some ent
+      else
+        None
+    in
+    replace_intra intra_constr replace false
+  | _ -> Some intra_constr
+
+let replace_backwards
+    (param_ent : HT.param_entity)
+    (intra_ent_1 : entity_)
+    (intra_ent_2 : entity_) : entity =
+  if equal_entity_ (Inter (HT.Param param_ent)) intra_ent_2 then
+    Some intra_ent_1
+  else
+    None
+
+let replace_forwards
+    (param_ent : HT.param_entity)
+    (intra_ent_1 : entity_)
+    (intra_ent_2 : entity_) : entity =
+  if equal_entity_ intra_ent_1 intra_ent_2 then
+    Some (embed_entity (HT.Param param_ent))
+  else
+    None
+
+let substitute_inter_intra_backwards =
+  substitute_inter_intra (`Backwards replace_backwards)
+
+let substitute_inter_intra_forwards =
+  substitute_inter_intra (`Forwards replace_forwards)
 
 let equiv
     (any_constr_list_1 : any_constraint list)
@@ -576,3 +629,6 @@ let equiv
        (List.filter_map ~f:only_intra_constr any_constr_list_1))
     (ConstraintSet.of_list
        (List.filter_map ~f:only_intra_constr any_constr_list_2))
+
+let subsets (ent1 : entity_) (ent2 : entity_) : constraint_ =
+  Subsets (ent1, ent2)

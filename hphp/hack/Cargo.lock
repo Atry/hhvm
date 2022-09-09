@@ -1709,7 +1709,9 @@ dependencies = [
 name = "hhbc-gen"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
  "bitflags",
+ "cc",
  "maplit",
  "once_cell",
 ]
@@ -1847,7 +1849,6 @@ name = "ir_core"
 version = "0.0.0"
 dependencies = [
  "bstr",
- "bumpalo",
  "ffi",
  "hash",
  "hhbc",
@@ -1865,6 +1866,7 @@ name = "ir_to_bc"
 version = "0.0.0"
 dependencies = [
  "bumpalo",
+ "dashmap",
  "ffi",
  "hash",
  "hhbc",
@@ -2357,6 +2359,8 @@ dependencies = [
 name = "ocamlrep_derive"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "macro_test_util",
  "proc-macro2",
  "quote",
  "syn",
@@ -2369,6 +2373,15 @@ version = "0.0.0"
 dependencies = [
  "libc",
  "ocamlrep",
+]
+
+[[package]]
+name = "ocamlrep_marshal_ffi_bindings"
+version = "0.0.0"
+dependencies = [
+ "libc",
+ "ocamlrep",
+ "ocamlrep_marshal",
 ]
 
 [[package]]
@@ -2591,7 +2604,6 @@ name = "passes"
 version = "0.0.0"
 dependencies = [
  "analysis",
- "bumpalo",
  "hash",
  "ir_core",
  "itertools 0.10.3",

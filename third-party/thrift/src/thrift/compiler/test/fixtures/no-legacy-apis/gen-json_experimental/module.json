@@ -1,6 +1,9 @@
 {
   "__fbthrift": "@generated",
   "thrift_module" : "module",
+  "includes": {
+    "thrift": "thrift/annotation/thrift.thrift"
+  },
   "namespaces": {
     "android": "test.fixtures.basic",
     "cpp2": "test.fixtures.basic",
@@ -82,7 +85,7 @@
       },
   "services" :
   {
-      "MyService" : {
+      "MyService" : { 
         "name" : "MyService",
         "lineno" : 43,
         "functions" : {

@@ -133,8 +133,8 @@ type module_reference =
 
 type module_def_type = {
   mdt_pos: Pos_or_decl.t;
-  mdt_exports: module_reference list;
-  mdt_imports: module_reference list;
+  mdt_exports: module_reference list option;
+  mdt_imports: module_reference list option;
 }
 [@@deriving show]
 
@@ -210,7 +210,7 @@ and enum_type = {
 type typedef_type = {
   td_module: Ast_defs.id option;
   td_pos: Pos_or_decl.t;
-  td_vis: Aast.typedef_visibility;
+  td_vis: Ast_defs.typedef_visibility;
   td_tparams: decl_tparam list;
   td_constraint: decl_ty option;
   td_type: decl_ty;

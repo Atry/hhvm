@@ -459,7 +459,7 @@ TEST_F(PatchTest, List) {
   }
   {
     auto expected = *value.listValue_ref();
-    expected.push_back(asValueStruct<type::binary_t>("best"));
+    expected.insert(expected.begin(), asValueStruct<type::binary_t>("best"));
     Object patchObj = makePatch(
         op::PatchOp::Add,
         asValueStruct<type::set<type::binary_t>>(std::set{"best"}));
@@ -1115,6 +1115,30 @@ TEST_F(PatchTest, ExtractMaskFromPatchNested) {
       EXPECT_EQ(value, expectedMask);
     }
   }
+}
+
+TEST_F(PatchTest, ExtractMaskFromPatchEdgeCase) {
+  // patch = Patch{1: Put{true}}
+  Value boolPatch;
+  boolPatch.objectValue_ref() =
+      makePatch(op::PatchOp::Put, asValueStruct<type::bool_t>(true));
+  Value objPatch;
+  objPatch.objectValue_ref().ensure()[FieldId{1}] = boolPatch;
+  Object patchObj = makePatch(op::PatchOp::Patch, objPatch);
+  // Add noops (this should not make the extractedMask allMask).
+  patchObj = patchAddOperation(
+      std::move(patchObj),
+      op::PatchOp::Clear,
+      asValueStruct<type::bool_t>(false));
+  patchObj = patchAddOperation(
+      std::move(patchObj), op::PatchOp::Add, asValueStruct<type::i32_t>(0));
+  patchObj = patchAddOperation(
+      std::move(patchObj),
+      op::PatchOp::Put,
+      asValueStruct<type::set<type::i32_t>>(std::set<int>{}));
+  Mask expectedMask;
+  expectedMask.includes_ref().emplace()[1] = allMask();
+  EXPECT_EQ(extractMaskFromPatch(patchObj), expectedMask);
 }
 
 TEST_F(PatchTest, ApplyPatchToSerializedData) {

@@ -83,6 +83,7 @@ type marker_kind =
   | Debug
       (** A dict argument to a function or method such as `$d = dict[]; f($d)`
        *)
+  | Constant  (** A dict constant such as `const dict<string, mixed> DICT` *)
 [@@deriving ord, show]
 
 module Codemod : sig
@@ -179,3 +180,5 @@ module ConstraintSet : Caml.Set.S with type elt = constraint_
 type event = string * (shape_result, Error.t) Either.t
 
 type any_constraint = (constraint_, inter_constraint_) HT.any_constraint_
+
+val compare_any_constraint : any_constraint -> any_constraint -> int

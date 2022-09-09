@@ -15,10 +15,17 @@
  */
 
 #include <thrift/conformance/GTestHarness.h>
+#include <thrift/conformance/PluggableFunctions.h>
 #include <thrift/conformance/Utils.h>
 #include <thrift/conformance/if/gen-cpp2/RPCConformanceServiceAsyncClient.h>
 
 namespace apache::thrift::conformance {
+
+template <>
+std::unique_ptr<Client<RPCConformanceService>>
+createClient<Client<RPCConformanceService>>(std::string service_name) {
+  return create_rpc_conformance_service_client_(service_name);
+}
 
 // Register the tests with gtest.
 THRIFT_CONFORMANCE_TEST(

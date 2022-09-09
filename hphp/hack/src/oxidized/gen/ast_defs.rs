@@ -3,7 +3,7 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 //
-// @generated SignedSource<<2ee3ca66784f5d4dee9fc138b1270890>>
+// @generated SignedSource<<a2d5c262affb20acb440bc2460e1460e>>
 //
 // To regenerate this file, run:
 //   hphp/hack/src/oxidized_regen.sh
@@ -460,39 +460,6 @@ arena_deserializer::impl_deserialize_in_arena!(Uop);
     Serialize,
     ToOcamlRep
 )]
-#[rust_to_ocaml(attr = r#"deriving ((show { with_path = false }), eq, ord,
-    (visitors
-       {
-         name = "iter_defs";
-         variety = "iter";
-         nude = true;
-         visit_prefix = "on_";
-         ancestors = ["iter_defs_base"]
-       }),
-    (visitors
-       {
-         name = "endo_defs";
-         variety = "endo";
-         nude = true;
-         visit_prefix = "on_";
-         ancestors = ["endo_defs_base"]
-       }),
-    (visitors
-       {
-         name = "reduce_defs";
-         variety = "reduce";
-         nude = true;
-         visit_prefix = "on_";
-         ancestors = ["reduce_defs_base"]
-       }),
-    (visitors
-       {
-         name = "map_defs";
-         variety = "map";
-         nude = true;
-         visit_prefix = "on_";
-         ancestors = ["map_defs_base"]
-       }))"#)]
 #[repr(u8)]
 pub enum Visibility {
     #[rust_to_ocaml(attr = r#"visitors.name "visibility_Private""#)]
@@ -528,7 +495,6 @@ arena_deserializer::impl_deserialize_in_arena!(Visibility);
     Serialize,
     ToOcamlRep
 )]
-#[rust_to_ocaml(attr = "deriving (eq, show)")]
 #[repr(C, u8)]
 pub enum XhpEnumValue {
     #[rust_to_ocaml(name = "XEV_Int")]
@@ -536,3 +502,124 @@ pub enum XhpEnumValue {
     #[rust_to_ocaml(name = "XEV_String")]
     XEVString(String),
 }
+
+/// Hack's primitive types (as the typechecker understands them).
+///
+/// Used in the AST of typehints (Aast_defs.Hprim) and in the representation of
+/// types (Typing_defs.Tprim).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    EqModuloPos,
+    EqModuloPosAndReason,
+    FromOcamlRep,
+    FromOcamlRepIn,
+    Hash,
+    NoPosHash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    ToOcamlRep
+)]
+#[repr(u8)]
+pub enum Tprim {
+    Tnull,
+    Tvoid,
+    Tint,
+    Tbool,
+    Tfloat,
+    Tstring,
+    Tresource,
+    Tnum,
+    Tarraykey,
+    Tnoreturn,
+}
+impl TrivialDrop for Tprim {}
+arena_deserializer::impl_deserialize_in_arena!(Tprim);
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    EqModuloPos,
+    EqModuloPosAndReason,
+    FromOcamlRep,
+    FromOcamlRepIn,
+    Hash,
+    NoPosHash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    ToOcamlRep
+)]
+#[repr(u8)]
+pub enum TypedefVisibility {
+    Transparent,
+    Opaque,
+    OpaqueModule,
+}
+impl TrivialDrop for TypedefVisibility {}
+arena_deserializer::impl_deserialize_in_arena!(TypedefVisibility);
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Deserialize,
+    Eq,
+    EqModuloPos,
+    EqModuloPosAndReason,
+    FromOcamlRep,
+    FromOcamlRepIn,
+    Hash,
+    NoPosHash,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    ToOcamlRep
+)]
+#[rust_to_ocaml(attr = r#"deriving ((show { with_path = false }), eq, ord,
+    (visitors
+       {
+         variety = "iter";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["Visitors_runtime.iter_base"]
+       }),
+    (visitors
+       {
+         variety = "endo";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["Visitors_runtime.endo_base"]
+       }),
+    (visitors
+       {
+         variety = "reduce";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["Visitors_runtime.reduce_base"]
+       }),
+    (visitors
+       {
+         variety = "map";
+         nude = true;
+         visit_prefix = "on_";
+         ancestors = ["Visitors_runtime.map_base"]
+       }))"#)]
+#[repr(u8)]
+pub enum ReifyKind {
+    Erased,
+    SoftReified,
+    Reified,
+}
+impl TrivialDrop for ReifyKind {}
+arena_deserializer::impl_deserialize_in_arena!(ReifyKind);

@@ -185,6 +185,10 @@ bool should_mangle_field_storage_name_in_struct(const t_struct& s) {
   return !s.has_annotation({"cpp.methods", "cpp2.methods"});
 }
 
+bool resolves_to_container_or_struct(const t_type* type) {
+  return type->is_container() || type->is_struct() || type->is_xception();
+}
+
 class cpp2_generator_context {
  public:
   static cpp2_generator_context create() { return cpp2_generator_context(); }
@@ -879,8 +883,8 @@ class cpp_mstch_type : public mstch_type {
   }
   mstch::node resolves_to_container() { return resolved_type_->is_container(); }
   mstch::node resolves_to_container_or_struct() {
-    return resolved_type_->is_container() || resolved_type_->is_struct() ||
-        resolved_type_->is_xception();
+    return ::apache::thrift::compiler::resolves_to_container_or_struct(
+        resolved_type_);
   }
   mstch::node resolves_to_container_or_enum() {
     return resolved_type_->is_container() || resolved_type_->is_enum();
@@ -2057,6 +2061,7 @@ class cpp_mstch_const : public mstch_const {
             {"constant:has_extra_arg?", &cpp_mstch_const::has_extra_arg},
             {"constant:extra_arg", &cpp_mstch_const::extra_arg},
             {"constant:extra_arg_type", &cpp_mstch_const::extra_arg_type},
+            {"constant:outline_init?", &cpp_mstch_const::outline_init},
         });
   }
   mstch::node enum_value() {
@@ -2074,9 +2079,6 @@ class cpp_mstch_const : public mstch_const {
   }
   mstch::node cpp_name() { return cpp2::get_name(field_); }
   mstch::node cpp_adapter() {
-    if (!const_) {
-      return false;
-    }
     if (const std::string* adapter =
             cpp_context_->resolver().find_structured_adapter_annotation(
                 *const_)) {
@@ -2102,6 +2104,12 @@ class cpp_mstch_const : public mstch_const {
     return std::shared_ptr<mstch_base>(std::make_shared<cpp_mstch_type>(
         &*anno->type(), context_, pos_, cpp_context_));
   }
+  mstch::node outline_init() {
+    return resolves_to_container_or_struct(
+               const_->get_type()->get_true_type()) ||
+        cpp_context_->resolver().find_structured_adapter_annotation(*const_) ||
+        cpp_context_->resolver().find_first_adapter(*const_->get_type());
+  }
 
  private:
   std::shared_ptr<cpp2_generator_context> cpp_context_;
@@ -2109,9 +2117,28 @@ class cpp_mstch_const : public mstch_const {
 
 class cpp_mstch_const_value : public mstch_const_value {
  public:
-  using mstch_const_value::mstch_const_value;
+  cpp_mstch_const_value(
+      const t_const_value* cv,
+      mstch_context& ctx,
+      mstch_element_position pos,
+      const t_const* current_const,
+      const t_type* expected_type)
+      : mstch_const_value(cv, ctx, pos, current_const, expected_type) {
+    register_methods(
+        this,
+        {
+            {"value:default_construct?",
+             &cpp_mstch_const_value::default_construct},
+        });
+  }
 
  private:
+  mstch::node default_construct() {
+    return boost::get<bool>(is_empty_container()) &&
+        !gen::cpp::type_resolver::find_first_adapter(
+               *const_value_->get_owner()->type());
+  }
+
   bool same_type_as_expected() const override {
     return const_value_->get_owner() &&
         same_types(expected_type_, const_value_->get_owner()->get_type());

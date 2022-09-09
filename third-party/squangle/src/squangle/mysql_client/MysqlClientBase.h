@@ -103,7 +103,7 @@ class MysqlClientBase {
       std::unique_ptr<db::DBCounterBase> db_stats =
           std::make_unique<db::SimpleDbCounter>());
 
-  virtual bool runInThread(folly::Cob&& fn) = 0;
+  virtual bool runInThread(folly::Cob&& fn, bool wait = false) = 0;
 
   virtual uint32_t numStartedAndOpenConnections() {
     return 0;
@@ -118,14 +118,17 @@ class MysqlClientBase {
   friend class Connection;
   friend class Operation;
   friend class ConnectOperation;
+  template <typename Class>
   friend class ConnectPoolOperation;
+  template <typename Class>
+  friend class ConnectionPool;
   friend class FetchOperation;
   friend class SpecialOperation;
   friend class ResetOperation;
   friend class ChangeUserOperation;
   friend class MysqlConnectionHolder;
   friend class AsyncConnection;
-  friend class AsyncConnectionPool;
+  friend class SyncConnection;
   virtual db::SquangleLoggingData makeSquangleLoggingData(
       const ConnectionKey* connKey,
       const db::ConnectionContextBase* connContext) = 0;

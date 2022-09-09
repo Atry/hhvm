@@ -153,17 +153,35 @@ class AsyncProcessorFactory {
           rpcKind(kind),
           priority(prio) {}
 
+    MethodMetadata(const MethodMetadata& other)
+        : executorType(other.executorType),
+          interactionType(other.interactionType),
+          rpcKind(other.rpcKind),
+          priority(other.priority) {}
+
     virtual ~MethodMetadata() = default;
 
     bool isWildcard() const {
-      // This dynamic_cast is cheap because WildcardMethodMetadata is final.
-      return dynamic_cast<const WildcardMethodMetadata*>(this);
+      if (auto status = isWildcard_.load(); status != WildcardStatus::UNKNOWN) {
+        return status == WildcardStatus::YES;
+      }
+      auto status = dynamic_cast<const WildcardMethodMetadata*>(this)
+          ? WildcardStatus::YES
+          : WildcardStatus::NO;
+      auto expected = WildcardStatus::UNKNOWN;
+      isWildcard_.compare_exchange_strong(expected, status);
+      return status == WildcardStatus::YES;
     }
 
     const ExecutorType executorType{ExecutorType::UNKNOWN};
     const InteractionType interactionType{InteractionType::UNKNOWN};
     const std::optional<RpcKind> rpcKind{};
     const std::optional<concurrency::PRIORITY> priority{};
+
+   private:
+    enum class WildcardStatus : std::uint8_t { UNKNOWN, NO, YES };
+    mutable folly::relaxed_atomic<WildcardStatus> isWildcard_{
+        WildcardStatus::UNKNOWN};
   };
 
   /**
@@ -297,7 +315,7 @@ using SelectPoolResult = std::variant<
  * functions here are called on the IO thread.
  *
  * While this is a customization point, its API is not stable. Most services use
- * GeneratedAsyncProcessor, which handles scheduling of methods on to the
+ * GeneratedAsyncProcessorBase, which handles scheduling of methods on to the
  * ThreadManager (tm) or executing inline (eb).
  */
 class AsyncProcessor : public TProcessorBase {
@@ -577,7 +595,7 @@ class ServerRequestHelper : public ServerRequest {
 
 class ServerInterface;
 
-class GeneratedAsyncProcessor : public AsyncProcessor {
+class GeneratedAsyncProcessorBase : public AsyncProcessor {
  public:
   template <typename Derived>
   using ProcessFunc = void (Derived::*)(
@@ -762,7 +780,7 @@ class RequestTask final : public EventTask {
       Cpp2RequestContext* ctx,
       bool oneway,
       ChildType* childClass,
-      GeneratedAsyncProcessor::ExecuteFunc<ChildType> executeFunc)
+      GeneratedAsyncProcessorBase::ExecuteFunc<ChildType> executeFunc)
       : EventTask(
             std::move(req),
             std::move(serializedRequest),
@@ -776,7 +794,7 @@ class RequestTask final : public EventTask {
 
  private:
   ChildType* childClass_;
-  GeneratedAsyncProcessor::ExecuteFunc<ChildType> executeFunc_;
+  GeneratedAsyncProcessorBase::ExecuteFunc<ChildType> executeFunc_;
 };
 
 /**
@@ -1023,7 +1041,7 @@ class ServerInterface : public virtual AsyncProcessorFactory,
   struct GeneratedMethodMetadata final
       : public AsyncProcessorFactory::MethodMetadata {
     GeneratedMethodMetadata(
-        GeneratedAsyncProcessor::ProcessFuncs<Processor> funcs,
+        GeneratedAsyncProcessorBase::ProcessFuncs<Processor> funcs,
         ExecutorType executor,
         InteractionType interaction,
         RpcKind rpcKind,
@@ -1031,7 +1049,7 @@ class ServerInterface : public virtual AsyncProcessorFactory,
         : MethodMetadata(executor, interaction, rpcKind, priority),
           processFuncs(funcs) {}
 
-    GeneratedAsyncProcessor::ProcessFuncs<Processor> processFuncs;
+    GeneratedAsyncProcessorBase::ProcessFuncs<Processor> processFuncs;
   };
 
  protected:
@@ -1434,7 +1452,7 @@ class HandlerCallback<TileAndResponse<InteractionIf, Response>> final
 ////
 
 template <typename ProtocolIn, typename Args>
-void GeneratedAsyncProcessor::deserializeRequest(
+void GeneratedAsyncProcessorBase::deserializeRequest(
     Args& args,
     folly::StringPiece methodName,
     const SerializedRequest& serializedRequest,
@@ -1467,7 +1485,7 @@ void GeneratedAsyncProcessor::deserializeRequest(
 }
 
 template <typename ProtocolIn, typename Args>
-void GeneratedAsyncProcessor::simpleDeserializeRequest(
+void GeneratedAsyncProcessorBase::simpleDeserializeRequest(
     Args& args, const SerializedRequest& serializedRequest) {
   ProtocolIn iprot;
   iprot.setInput(serializedRequest.buffer.get());
@@ -1483,7 +1501,7 @@ void GeneratedAsyncProcessor::simpleDeserializeRequest(
 }
 
 template <typename Response, typename ProtocolOut, typename Result>
-Response GeneratedAsyncProcessor::serializeResponseImpl(
+Response GeneratedAsyncProcessorBase::serializeResponseImpl(
     const char* method,
     ProtocolOut* prot,
     int32_t protoSeqId,
@@ -1540,7 +1558,7 @@ Response GeneratedAsyncProcessor::serializeResponseImpl(
 }
 
 template <typename ProtocolOut, typename Result>
-LegacySerializedResponse GeneratedAsyncProcessor::serializeLegacyResponse(
+LegacySerializedResponse GeneratedAsyncProcessorBase::serializeLegacyResponse(
     const char* method,
     ProtocolOut* prot,
     int32_t protoSeqId,
@@ -1551,14 +1569,14 @@ LegacySerializedResponse GeneratedAsyncProcessor::serializeLegacyResponse(
 }
 
 template <typename ProtocolOut, typename Result>
-SerializedResponse GeneratedAsyncProcessor::serializeResponse(
+SerializedResponse GeneratedAsyncProcessorBase::serializeResponse(
     ProtocolOut* prot, ContextStack* ctx, const Result& result) {
   return serializeResponseImpl<SerializedResponse>("", prot, 0, ctx, result);
 }
 
 template <typename ChildType>
 std::unique_ptr<concurrency::Runnable>
-GeneratedAsyncProcessor::makeEventTaskForRequest(
+GeneratedAsyncProcessorBase::makeEventTaskForRequest(
     ResponseChannelRequest::UniquePtr req,
     SerializedCompressedRequest&& serializedRequest,
     Cpp2RequestContext* ctx,
@@ -1586,7 +1604,7 @@ GeneratedAsyncProcessor::makeEventTaskForRequest(
 }
 
 template <typename ChildType>
-void GeneratedAsyncProcessor::processInThread(
+void GeneratedAsyncProcessorBase::processInThread(
     ResponseChannelRequest::UniquePtr req,
     SerializedCompressedRequest&& serializedRequest,
     Cpp2RequestContext* ctx,

@@ -3072,7 +3072,7 @@ void in(ISS& env, const bc::CheckClsReifiedGenericMismatch& op) {
 void in(ISS& env, const bc::ClassHasReifiedGenerics& op) {
   // TODO(T121050961) Optimize for lazy classes too
   auto const cls = popC(env);
-  if (!cls.couldBe(BCls)) {
+  if (!cls.couldBe(BCls | BLazyCls)) {
     unreachable(env);
     return push(env, TBottom);
   }
@@ -3122,7 +3122,7 @@ void in(ISS& env, const bc::GetClsRGProp& op) {
 void in(ISS& env, const bc::HasReifiedParent& op) {
   // TODO(T121050961) Optimize for lazy classes too
   auto const cls = popC(env);
-  if (!cls.couldBe(BCls)) {
+  if (!cls.couldBe(BCls | BLazyCls)) {
     unreachable(env);
     return push(env, TBottom);
   }
@@ -4259,9 +4259,8 @@ void in(ISS& env, const bc::ResolveClass& op) {
     effect_free(env);
     push(env, clsExact(*cls));
   } else {
-    // No non-unique classes in repo mode.
-    unreachable(env);
-    push(env, TBottom);
+    // If the class is not resolved, it might not be unique
+    push(env, TCls);
   }
 }
 
@@ -4441,6 +4440,21 @@ void in(ISS& env, const bc::FCallClsMethod& op) {
   fcallClsMethodImpl(env, op, clsTy, methName, true, 2, op.str2, updateBC);
 }
 
+namespace {
+
+bool module_check_always_passes(ISS& env, const php::Class* cls) {
+  if (!(cls->attrs & AttrInternal)) return true;
+  return env.index.lookup_func_unit(*env.ctx.func)->moduleName ==
+         env.index.lookup_class_unit(*cls)->moduleName;
+}
+
+bool module_check_always_passes(ISS& env, const res::Class& rcls) {
+  if (auto const cls = rcls.cls()) return module_check_always_passes(env, cls);
+  return false;
+}
+
+} // namespace
+
 void in(ISS& env, const bc::FCallClsMethodM& op) {
   auto const t = topC(env);
   if (!t.couldBe(BObj | BCls | BStr | BLazyCls)) {
@@ -4481,6 +4495,7 @@ void in(ISS& env, const bc::FCallClsMethodM& op) {
     !RuntimeOption::EvalLogKnownMethodsAsDynamicCalls &&
       op.subop3 == IsLogAsDynamicCallOp::DontLogAsDynamicCall;
   if (is_specialized_cls(clsTy) && dcls_of(clsTy).isExact() &&
+      module_check_always_passes(env, dcls_of(clsTy).cls()) &&
       (!rfunc.mightCareAboutDynCalls() ||
         !maybeDynamicCall ||
         skipLogAsDynamicCall
@@ -4531,9 +4546,7 @@ void fcallClsMethodSImpl(ISS& env, const Op& op, SString methName, bool dynamic,
   auto moduleCheck = [&] {
     auto const func = rfunc.exactFunc();
     assertx(func);
-    if (!(func->cls->attrs & AttrInternal)) return true;
-    return env.index.lookup_func_unit(*env.ctx.func)->moduleName ==
-           env.index.lookup_func_unit(*func)->moduleName;
+    return module_check_always_passes(env, func->cls);
   };
 
   if (rfunc.exactFunc() && op.str2->empty() && moduleCheck()) {
@@ -4613,7 +4626,6 @@ void newObjDImpl(ISS& env, const StringData* className, bool rflavor) {
 } // namespace
 
 void in(ISS& env, const bc::NewObjD& op)  { newObjDImpl(env, op.str1, false); }
-void in(ISS& env, const bc::NewObjRD& op) { newObjDImpl(env, op.str1, true);  }
 
 void in(ISS& env, const bc::NewObjS& op) {
   auto const cls = specialClsRefToCls(env, op.subop1);
@@ -4649,39 +4661,6 @@ void in(ISS& env, const bc::NewObj& op) {
     );
   }
 
-  popC(env);
-  push(env, toobj(cls));
-}
-
-void in(ISS& env, const bc::NewObjR& op) {
-  auto const generics = topC(env);
-  auto const cls = topC(env, 1);
-
-  if (generics.subtypeOf(BInitNull)) {
-    return reduce(
-      env,
-      bc::PopC {},
-      bc::NewObj {}
-    );
-  }
-
-  if (!cls.subtypeOf(BCls) || !is_specialized_cls(cls)) {
-    popC(env);
-    popC(env);
-    push(env, TObj);
-    return;
-  }
-
-  auto const& dcls = dcls_of(cls);
-  if (dcls.isExact() && !dcls.cls().couldHaveReifiedGenerics()) {
-    return reduce(
-      env,
-      bc::PopC {},
-      bc::NewObj {}
-    );
-  }
-
-  popC(env);
   popC(env);
   push(env, toobj(cls));
 }

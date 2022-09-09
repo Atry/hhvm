@@ -49,8 +49,16 @@ let show_constraint env =
   | Subsets (sub, sup) -> show_entity sub ^ " ⊆ " ^ show_entity sup
 
 let show_inter_constraint _ = function
-  | HT.Arg ((f_id, arg_idx, _), ent) ->
+  | HT.Arg (((_, f_id), arg_idx), ent) ->
     Format.asprintf "Arg(%s, %i, %s)" f_id arg_idx (show_entity ent)
+  | HT.Constant const ->
+    Format.asprintf "Constant %s" (HT.show_const_entity const)
+  | HT.ConstantInitial inst ->
+    Format.asprintf "Constant initialization at %s" (show_entity inst)
+  | HT.Identifier ident ->
+    Format.asprintf "Identifier %s" (HT.show_identifier_entity ident)
+  | HT.Param param ->
+    Format.asprintf "Parameter %s" (HT.show_param_entity param)
 
 let show_decorated_constraint_general
     ~verbosity

@@ -188,11 +188,138 @@ struct SerializedSize<true, type::binary_t> {
   }
 };
 
+template <typename T>
+struct SerializedSize<false, type::struct_t<T>> {
+  template <typename Protocol>
+  uint32_t operator()(Protocol& prot, const T& s) const {
+    return s.serializedSize(&prot);
+  }
+};
+
+template <typename T>
+struct SerializedSize<true, type::struct_t<T>> {
+  template <typename Protocol>
+  uint32_t operator()(Protocol& prot, const T& s) const {
+    return s.serializedSizeZC(&prot);
+  }
+};
+
+template <typename T>
+struct SerializedSize<false, type::union_t<T>> {
+  template <typename Protocol>
+  uint32_t operator()(Protocol& prot, const T& s) const {
+    return s.serializedSize(&prot);
+  }
+};
+
+template <typename T>
+struct SerializedSize<true, type::union_t<T>> {
+  template <typename Protocol>
+  uint32_t operator()(Protocol& prot, const T& s) const {
+    return s.serializedSizeZC(&prot);
+  }
+};
+
+template <typename T>
+struct SerializedSize<false, type::exception_t<T>> {
+  template <typename Protocol>
+  uint32_t operator()(Protocol& prot, const T& s) const {
+    return s.serializedSize(&prot);
+  }
+};
+
+template <typename T>
+struct SerializedSize<true, type::exception_t<T>> {
+  template <typename Protocol>
+  uint32_t operator()(Protocol& prot, const T& s) const {
+    return s.serializedSizeZC(&prot);
+  }
+};
+
 template <bool ZeroCopy, typename T>
 struct SerializedSize<ZeroCopy, type::enum_t<T>> {
   template <typename Protocol>
   uint32_t operator()(Protocol& prot, const T& s) const {
     return prot.serializedSizeI32(static_cast<int32_t>(s));
+  }
+};
+
+inline uint32_t checked_container_size(size_t size) {
+  const size_t limit = std::numeric_limits<int32_t>::max();
+  if (size > limit) {
+    TProtocolException::throwExceededSizeLimit(size, limit);
+  }
+  return static_cast<uint32_t>(size);
+}
+
+template <bool ZeroCopy, typename Tag>
+struct SerializedSize<ZeroCopy, type::list<Tag>> {
+  template <typename Protocol>
+  uint32_t operator()(
+      Protocol& prot, const type::native_type<type::list<Tag>>& list) const {
+    uint32_t xfer = 0;
+    xfer += prot.serializedSizeListBegin(
+        typeTagToTType<Tag>, checked_container_size(list.size()));
+    for (const auto& elem : list) {
+      xfer += SerializedSize<ZeroCopy, Tag>{}(prot, elem);
+    }
+    xfer += prot.serializedSizeListEnd();
+    return xfer;
+  }
+};
+
+template <bool ZeroCopy, typename Tag>
+struct SerializedSize<ZeroCopy, type::set<Tag>> {
+  template <typename Protocol>
+  uint32_t operator()(
+      Protocol& prot, const type::native_type<type::set<Tag>>& set) const {
+    uint32_t xfer = 0;
+    xfer += prot.serializedSizeSetBegin(
+        typeTagToTType<Tag>, checked_container_size(set.size()));
+    for (const auto& elem : set) {
+      xfer += SerializedSize<ZeroCopy, Tag>{}(prot, elem);
+    }
+    xfer += prot.serializedSizeSetEnd();
+    return xfer;
+  }
+};
+
+template <bool ZeroCopy, typename Key, typename Value>
+struct SerializedSize<ZeroCopy, type::map<Key, Value>> {
+  template <typename Protocol>
+  uint32_t operator()(
+      Protocol& prot,
+      const type::native_type<type::map<Key, Value>>& map) const {
+    uint32_t xfer = 0;
+    xfer += prot.serializedSizeMapBegin(
+        typeTagToTType<Key>,
+        typeTagToTType<Value>,
+        checked_container_size(map.size()));
+    for (const auto& kv : map) {
+      xfer += SerializedSize<ZeroCopy, Key>{}(prot, kv.first);
+      xfer += SerializedSize<ZeroCopy, Value>{}(prot, kv.second);
+    }
+    xfer += prot.serializedSizeMapEnd();
+    return xfer;
+  }
+};
+
+// TODO: Handle cpp_type with containers that cannot use static_cast.
+template <bool ZeroCopy, typename T, typename Tag>
+struct SerializedSize<ZeroCopy, type::cpp_type<T, Tag>> {
+  template <typename Protocol>
+  uint32_t operator()(Protocol& prot, const T& t) const {
+    return SerializedSize<ZeroCopy, Tag>{}(
+        prot, static_cast<type::native_type<Tag>>(t));
+  }
+};
+
+// TODO: Use serializedSize in adapter to optimize.
+template <bool ZeroCopy, typename Adapter, typename Tag>
+struct SerializedSize<ZeroCopy, type::adapted<Adapter, Tag>> {
+  template <typename Protocol, typename U>
+  uint32_t operator()(Protocol& prot, const U& m) const {
+    return SerializedSize<ZeroCopy, Tag>{}(prot, Adapter::toThrift(m));
   }
 };
 
@@ -309,8 +436,9 @@ struct Encode<type::list<Tag>> {
   template <typename Protocol>
   uint32_t operator()(
       Protocol& prot, const type::native_type<type::list<Tag>>& list) const {
-    std::size_t xfer = 0;
-    xfer += prot.writeListBegin(typeTagToTType<Tag>, list.size());
+    uint32_t xfer = 0;
+    xfer += prot.writeListBegin(
+        typeTagToTType<Tag>, checked_container_size(list.size()));
     for (const auto& elem : list) {
       xfer += Encode<Tag>{}(prot, elem);
     }
@@ -324,8 +452,9 @@ struct Encode<type::set<Tag>> {
   template <typename Protocol>
   uint32_t operator()(
       Protocol& prot, const type::native_type<type::set<Tag>>& set) const {
-    std::size_t xfer = 0;
-    xfer += prot.writeSetBegin(typeTagToTType<Tag>, set.size());
+    uint32_t xfer = 0;
+    xfer += prot.writeSetBegin(
+        typeTagToTType<Tag>, checked_container_size(set.size()));
     for (const auto& elem : set) {
       xfer += Encode<Tag>{}(prot, elem);
     }
@@ -340,9 +469,11 @@ struct Encode<type::map<Key, Value>> {
   uint32_t operator()(
       Protocol& prot,
       const type::native_type<type::map<Key, Value>>& map) const {
-    std::size_t xfer = 0;
+    uint32_t xfer = 0;
     xfer += prot.writeMapBegin(
-        typeTagToTType<Key>, typeTagToTType<Value>, map.size());
+        typeTagToTType<Key>,
+        typeTagToTType<Value>,
+        checked_container_size(map.size()));
     for (const auto& kv : map) {
       xfer += Encode<Key>{}(prot, kv.first);
       xfer += Encode<Value>{}(prot, kv.second);
@@ -579,6 +710,15 @@ struct Decode<type::adapted<Adapter, Tag>> {
     type::native_type<Tag> orig;
     Decode<Tag>{}(prot, orig);
     m = Adapter::fromThrift(std::move(orig));
+  }
+
+  template <typename FieldId, class Struct, class Protocol, class U>
+  void operator()(FieldId, Struct& strct, Protocol& prot, U& m) const {
+    type::native_type<Tag> orig;
+    Decode<Tag>{}(prot, orig);
+    m = adapt_detail::
+        fromThriftField<Adapter, folly::to_underlying(FieldId::value)>(
+            std::move(orig), strct);
   }
 };
 

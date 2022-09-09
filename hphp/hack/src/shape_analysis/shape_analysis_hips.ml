@@ -24,13 +24,21 @@ module Intra_shape :
 
   type any_constraint = ST.any_constraint
 
-  let is_same_entity = SS.is_same_entity
+  let is_same_entity = ST.equal_entity_
 
-  let max_iteration = 5
+  let embed_entity = SS.embed_entity
+
+  let max_iteration = 15
+
+  let compare_any_constraint = ST.compare_any_constraint
 
   let equiv = SS.equiv
 
-  let substitute_inter_intra = SS.substitute_inter_intra
+  let substitute_inter_intra_forwards = SS.substitute_inter_intra_forwards
+
+  let substitute_inter_intra_backwards = SS.substitute_inter_intra_backwards
 
   let deduce = SS.deduce
+
+  let subsets = SS.subsets
 end
