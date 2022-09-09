@@ -83,9 +83,20 @@ let
       (builtins.readFile ./hphp/runtime/version.h);
   makeVersion = major: minor: patch: suffix:
     if suffix == "-dev" then "${major}.${minor}.${patch}-dev${lastModifiedDate}" else "${major}.${minor}.${patch}";
+
   rustNightly = rustChannelOf {
-    sha256 = "TpJKRroEs7V2BTo2GFPJlEScYVArFY2MnGpYTxbnSo8=";
-    date = "2022-02-24";
+
+    # When the date attribute changes, sha256 should be updated accordingly.
+    #
+    # 1. Export your diff to GitHub;
+    # 2. Wait for an error message about sha256 mismatch from the GitHub
+    #    Actions;
+    # 3. Copy the new sha256 from the error message and paste it here;
+    # 4. Submit the diff and export the diff to GitHub, again.
+    # 5. Ensure no error message about sha256 mismatch from the GitHub Actions.
+    sha256 = "wVnIzrnpYGqiCBtc3k55tw4VW8YLA3WZY0mSac+2yl0=";
+
+    date = "2022-08-11";
     channel = "nightly";
   };
 in

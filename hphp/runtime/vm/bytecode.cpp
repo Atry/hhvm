@@ -813,7 +813,7 @@ uint32_t prepareUnpackArgs(const Func* func, uint32_t numArgs,
       // argArray was exhausted, so there are no "extra" arguments but there
       // may be a deficit of non-variadic arguments, and the need to push an
       // empty array for the variadic argument ... that work is left to
-      // prepareFuncEntry.
+      // initFuncInputs.
       assertx(numArgs + numUnpackArgs <= numParams);
       return numArgs + numUnpackArgs;
     }
@@ -965,24 +965,16 @@ void checkModuleBoundaryViolation(const Class* cls) {
 } // namespace
 
 static inline Class* lookupClsRef(TypedValue* input) {
-  Class* class_ = nullptr;
   if (isStringType(input->m_type) || isLazyClassType(input->m_type)) {
     auto const cname = isStringType(input->m_type) ?
       input->m_data.pstr : input->m_data.plazyclass.name();
-    class_ = Class::load(cname);
-    if (class_ == nullptr) {
-      raise_error(Strings::UNKNOWN_CLASS, cname->data());
-    }
-  } else if (input->m_type == KindOfObject) {
-    class_ = input->m_data.pobj->getVMClass();
-  } else if (isClassType(input->m_type)) {
-    class_ = input->m_data.pclass;
-  } else {
-    raise_error("Cls: Expected string or object, got %s",
-                describe_actual_type(input).c_str());
+    if (Class* class_ = Class::resolve(cname, vmfp()->func())) return class_;
+    raise_error(Strings::UNKNOWN_CLASS, cname->data());
   }
-  checkModuleBoundaryViolation(class_);
-  return class_;
+  if (input->m_type == KindOfObject) return input->m_data.pobj->getVMClass();
+  if (isClassType(input->m_type)) return input->m_data.pclass;
+  raise_error("Cls: Expected string or object, got %s",
+              describe_actual_type(input).c_str());
 }
 
 static UNUSED int innerCount(TypedValue tv) {
@@ -1820,10 +1812,6 @@ OPTBLD_INLINE void jmpSurpriseCheck(Offset offset) {
   }
 }
 
-OPTBLD_INLINE void iopEnter(PC& pc, PC targetpc) {
-  pc = targetpc;
-}
-
 OPTBLD_INLINE void iopJmp(PC& pc, PC targetpc) {
   jmpSurpriseCheck(targetpc - pc);
   pc = targetpc;
@@ -2158,6 +2146,20 @@ OPTBLD_INLINE JitResumeAddr iopRetM(PC& pc, uint32_t numRet) {
   return jitReturnPost(jitReturn);
 }
 
+OPTBLD_INLINE JitResumeAddr iopEnter(PC& pc, PC targetpc) {
+  auto const jitReturn = jitReturnPre(vmfp());
+  auto const intercepted = !EventHook::FunctionCall(
+    vmfp(), EventHook::NormalFunc, EventHook::Source::Interpreter);
+  if (intercepted) {
+    // The callee was intercepted, return to the caller.
+    pc = vmpc();
+    return jitReturnPost(jitReturn);
+  }
+
+  pc = targetpc;
+  return JitResumeAddr::none();
+}
+
 OPTBLD_INLINE void iopThrow(PC&) {
   TypedValue* c1 = vmStack().topC();
   if (c1->m_type != KindOfObject ||
@@ -2183,16 +2185,8 @@ OPTBLD_INLINE void iopRaiseClassStringConversionWarning() {
 OPTBLD_INLINE void iopResolveClass(Id id) {
   auto const cname = vmfp()->unit()->lookupLitstrId(id);
   auto const class_ = Class::resolve(cname, vmfp()->func());
-  // TODO (T61651936): Disallow implicit conversion to string
-  if (class_ == nullptr) {
-    if (RuntimeOption::EvalRaiseClassConversionWarning) {
-      raise_class_to_string_conversion_warning();
-    }
-    vmStack().pushStaticString(cname);
-  }
-  else {
-    vmStack().pushClass(class_);
-  }
+  if (class_) vmStack().pushClass(class_);
+  else raise_resolve_class_undefined(cname);
 }
 
 OPTBLD_INLINE void iopLazyClass(Id id) {
@@ -3462,6 +3456,9 @@ bool funcEntry() {
   initClosureLocals();
   initRegularLocals();
 
+  // DV initializers delay the function call event hook until the Enter opcode.
+  if (vmpc() != vmfp()->func()->entry()) return true;
+
   // If this returns false, the callee was intercepted and should be skipped.
   return EventHook::FunctionCall(
     vmfp(), EventHook::NormalFunc, EventHook::Source::Interpreter);
@@ -3725,8 +3722,8 @@ Func* resolveFuncImpl(Id id) {
   auto unit = vmfp()->func()->unit();
   auto const nep = unit->lookupNamedEntityPairId(id);
   auto func = Func::resolve(nep.second, nep.first, vmfp()->func());
-  if (func == nullptr) raise_resolve_undefined(unit->lookupLitstrId(id));
-  return func;
+  if (func) return func;
+  raise_resolve_func_undefined(unit->lookupLitstrId(id));
 }
 
 OPTBLD_INLINE void iopResolveFunc(Id id) {
@@ -4221,31 +4218,13 @@ iopFCallClsMethodSD(bool retToJit, PC origpc, PC& pc, FCallArgs fca,
 
 namespace {
 
-ObjectData* newObjImpl(Class* cls, ArrayData* reified_types) {
-  if (reified_types && cls->hasReifiedGenerics()) {
-    checkClassReifiedGenericMismatch(cls, reified_types);
-  }
+ObjectData* newObjImpl(Class* cls) {
   // Replace input with uninitialized instance.
-  auto this_ = reified_types
-    ? ObjectData::newInstanceReified<true>(cls, reified_types)
-    : ObjectData::newInstance<true>(cls);
+  auto this_ = ObjectData::newInstance<true>(cls);
   TRACE(2, "NewObj: just new'ed an instance of class %s: %p\n",
         cls->name()->data(), this_);
   profileArrLikePropsForInterp(this_);
   return this_;
-}
-
-void newObjDImpl(Id id, ArrayData* reified_types) {
-  const NamedEntityPair &nep =
-    vmfp()->func()->unit()->lookupNamedEntityPairId(id);
-  auto cls = Class::resolve(nep.second, nep.first, vmfp()->func());
-  if (cls == nullptr) {
-    raise_error(Strings::UNKNOWN_CLASS,
-                vmfp()->func()->unit()->lookupLitstrId(id)->data());
-  }
-  auto this_ = newObjImpl(cls, reified_types);
-  if (reified_types) vmStack().popC();
-  vmStack().pushObjectNoRc(this_);
 }
 
 } // namespace
@@ -4258,50 +4237,21 @@ OPTBLD_INLINE void iopNewObj() {
   auto const cls = clsCell->m_data.pclass;
 
   callerDynamicConstructChecks(cls);
-  auto this_ = newObjImpl(cls, nullptr);
-  vmStack().popC();
-  vmStack().pushObjectNoRc(this_);
-}
-
-OPTBLD_INLINE void iopNewObjR() {
-  auto const reifiedCell = vmStack().topC();
-  auto const clsCell = vmStack().indC(1);
-
-  if (!isClassType(clsCell->m_type)) {
-    raise_error("Attempting NewObjR with non-class");
-  }
-  auto const cls = clsCell->m_data.pclass;
-
-  auto const reified = [&] () -> ArrayData* {
-    if (reifiedCell->m_type == KindOfNull) return nullptr;
-    if (!tvIsVec(reifiedCell)) {
-      raise_error("Attempting NewObjR with invalid reified generics");
-    }
-    return reifiedCell->m_data.parr;
-  }();
-
-  callerDynamicConstructChecks(cls);
-  auto this_ = newObjImpl(cls, reified);
-  vmStack().popC();
+  auto this_ = newObjImpl(cls);
   vmStack().popC();
   vmStack().pushObjectNoRc(this_);
 }
 
 OPTBLD_INLINE void iopNewObjD(Id id) {
-  newObjDImpl(id, nullptr);
-}
-
-OPTBLD_INLINE void iopNewObjRD(Id id) {
-  auto const tsList = vmStack().topC();
-
-  auto const reified = [&] () -> ArrayData* {
-    if (tsList->m_type == KindOfNull) return nullptr;
-    if (!tvIsVec(tsList)) {
-      raise_error("Attempting NewObjRD with invalid reified generics");
-    }
-    return tsList->m_data.parr;
-  }();
-  newObjDImpl(id, reified);
+  const NamedEntityPair &nep =
+    vmfp()->func()->unit()->lookupNamedEntityPairId(id);
+  auto cls = Class::resolve(nep.second, nep.first, vmfp()->func());
+  if (cls == nullptr) {
+    raise_error(Strings::UNKNOWN_CLASS,
+                vmfp()->func()->unit()->lookupLitstrId(id)->data());
+  }
+  auto this_ = newObjImpl(cls);
+  vmStack().pushObjectNoRc(this_);
 }
 
 OPTBLD_INLINE void iopNewObjS(SpecialClsRef ref) {
@@ -4309,9 +4259,7 @@ OPTBLD_INLINE void iopNewObjS(SpecialClsRef ref) {
   if (ref == SpecialClsRef::LateBoundCls && cls->hasReifiedGenerics()) {
     raise_error(Strings::NEW_STATIC_ON_REIFIED_CLASS, cls->name()->data());
   }
-  auto const reified_generics = cls->hasReifiedGenerics()
-    ? getClsReifiedGenericsProp(cls, vmfp()->getThis()) : nullptr;
-  auto this_ = newObjImpl(cls, reified_generics);
+  auto this_ = newObjImpl(cls);
   vmStack().pushObjectNoRc(this_);
 }
 

@@ -6286,7 +6286,6 @@ function unsaved_bar(): string { return "hello"; }
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [{"title": "Restart hh_server"}],
                     "message": "Hack IDE: initializing.\nhh_server: stopped.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -6296,7 +6295,6 @@ function unsaved_bar(): string { return "hello"; }
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [],
                     "message": "Hack IDE: initializing.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -6306,7 +6304,6 @@ function unsaved_bar(): string { return "hello"; }
                 method="window/showStatus",
                 params={
                     "type": 3,
-                    "actions": [],
                     "message": "Hack IDE: ready.",
                     "shortMessage": "Hack: ready",
                 },
@@ -6314,7 +6311,6 @@ function unsaved_bar(): string { return "hello"; }
             .wait_for_server_request(
                 method="window/showStatus",
                 params={
-                    "actions": [{"title": "Restart hh_server"}],
                     "message": "Hack IDE: ready.\nhh_server: stopped.",
                     "shortMessage": "Hack: ready",
                     "type": 3,
@@ -6345,52 +6341,6 @@ function unsaved_bar(): string { return "hello"; }
             .request(
                 line=line(),
                 comment="hover after file_open will succeed",
-                method="textDocument/hover",
-                params={
-                    "textDocument": {"uri": "${php_file_uri}"},
-                    "position": {"line": 26, "character": 20},
-                },
-                result={
-                    "contents": [
-                        {"language": "hack", "value": "string"},
-                        {"language": "hack", "value": "Parameter: $s"},
-                    ]
-                },
-                powered_by="serverless_ide",
-            )
-            .request(
-                line=line(),
-                method="$test/shutdownServerlessIde",
-                params={},
-                result=None,
-                powered_by="serverless_ide",
-            )
-            .wait_for_server_request(
-                method="window/showStatus",
-                params={
-                    "actions": [
-                        {"title": "Restart Hack IDE"},
-                        {"title": "Restart hh_server"},
-                    ],
-                    "message": "Hack IDE has failed. See Output›Hack for details.\nhh_server: stopped.",
-                    "shortMessage": "Hack: failed",
-                    "type": 1,
-                },
-                result={"title": "Restart Hack IDE"},
-            )
-            .wait_for_server_request(
-                method="window/showStatus",
-                params={
-                    "actions": [{"title": "Restart hh_server"}],
-                    "message": "Hack IDE: ready.\nhh_server: stopped.",
-                    "shortMessage": "Hack: ready",
-                    "type": 3,
-                },
-                result=NoResponse(),
-            )
-            .request(
-                line=line(),
-                comment="hover after restart will succeed",
                 method="textDocument/hover",
                 params={
                     "textDocument": {"uri": "${php_file_uri}"},
@@ -6444,18 +6394,18 @@ function unsaved_bar(): string { return "hello"; }
                 method="textDocument/didOpen",
                 params={
                     "textDocument": {
-                        "uri": "${php_file_uri}",
+                        "uri": "${unsaved2_file_uri}",
                         "languageId": "hack",
                         "version": 1,
-                        "text": "${php_file}",
+                        "text": "${unsaved2_file}",
                     }
                 },
             )
             .wait_for_notification(
-                comment="After didOpen(file1), the hh_server_status diagnostic should appear in file1",
+                comment="After didOpen(file2), the hh_server_status diagnostic should appear in file1",
                 method="textDocument/publishDiagnostics",
                 params={
-                    "uri": "${php_file_uri}",
+                    "uri": "${unsaved2_file_uri}",
                     "diagnostics": [
                         {
                             "range": {
@@ -6476,49 +6426,15 @@ function unsaved_bar(): string { return "hello"; }
                 method="textDocument/didOpen",
                 params={
                     "textDocument": {
-                        "uri": "${unsaved2_file_uri}",
+                        "uri": "${php_file_uri}",
                         "languageId": "hack",
                         "version": 1,
-                        "text": "${unsaved2_file}",
+                        "text": "${php_file}",
                     }
                 },
             )
             .wait_for_notification(
-                comment="After didOpen(file2), the hh_server_status diagnostic should disappear from file1",
-                method="textDocument/publishDiagnostics",
-                params={
-                    "uri": "${php_file_uri}",
-                    "diagnostics": [],
-                    "isStatusFB": True,
-                },
-            )
-            .wait_for_notification(
-                comment="After didOpen(file2), the hh_server_status diagnostic should reappear in file2",
-                method="textDocument/publishDiagnostics",
-                params={
-                    "uri": "${unsaved2_file_uri}",
-                    "diagnostics": [
-                        {
-                            "range": {
-                                "start": {"line": 0, "character": 0},
-                                "end": {"line": 0, "character": 1},
-                            },
-                            "severity": 1,
-                            "source": "hh_server",
-                            "message": "hh_server isn't running, so there may be undetected errors. Try `hh` at the command line... hh_server: stopped.",
-                            "relatedInformation": [],
-                            "relatedLocations": [],
-                        }
-                    ],
-                    "isStatusFB": True,
-                },
-            )
-            .notification(
-                method="textDocument/didClose",
-                params={"textDocument": {"uri": "${unsaved2_file_uri}"}},
-            )
-            .wait_for_notification(
-                comment="After didClose(file2), the hh_server_status diagnostic should disappear from file2",
+                comment="After didOpen(file1), the hh_server_status diagnostic should disappear from file2",
                 method="textDocument/publishDiagnostics",
                 params={
                     "uri": "${unsaved2_file_uri}",
@@ -6527,7 +6443,7 @@ function unsaved_bar(): string { return "hello"; }
                 },
             )
             .wait_for_notification(
-                comment="After didClose(file2), the hh_server_status diagnostic should reappear in file1",
+                comment="After didOpen(file1), the hh_server_status diagnostic should reappear in file1",
                 method="textDocument/publishDiagnostics",
                 params={
                     "uri": "${php_file_uri}",
@@ -6556,6 +6472,40 @@ function unsaved_bar(): string { return "hello"; }
                 method="textDocument/publishDiagnostics",
                 params={
                     "uri": "${php_file_uri}",
+                    "diagnostics": [],
+                    "isStatusFB": True,
+                },
+            )
+            .wait_for_notification(
+                comment="After didClose(file1), the hh_server_status diagnostic should reappear in file2",
+                method="textDocument/publishDiagnostics",
+                params={
+                    "uri": "${unsaved2_file_uri}",
+                    "diagnostics": [
+                        {
+                            "range": {
+                                "start": {"line": 0, "character": 0},
+                                "end": {"line": 0, "character": 1},
+                            },
+                            "severity": 1,
+                            "source": "hh_server",
+                            "message": "hh_server isn't running, so there may be undetected errors. Try `hh` at the command line... hh_server: stopped.",
+                            "relatedInformation": [],
+                            "relatedLocations": [],
+                        }
+                    ],
+                    "isStatusFB": True,
+                },
+            )
+            .notification(
+                method="textDocument/didClose",
+                params={"textDocument": {"uri": "${unsaved2_file_uri}"}},
+            )
+            .wait_for_notification(
+                comment="After didClose(file2), the hh_server_status diagnostic should disappear from file2",
+                method="textDocument/publishDiagnostics",
+                params={
+                    "uri": "${unsaved2_file_uri}",
                     "diagnostics": [],
                     "isStatusFB": True,
                 },
@@ -6907,7 +6857,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 params={
                     "shortMessage": "Hack: stopped",
                     "message": "hh_server: stopped.",
-                    "actions": [{"title": "Restart hh_server"}],
                     "type": 1,
                 },
                 result=NoResponse(),
@@ -6934,12 +6883,11 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                     "type": 2,
                     "shortMessage": "Hack: initializing",
                     "message": "hh_server initializing: processing [<test> seconds]",
-                    "actions": [],
                 },
             )
             .wait_for_server_request(
                 method="window/showStatus",
-                params={"actions": [], "message": "hh_server: ready.", "type": 3},
+                params={"message": "hh_server: ready.", "type": 3},
                 result=NoResponse(),
             )
             .request(line=line(), method="shutdown", params={}, result=None)
@@ -6963,7 +6911,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [{"title": "Restart hh_server"}],
                     "message": "Hack IDE: initializing.\nhh_server: stopped.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -6973,7 +6920,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [],
                     "message": "Hack IDE: initializing.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -6983,7 +6929,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/showStatus",
                 params={
                     "type": 3,
-                    "actions": [],
                     "message": "Hack IDE: ready.",
                     "shortMessage": "Hack: ready",
                 },
@@ -6993,7 +6938,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 params={
                     "message": "Hack IDE: ready.\nhh_server: stopped.",
                     "shortMessage": "Hack: ready",
-                    "actions": [{"title": "Restart hh_server"}],
                     "type": 3,
                 },
                 result=NoResponse(),
@@ -7002,98 +6946,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
             .notification(method="exit", params={})
         )
         self.run_spec(spec, variables, wait_for_server=False, use_serverless_ide=True)
-
-    def test_serverless_ide_status_restart(self) -> None:
-        variables = dict(self.prepare_serverless_ide_environment())
-        variables.update(self.setup_php_file("hover.php"))
-
-        spec = (
-            self.initialize_spec(
-                LspTestSpec("serverless_ide_status_restart"),
-                use_serverless_ide=True,
-                supports_status=True,
-            )
-            .ignore_requests(
-                comment="Ignore initializing messages since they're racy",
-                method="window/showStatus",
-                params={
-                    "type": 2,
-                    "actions": [],
-                    "message": "Hack IDE: initializing.\nhh_server initializing: processing [<test> seconds]",
-                    "shortMessage": "Hack: initializing",
-                },
-            )
-            .ignore_requests(
-                comment="Another form of initializing to ignore",
-                method="window/showStatus",
-                params={
-                    "type": 2,
-                    "actions": [],
-                    "message": "Hack IDE: initializing.\nhh_server: ready.",
-                    "shortMessage": "Hack: initializing",
-                },
-            )
-            .ignore_requests(
-                comment="Another form of initializing to ignore before we've even heard the first peep from hh_server",
-                method="window/showStatus",
-                params={
-                    "type": 2,
-                    "actions": [],
-                    "message": "Hack IDE: initializing.",
-                    "shortMessage": "Hack: initializing",
-                },
-            )
-            .ignore_requests(
-                comment="another racy initialization to ignore, again before hh_server",
-                method="window/showStatus",
-                params={
-                    "type": 3,
-                    "actions": [],
-                    "message": "Hack IDE: ready.",
-                    "shortMessage": "Hack: ready",
-                },
-            )
-            .wait_for_server_request(
-                method="window/showStatus",
-                params={
-                    "actions": [],
-                    "message": "Hack IDE: ready.\nhh_server: ready.",
-                    "shortMessage": "Hack: ready",
-                    "type": 3,
-                },
-                result=NoResponse(),
-            )
-            .request(
-                line=line(),
-                method="$test/shutdownServerlessIde",
-                params={},
-                result=None,
-                powered_by="serverless_ide",
-            )
-            .wait_for_server_request(
-                method="window/showStatus",
-                params={
-                    "actions": [{"title": "Restart Hack IDE"}],
-                    "message": "Hack IDE has failed. See Output›Hack for details.\nhh_server: ready.",
-                    "shortMessage": "Hack: failed",
-                    "type": 1,
-                },
-                result={"title": "Restart Hack IDE"},
-            )
-            .wait_for_server_request(
-                method="window/showStatus",
-                params={
-                    "actions": [],
-                    "message": "Hack IDE: ready.\nhh_server: ready.",
-                    "shortMessage": "Hack: ready",
-                    "type": 3,
-                },
-                result=NoResponse(),
-            )
-            .request(line=line(), method="shutdown", params={}, result=None)
-            .notification(method="exit", params={})
-        )
-        self.run_spec(spec, variables, wait_for_server=True, use_serverless_ide=True)
 
     def test_serverless_ide_failed_to_load_saved_state(self) -> None:
         variables = dict(self.prepare_serverless_ide_environment())
@@ -7113,7 +6965,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [],
                     "message": "Hack IDE: initializing.\nhh_server initializing: processing [<test> seconds]",
                     "shortMessage": "Hack: initializing",
                 },
@@ -7123,7 +6974,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [],
                     "message": "Hack IDE: initializing.\nhh_server: ready.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -7133,7 +6983,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [],
                     "message": "Hack IDE: initializing.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -7143,7 +6992,6 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/showStatus",
                 params={
                     "type": 1,
-                    "actions": [{"title": "Restart Hack IDE"}],
                     "message": "Hack IDE has failed. See Output›Hack for details.",
                     "shortMessage": "Hack: failed",
                 },
@@ -7152,13 +7000,12 @@ If you want to examine the raw LSP logs, you can check the `.sent.log` and
                 method="window/logMessage",
                 params={
                     "type": 1,
-                    "message": "Hack IDE has failed.\nThis is unexpected.\nPlease file a bug within your IDE.\nMore details: http://dummy/HH_TEST_MODE",
+                    "message": "Hack IDE has failed.\nThis is unexpected.\nPlease file a bug within your IDE, and try restarting it.\nMore details: http://dummy/HH_TEST_MODE",
                 },
             )
             .wait_for_server_request(
                 method="window/showStatus",
                 params={
-                    "actions": [{"title": "Restart Hack IDE"}],
                     "message": "Hack IDE has failed. See Output›Hack for details.\nhh_server: ready.",
                     "shortMessage": "Hack: failed",
                     "type": 1,
@@ -7685,7 +7532,6 @@ function aaa(): string {
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [{"title": "Restart hh_server"}],
                     "message": "Hack IDE: initializing.\nhh_server: stopped.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -7695,7 +7541,6 @@ function aaa(): string {
                 method="window/showStatus",
                 params={
                     "type": 2,
-                    "actions": [],
                     "message": "Hack IDE: initializing.",
                     "shortMessage": "Hack: initializing",
                 },
@@ -7705,7 +7550,6 @@ function aaa(): string {
                 method="window/showStatus",
                 params={
                     "type": 3,
-                    "actions": [],
                     "message": "Hack IDE: ready.",
                     "shortMessage": "Hack: ready",
                 },
@@ -7766,7 +7610,6 @@ function aaa(): string {
             .wait_for_server_request(
                 method="window/showStatus",
                 params={
-                    "actions": [{"title": "Restart hh_server"}],
                     "message": "Hack IDE: ready.\nhh_server: stopped.",
                     "shortMessage": "Hack: ready",
                     "type": 3,

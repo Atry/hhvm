@@ -19,13 +19,15 @@
 #include <cmath>
 
 #include <folly/CPortability.h>
-#include <folly/Overload.h>
 #include <folly/Portability.h>
+#include <folly/io/IOBuf.h>
 #include <folly/memory/SanitizeLeak.h>
+#include <thrift/lib/cpp2/Adapt.h>
 #include <thrift/lib/cpp2/FieldRef.h>
 #include <thrift/lib/cpp2/Thrift.h>
 #include <thrift/lib/cpp2/op/Compare.h>
 #include <thrift/lib/cpp2/op/Create.h>
+#include <thrift/lib/cpp2/type/NativeType.h>
 #include <thrift/lib/cpp2/type/Tag.h>
 #include <thrift/lib/cpp2/type/ThriftType.h>
 
@@ -34,51 +36,154 @@ namespace thrift {
 namespace op {
 namespace detail {
 
+// Helper that creates a leaky singleton.
+template <typename F>
+FOLLY_EXPORT const auto& staticDefault(F&& make) {
+  static const auto& kVal = *make().release();
+  return kVal;
+}
+
+// Gets a (potentally const&) value representing the intrinsic default.
+//
 // C++'s intrinsic default for the underlying native type, is the intrisitic
 // default for for all unstructured types.
-template <typename Tag>
+template <typename Tag, typename = void>
 struct GetIntrinsicDefault {
-  static_assert(type::is_concrete_v<Tag>, "");
-  using T = type::native_type<Tag>;
+  constexpr auto operator()() const { return type::native_type<Tag>{}; }
+};
 
-  template <typename TagT = Tag>
-  constexpr type::if_is_a<TagT, type::string_c, T> operator()() const {
-    return StringTraits<T>::fromStringLiteral("");
+// Clear the given value, setting it to it's intrinsic default.
+template <typename Tag, typename = void>
+struct Clear {
+  constexpr void operator()(type::native_type<Tag>& val) const {
+    clear(val, Tag{});
   }
 
-  template <typename TagT = Tag>
-  FOLLY_EXPORT type::if_is_a<TagT, type::structured_c, const T&> operator()()
-      const {
-    static const T& kDefault = *[]() {
-      auto* value = new T{};
-      // The default construct respects 'custom' defaults on fields, but
-      // clearing any instance of a structured type, sets it to the
-      // 'intrinsic' default.
-      apache::thrift::clear(*value);
-      return value;
-    }();
-    return kDefault;
+ private:
+  template <typename T>
+  static void clear(T& val, type::structured_c) {
+    thrift::clear(val);
   }
-
-  // For rest of type tag, value initialize its native type.
-  template <typename TagT = Tag>
-  constexpr std::enable_if_t<
-      !type::is_a_v<TagT, type::string_c> &&
-          !type::is_a_v<TagT, type::structured_c>,
-      T>
-  operator()() const {
-    return T{};
+  template <typename T>
+  static void clear(T& val, type::container_c) {
+    val.clear();
+  }
+  template <typename T>
+  constexpr static void clear(T& val, type::all_c) {
+    val = GetIntrinsicDefault<Tag>{}();
   }
 };
 
-template <typename Adapter, typename Tag>
-struct GetIntrinsicDefault<type::adapted<Adapter, Tag>> {
-  using adapted_tag = type::adapted<Adapter, Tag>;
-  using T = type::native_type<adapted_tag>;
-  static_assert(type::is_concrete_v<adapted_tag>, "");
-  FOLLY_EXPORT const T& operator()() const {
-    static const T& kDefault = *new T(op::create<adapted_tag>());
-    return kDefault;
+// Checks if the given value is empty.
+template <typename Tag>
+struct IsEmpty {
+  constexpr bool operator()(const type::native_type<Tag>& value) const {
+    return empty(value, Tag{});
+  }
+
+ private:
+  template <typename T>
+  static bool empty(const T& val, type::structured_c) {
+    return thrift::empty(val);
+  }
+  template <typename T>
+  static bool empty(const T& val, type::container_c) {
+    return val.empty();
+  }
+  template <typename T>
+  static bool empty(const T& val, type::string_c) {
+    return val.empty();
+  }
+  template <typename T>
+  constexpr static bool empty(const T& val, type::all_c) {
+    return op::identical<Tag>(val, GetIntrinsicDefault<Tag>{}());
+  }
+  template <typename ATag>
+  static bool empty(const std::unique_ptr<folly::IOBuf>& val, ATag tag) {
+    return val == nullptr || empty(*val, tag);
+  }
+};
+
+// Gets the intrinsic default via `thrift::clear`
+//
+// Useful for any type that supports custom defaults.
+template <typename Tag>
+struct ThriftClearDefault {
+  const auto& operator()() const {
+    return staticDefault([] {
+      auto value = std::make_unique<type::native_type<Tag>>();
+      apache::thrift::clear(*value);
+      return value;
+    });
+  }
+};
+
+// Gets the intrinsic default via `op::create`
+template <typename Tag>
+struct CreateDefault {
+  const auto& operator()() const {
+    return staticDefault([] {
+      return std::make_unique<type::native_type<Tag>>(op::create<Tag>());
+    });
+  }
+};
+
+// Cache the cleared defaults for structured types.
+template <typename T>
+struct GetIntrinsicDefault<type::struct_t<T>>
+    : ThriftClearDefault<type::struct_t<T>> {};
+template <typename T>
+struct GetIntrinsicDefault<type::exception_t<T>>
+    : ThriftClearDefault<type::exception_t<T>> {};
+// TODO(afuller): Is thrift::clear actually needed for union?
+template <typename T>
+struct GetIntrinsicDefault<type::union_t<T>>
+    : ThriftClearDefault<type::union_t<T>> {};
+
+template <typename Adapter, typename UTag, typename Struct, int16_t id>
+using adapted_field_tag =
+    type::field<type::adapted<Adapter, UTag>, FieldContext<Struct, id>>;
+
+// Cache the result of op::create for adapters.
+template <typename Adapter, typename UTag>
+struct GetIntrinsicDefault<type::adapted<Adapter, UTag>>
+    : CreateDefault<type::adapted<Adapter, UTag>> {};
+template <typename Adapter, typename UTag, typename Struct, int16_t id>
+struct GetIntrinsicDefault<adapted_field_tag<Adapter, UTag, Struct, id>> {
+  using Tag = adapted_field_tag<Adapter, UTag, Struct, id>;
+  const auto& operator()() const {
+    return staticDefault([] {
+      // TODO(afuller): Remove or move this logic to the adapter.
+      auto& obj = *new Struct{};
+      folly::annotate_object_leaked(&obj);
+      apache::thrift::clear(obj);
+      return std::make_unique<type::native_type<Tag>>(op::create<Tag>(obj));
+    });
+  }
+};
+
+// Delegate to adapter.
+template <typename Adapter, typename UTag>
+struct Clear<type::adapted<Adapter, UTag>> {
+  using Tag = type::adapted<Adapter, UTag>;
+  constexpr void operator()(type::native_type<Tag>& value) const {
+    adapt_detail::clear<Adapter>(value);
+  }
+};
+
+// Delegate to op::identical.
+template <typename Adapter, typename UTag>
+struct IsEmpty<type::adapted<Adapter, UTag>> {
+  using Tag = type::adapted<Adapter, UTag>;
+  constexpr bool operator()(const type::native_type<Tag>& value) const {
+    return op::identical<Tag>(value, GetIntrinsicDefault<Tag>{}());
+  }
+};
+template <typename Adapter, typename UTag, typename Struct, int16_t id>
+struct IsEmpty<adapted_field_tag<Adapter, UTag, Struct, id>> {
+  using Tag = adapted_field_tag<Adapter, UTag, Struct, id>;
+  constexpr bool operator()(const type::native_type<Tag>& value) const {
+    return op::identical<Tag>(value, GetIntrinsicDefault<Tag>{}());
   }
 };
 
@@ -86,54 +191,8 @@ struct GetIntrinsicDefault<type::adapted<Adapter, Tag>> {
 template <typename Tag, typename Context>
 struct GetIntrinsicDefault<type::field<Tag, Context>>
     : GetIntrinsicDefault<Tag> {};
-
-template <typename Adapter, typename Tag, typename Struct, int16_t FieldId>
-struct GetIntrinsicDefault<
-    type::field<type::adapted<Adapter, Tag>, FieldContext<Struct, FieldId>>> {
-  using field_adapted_tag =
-      type::field<type::adapted<Adapter, Tag>, FieldContext<Struct, FieldId>>;
-  using T = type::native_type<field_adapted_tag>;
-  static_assert(type::is_concrete_v<field_adapted_tag>, "");
-
-  FOLLY_EXPORT const T& operator()() const {
-    static const T& kDefault = *[]() {
-      // Note, this is a separate leaky singleton instance from
-      // 'op::getIntrinsicDefault<struct_t<Struct>>'.
-      auto& obj = *new Struct{};
-      folly::annotate_object_leaked(&obj);
-      apache::thrift::clear(obj);
-      auto* value = new T(op::create<field_adapted_tag>(obj));
-      return value;
-    }();
-    return kDefault;
-  }
-};
-
-template <typename Tag>
-struct Clear {
-  static_assert(type::is_concrete_v<Tag>, "");
-  template <typename T>
-  void operator()(T& value) const {
-    folly::overload(
-        [](auto& v, type::structured_c) { apache::thrift::clear(v); },
-        [](auto& v, type::container_c) { v.clear(); },
-        [](auto& v, type::all_c) {
-          // All unstructured types can be cleared by assigning to the intrinsic
-          // default.
-          v = GetIntrinsicDefault<Tag>{}();
-        })(value, Tag{});
-  }
-};
-
-template <typename Adapter, typename Tag>
-struct Clear<type::adapted<Adapter, Tag>> {
-  using adapted_tag = type::adapted<Adapter, Tag>;
-  static_assert(type::is_concrete_v<adapted_tag>, "");
-  template <typename T>
-  void operator()(T& value) const {
-    ::apache::thrift::adapt_detail::clear<Adapter>(value);
-  }
-};
+template <typename Tag, typename Context>
+struct IsEmpty<type::field<Tag, Context>> : IsEmpty<Tag> {};
 
 // TODO: support union
 struct ClearOptionalField {
@@ -178,80 +237,29 @@ struct ClearField<type::field<Tag, Context>> : ClearOptionalField {
   }
 };
 
-template <typename Adapter, typename Tag, typename Struct, int16_t FieldId>
-struct ClearField<
-    type::field<type::adapted<Adapter, Tag>, FieldContext<Struct, FieldId>>>
+template <typename Adapter, typename UTag, typename Struct, int16_t id>
+struct ClearField<adapted_field_tag<Adapter, UTag, Struct, id>>
     : ClearOptionalField {
-  using field_adapted_tag =
-      type::field<type::adapted<Adapter, Tag>, FieldContext<Struct, FieldId>>;
-  static_assert(type::is_concrete_v<field_adapted_tag>, "");
+  using Tag = adapted_field_tag<Adapter, UTag, Struct, id>;
+  static_assert(type::is_concrete_v<Tag>, "");
 
   using ClearOptionalField::operator();
-
   template <typename T>
   void operator()(required_field_ref<T> field, Struct& s) const {
-    ::apache::thrift::adapt_detail::clear<Adapter, FieldId>(*field, s);
+    ::apache::thrift::adapt_detail::clear<Adapter, id>(*field, s);
   }
 
   template <typename T>
   void operator()(terse_field_ref<T> field, Struct& s) const {
-    ::apache::thrift::adapt_detail::clear<Adapter, FieldId>(*field, s);
+    ::apache::thrift::adapt_detail::clear<Adapter, id>(*field, s);
   }
 
   template <typename T>
   void operator()(field_ref<T> field, Struct& s) const {
-    ::apache::thrift::adapt_detail::clear<Adapter, FieldId>(*field, s);
+    ::apache::thrift::adapt_detail::clear<Adapter, id>(*field, s);
   }
 };
 
-template <typename Tag>
-struct Empty {
-  static_assert(type::is_concrete_v<Tag>, "");
-  template <typename T = type::native_type<Tag>>
-  constexpr bool operator()(const T& value) const {
-    return folly::overload(
-        [](const auto& v, type::string_c) {
-          return StringTraits<T>::isEmpty(v);
-        },
-        [](const auto& v, type::container_c) { return v.empty(); },
-        [](const auto& v, type::structured_c) {
-          return apache::thrift::empty(v);
-        },
-        [](const auto& v, type::all_c) {
-          // All unstructured values are 'empty' if they are identical to their
-          // intrinsic default.
-          return op::identical<Tag>(v, GetIntrinsicDefault<Tag>{}());
-        })(value, Tag{});
-  }
-};
-
-template <typename Adapter, typename Tag>
-struct Empty<type::adapted<Adapter, Tag>> {
-  using adapted_tag = type::adapted<Adapter, Tag>;
-  static_assert(type::is_concrete_v<adapted_tag>, "");
-  template <typename T>
-  constexpr bool operator()(const T& value) const {
-    return op::identical<adapted_tag>(
-        value, GetIntrinsicDefault<adapted_tag>{}());
-  }
-};
-
-// TODO(dokwon): Support field_ref types.
-template <typename Tag, typename Context>
-struct Empty<type::field<Tag, Context>> : Empty<Tag> {};
-
-template <typename Adapter, typename Tag, typename Struct, int16_t FieldId>
-struct Empty<
-    type::field<type::adapted<Adapter, Tag>, FieldContext<Struct, FieldId>>> {
-  using field_adapted_tag =
-      type::field<type::adapted<Adapter, Tag>, FieldContext<Struct, FieldId>>;
-  static_assert(type::is_concrete_v<field_adapted_tag>, "");
-  template <typename T>
-  constexpr bool operator()(const T& value) const {
-    return op::identical<field_adapted_tag>(
-        value, GetIntrinsicDefault<field_adapted_tag>{}());
-  }
-};
 } // namespace detail
 } // namespace op
 } // namespace thrift

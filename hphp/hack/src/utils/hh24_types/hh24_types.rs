@@ -10,16 +10,16 @@ use typing_deps_hash::DepType;
 
 #[derive(thiserror::Error, Debug)]
 pub enum HhError {
-    #[error("Unexpected: {0}")]
+    #[error("Unexpected: {0:#}")]
     Unexpected(anyhow::Error),
 
-    #[error("Disk changed: {0} - do hh_decl --update then restart the operation")]
+    #[error("Disk changed: {0} - do hh_decl --update then restart the operation. [{1}]")]
     DiskChanged(std::path::PathBuf, String),
 
-    #[error("Decl-store changed its checksum: {0} - restart the operation")]
+    #[error("Decl-store changed its checksum: {0} - restart the operation. [{1}]")]
     ChecksumChanged(Checksum, String),
 
-    #[error("Decl-store stopped - abandon the operation")]
+    #[error("Decl-store stopped - abandon the operation. [{0}]")]
     Stopped(String),
 }
 
@@ -53,6 +53,12 @@ impl<T> HhErrorContext<T> for Result<T, std::io::Error> {
 impl<T> HhErrorContext<T> for Result<T, serde_json::error::Error> {
     fn hh_context(self, context: &'static str) -> Result<T, HhError> {
         self.map_err(|err| HhError::Unexpected(anyhow::Error::new(err).context(context)))
+    }
+}
+
+impl<T> HhErrorContext<T> for Result<T, anyhow::Error> {
+    fn hh_context(self, context: &'static str) -> Result<T, HhError> {
+        self.map_err(|err| HhError::Unexpected(err.context(context)))
     }
 }
 

@@ -9,12 +9,10 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
-use std::time::Instant;
 
 use anyhow::ensure;
 use clap::Parser;
 use itertools::Itertools;
-use log::info;
 use multifile_rust as multifile;
 use ocamlrep::rc::RcOc;
 use oxidized::relative_path::Prefix;
@@ -67,11 +65,10 @@ thread_local! {
     pub static PANIC_MSG: RefCell<Option<String>> = RefCell::new(None);
 }
 
-#[derive(Clone, Parser, Debug)]
+#[derive(Parser, Debug)]
 struct CommonOpts {
-    /// The input Hack files or directories to process.
-    #[clap(name = "PATH")]
-    paths: Vec<PathBuf>,
+    #[clap(flatten)]
+    files: crate::FileOpts,
 
     /// Print full error messages
     #[clap(short = 'l')]
@@ -94,7 +91,7 @@ struct CommonOpts {
     show_all: bool,
 }
 
-#[derive(Clone, Parser, Debug)]
+#[derive(Parser, Debug)]
 struct AssembleOpts {
     #[clap(flatten)]
     common: CommonOpts,
@@ -133,16 +130,17 @@ impl AssembleOpts {
         });
 
         let total_t = compile_profile.codegen_t
-            + compile_profile.parsing_t
+            + compile_profile.parser_profile.total_t
             + print_profile.printing_t
-            + assemble_t.as_secs_f64()
-            + verify_t.as_secs_f64();
+            + assemble_t.total()
+            + verify_t.total();
 
         profile.fold_with(ProfileAcc {
-            total_t: Timing::from_secs_f64(total_t, path),
-            codegen_t: Timing::from_secs_f64(compile_profile.codegen_t, path),
-            parsing_t: Timing::from_secs_f64(compile_profile.parsing_t, path),
-            printing_t: Timing::from_secs_f64(print_profile.printing_t, path),
+            total_t: Timing::from_duration(total_t, path),
+            codegen_t: Timing::from_duration(compile_profile.codegen_t, path),
+            parsing_t: Timing::from_duration(compile_profile.parser_profile.parsing_t, path),
+            lowering_t: Timing::from_duration(compile_profile.parser_profile.lowering_t, path),
+            printing_t: Timing::from_duration(print_profile.printing_t, path),
             assemble_t,
             verify_t,
             ..Default::default()
@@ -152,7 +150,7 @@ impl AssembleOpts {
     }
 }
 
-#[derive(Clone, Parser, Debug)]
+#[derive(Parser, Debug)]
 struct IrOpts {
     #[clap(flatten)]
     common: CommonOpts,
@@ -178,15 +176,16 @@ impl IrOpts {
             Timing::time(path, || sem_diff::sem_diff_unit(&pre_unit, &post_unit));
 
         let total_t = compile_profile.codegen_t
-            + compile_profile.parsing_t
-            + bc_to_ir_t.as_secs_f64()
-            + ir_to_bc_t.as_secs_f64()
-            + verify_t.as_secs_f64();
+            + compile_profile.parser_profile.total_t
+            + bc_to_ir_t.total()
+            + ir_to_bc_t.total()
+            + verify_t.total();
 
         profile.fold_with(ProfileAcc {
-            total_t: Timing::from_secs_f64(total_t, path),
-            codegen_t: Timing::from_secs_f64(compile_profile.codegen_t, path),
-            parsing_t: Timing::from_secs_f64(compile_profile.parsing_t, path),
+            total_t: Timing::from_duration(total_t, path),
+            codegen_t: Timing::from_duration(compile_profile.codegen_t, path),
+            parsing_t: Timing::from_duration(compile_profile.parser_profile.parsing_t, path),
+            lowering_t: Timing::from_duration(compile_profile.parser_profile.lowering_t, path),
             bc_to_ir_t,
             ir_to_bc_t,
             verify_t,
@@ -197,7 +196,7 @@ impl IrOpts {
     }
 }
 
-#[derive(Clone, Parser, Debug)]
+#[derive(Parser, Debug)]
 enum Mode {
     /// Compile files and save the resulting HHAS and interior hhbc::Unit. Assemble the HHAS files and save the resulting Unit. Compare Unit.
     Assemble(AssembleOpts),
@@ -225,7 +224,7 @@ impl Mode {
     }
 }
 
-#[derive(Parser, Clone, Debug)]
+#[derive(Parser, Debug)]
 pub struct Opts {
     #[clap(subcommand)]
     mode: Mode,
@@ -237,7 +236,7 @@ fn compile_php_file<'a, 'arena>(
     content: Vec<u8>,
     single_file_opts: &'a SingleFileOpts,
     profile: &mut compile::Profile,
-) -> Result<(compile::NativeEnv<'a>, hhbc::Unit<'arena>)> {
+) -> Result<(compile::NativeEnv, hhbc::Unit<'arena>)> {
     let filepath = RelativePath::make(Prefix::Dummy, path.to_path_buf());
     let source_text = SourceText::make(RcOc::new(filepath.clone()), &content);
     let env = crate::compile::native_env(filepath, single_file_opts);
@@ -292,6 +291,7 @@ struct ProfileAcc {
     codegen_t: Timing,
     ir_to_bc_t: Timing,
     parsing_t: Timing,
+    lowering_t: Timing,
     printing_t: Timing,
     total_t: Timing,
     verify_t: Timing,
@@ -307,6 +307,7 @@ impl std::default::Default for ProfileAcc {
             codegen_t: Default::default(),
             ir_to_bc_t: Default::default(),
             parsing_t: Default::default(),
+            lowering_t: Default::default(),
             printing_t: Default::default(),
             total_t: Default::default(),
             verify_t: Default::default(),
@@ -328,6 +329,7 @@ impl ProfileAcc {
         self.codegen_t.fold_with(other.codegen_t);
         self.ir_to_bc_t.fold_with(other.ir_to_bc_t);
         self.parsing_t.fold_with(other.parsing_t);
+        self.lowering_t.fold_with(other.lowering_t);
         self.printing_t.fold_with(other.printing_t);
         self.total_t.fold_with(other.total_t);
         self.verify_t.fold_with(other.verify_t);
@@ -393,6 +395,7 @@ impl ProfileAcc {
         let mut w = std::io::stdout();
         profile::report_stat(&mut w, "", "total time", &self.total_t)?;
         profile::report_stat(&mut w, "  ", "parsing time", &self.parsing_t)?;
+        profile::report_stat(&mut w, "  ", "lowering time", &self.lowering_t)?;
         profile::report_stat(&mut w, "  ", "codegen time", &self.codegen_t)?;
         profile::report_stat(&mut w, "  ", "printing time", &self.printing_t)?;
         profile::report_stat(&mut w, "  ", "assemble time", &self.assemble_t)?;
@@ -491,21 +494,12 @@ fn verify_files(files: &[PathBuf], mode: &Mode) -> anyhow::Result<()> {
 }
 
 pub fn run(mut opts: Opts) -> anyhow::Result<()> {
-    eprint!("Collecting files...");
-    info!("Collecting files");
-    let files = {
-        let start = Instant::now();
-        let files = crate::util::collect_files(
-            &opts.mode.common().paths,
-            None,
-            opts.mode.common().num_threads,
-        )?;
-        let duration = start.elapsed();
-        info!("{} files found in {}", files.len(), duration.display());
-        files
-    };
-    eprint!("\r");
-
+    let num_threads = opts.mode.common().num_threads;
+    let files = opts
+        .mode
+        .common_mut()
+        .files
+        .collect_input_files(num_threads)?;
     if files.len() == 1 {
         opts.mode.common_mut().panic_fuse = true;
     }

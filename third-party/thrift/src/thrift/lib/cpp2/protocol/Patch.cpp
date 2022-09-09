@@ -16,6 +16,8 @@
 
 #include <thrift/lib/cpp2/protocol/Patch.h>
 
+#include <cmath>
+#include <limits>
 #include <stdexcept>
 
 #include <fmt/core.h>
@@ -23,8 +25,12 @@
 #include <folly/io/IOBufQueue.h>
 #include <folly/lang/Exception.h>
 #include <thrift/lib/cpp/util/EnumUtils.h>
+#include <thrift/lib/cpp/util/SaturatingMath.h>
 #include <thrift/lib/cpp/util/VarintUtils.h>
+#include <thrift/lib/cpp2/FieldMask.h>
 #include <thrift/lib/cpp2/op/Get.h>
+#include <thrift/lib/cpp2/protocol/BinaryProtocol.h>
+#include <thrift/lib/cpp2/protocol/CompactProtocol.h>
 #include <thrift/lib/cpp2/protocol/Object.h>
 #include <thrift/lib/cpp2/type/Id.h>
 #include <thrift/lib/cpp2/type/NativeType.h>
@@ -101,12 +107,18 @@ bool applyAssign(const Object& patch, value_native_type<Tag>& value) {
 template <typename Tag, typename T>
 void applyNumericPatch(const Object& patch, T& value) {
   constexpr auto valueType = static_cast<Value::Type>(type::base_type_v<Tag>);
-  checkOps(patch, valueType, {PatchOp::Assign, PatchOp::Add});
+  checkOps(patch, valueType, {PatchOp::Assign, PatchOp::Clear, PatchOp::Add});
   if (applyAssign<Tag>(patch, value)) {
     return; // Ignore all other ops.
   }
+  if (auto* clear = findOp(patch, PatchOp::Clear)) {
+    if (argAs<type::bool_t>(*clear)) {
+      value = {};
+    }
+  }
+
   if (auto* arg = findOp(patch, PatchOp::Add)) {
-    value += argAs<Tag>(*arg);
+    value = util::add_saturating<T>(value, argAs<Tag>(*arg));
   }
 }
 
@@ -152,9 +164,16 @@ void ApplyPatch::operator()(const Object& patch, protocol::Value& value) const {
 }
 
 void ApplyPatch::operator()(const Object& patch, bool& value) const {
-  checkOps(patch, Value::Type::boolValue, {PatchOp::Assign, PatchOp::Put});
+  checkOps(
+      patch,
+      Value::Type::boolValue,
+      {PatchOp::Assign, PatchOp::Put, PatchOp::Clear});
   if (applyAssign<type::bool_t>(patch, value)) {
     return; // Ignore all other ops.
+  }
+  if (auto* clear = findOp(patch, PatchOp::Clear);
+      clear != nullptr && *clear->boolValue_ref()) {
+    value = false;
   }
   if (auto* invert = findOp(patch, PatchOp::Put)) { // Put is Invert for bool.
     if (argAs<type::bool_t>(*invert)) {
@@ -266,7 +285,7 @@ void ApplyPatch::operator()(
       auto& to_add = *add->setValue_ref();
       for (const auto& element : to_add) {
         if (std::find(value.begin(), value.end(), element) == value.end()) {
-          value.push_back(element);
+          value.insert(value.begin(), element);
         }
       }
     } else {
@@ -483,24 +502,23 @@ Mask extractMaskFromPatch(const protocol::Object& patch) {
   if (findOp(patch, PatchOp::Assign)) {
     return allMask();
   }
-  // All other operators are noop if they have the intrinsic default value.
-  if (isIntrinsicDefault(patch)) {
-    return noneMask();
-  }
   // If Clear or Add, it is modified if not intristic default.
   for (auto op : {PatchOp::Clear, PatchOp::Add}) {
-    if (findOp(patch, op)) {
-      return allMask();
+    if (auto* value = findOp(patch, op)) {
+      if (!isIntrinsicDefault(*value)) {
+        return allMask();
+      }
     }
   }
 
-  Mask mask;
+  Mask mask = noneMask();
   // Put should return allMask if not a map patch. Otherwise add keys to mask.
   if (auto* value = findOp(patch, PatchOp::Put)) {
-    if (!value->mapValue_ref()) {
+    if (value->mapValue_ref()) {
+      insertFieldsToMask(mask, *value, false);
+    } else if (!isIntrinsicDefault(*value)) {
       return allMask();
     }
-    insertFieldsToMask(mask, *value, false);
   }
   // Remove always adds keys to map mask. All types (list, set, and map) use
   // a set for Remove, so they are indistinguishable.
@@ -530,6 +548,35 @@ Mask extractMaskFromPatch(const protocol::Object& patch) {
 Mask extractMaskFromPatch(const protocol::Object& patch) {
   return detail::extractMaskFromPatch(patch);
 }
+
+template <type::StandardProtocol Protocol>
+std::unique_ptr<folly::IOBuf> applyPatchToSerializedData(
+    const protocol::Object& patch, const folly::IOBuf& buf) {
+  // TODO: create method for this operation
+  static_assert(
+      Protocol == type::StandardProtocol::Binary ||
+      Protocol == type::StandardProtocol::Compact);
+  using ProtocolReader = std::conditional_t<
+      Protocol == type::StandardProtocol::Binary,
+      BinaryProtocolReader,
+      CompactProtocolReader>;
+  using ProtocolWriter = std::conditional_t<
+      Protocol == type::StandardProtocol::Binary,
+      BinaryProtocolWriter,
+      CompactProtocolWriter>;
+  Mask mask = protocol::extractMaskFromPatch(patch);
+  MaskedDecodeResult result = parseObject<ProtocolReader>(buf, mask);
+  applyPatch(patch, result.included);
+  return serializeObject<ProtocolWriter>(result.included, result.excluded);
+}
+
+// Uses explicit instantiations to have the function definition in .cpp file.
+template std::unique_ptr<folly::IOBuf>
+applyPatchToSerializedData<type::StandardProtocol::Binary>(
+    const protocol::Object& patch, const folly::IOBuf& buf);
+template std::unique_ptr<folly::IOBuf>
+applyPatchToSerializedData<type::StandardProtocol::Compact>(
+    const protocol::Object& patch, const folly::IOBuf& buf);
 } // namespace protocol
 } // namespace thrift
 } // namespace apache

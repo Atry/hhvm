@@ -14,7 +14,7 @@ use std::sync::Mutex;
 use anyhow::Result;
 use clap::Parser;
 use compile::EnvFlags;
-use compile::HHBCFlags;
+use compile::HhbcFlags;
 use compile::NativeEnv;
 use compile::ParserFlags;
 use compile::Profile;
@@ -49,21 +49,8 @@ pub struct Opts {
 
 #[derive(Parser, Clone, Debug)]
 pub(crate) struct SingleFileOpts {
-    /// Disable toplevel definition elaboration
-    #[clap(long)]
-    pub(crate) disable_toplevel_elaboration: bool,
-
-    /// Dump IR instead of HHAS
-    #[clap(long)]
-    pub(crate) dump_ir: bool,
-
-    /// Compile files using the IR pass
-    #[clap(long)]
-    pub(crate) enable_ir: bool,
-
-    /// Treat the files as part of systemlib
-    #[clap(long)]
-    pub(crate) systemlib: bool,
+    #[clap(flatten)]
+    pub(crate) env_flags: EnvFlags,
 
     /// The level of verbosity (can be set multiple times)
     #[clap(long = "verbose", parse(from_occurrences))]
@@ -130,25 +117,21 @@ fn process_one_file(f: &Path, opts: &Opts, w: &SyncWrite) -> Result<()> {
     results.into_iter().collect()
 }
 
-pub(crate) fn native_env(filepath: RelativePath, opts: &SingleFileOpts) -> NativeEnv<'_> {
-    let mut flags = EnvFlags::empty();
-    flags.set(
-        EnvFlags::DISABLE_TOPLEVEL_ELABORATION,
-        opts.disable_toplevel_elaboration,
-    );
-    flags.set(EnvFlags::DUMP_IR, opts.dump_ir);
-    flags.set(EnvFlags::ENABLE_IR, opts.enable_ir);
-    flags.set(EnvFlags::IS_SYSTEMLIB, opts.systemlib);
-    let hhbc_flags = HHBCFlags::EMIT_CLS_METH_POINTERS
-        | HHBCFlags::EMIT_METH_CALLER_FUNC_POINTERS
-        | HHBCFlags::FOLD_LAZY_CLASS_KEYS
-        | HHBCFlags::LOG_EXTERN_COMPILER_PERF;
-    let parser_flags = ParserFlags::ENABLE_ENUM_CLASSES;
+pub(crate) fn native_env(filepath: RelativePath, opts: &SingleFileOpts) -> NativeEnv {
     NativeEnv {
         filepath,
-        hhbc_flags,
-        parser_flags,
-        flags,
+        hhbc_flags: HhbcFlags {
+            emit_cls_meth_pointers: true,
+            emit_meth_caller_func_pointers: true,
+            fold_lazy_class_keys: true,
+            log_extern_compiler_perf: true,
+            ..Default::default()
+        },
+        parser_flags: ParserFlags {
+            enable_enum_classes: true,
+            ..Default::default()
+        },
+        flags: opts.env_flags.clone(),
         ..Default::default()
     }
 }
@@ -165,9 +148,8 @@ pub(crate) fn process_single_file(
     let filepath = RelativePath::make(Prefix::Dummy, filepath);
     let source_text = SourceText::make(RcOc::new(filepath.clone()), &content);
     let env = native_env(filepath, opts);
-    let arena = bumpalo::Bump::new();
     let mut output = Vec::new();
-    compile::from_text(&arena, &mut output, source_text, &env, None, profile)?;
+    compile::from_text(&mut output, source_text, &env, None, profile)?;
     if opts.verbosity >= 1 {
         eprintln!("{}: {:#?}", env.filepath.path().display(), profile);
     }
@@ -186,15 +168,13 @@ pub(crate) fn compile_from_text(hackc_opts: &mut crate::Opts, w: &mut impl Write
 }
 
 fn compile_impl<'d>(
-    env: NativeEnv<'_>,
+    env: NativeEnv,
     source_text: Vec<u8>,
     decl_provider: Option<&'d dyn DeclProvider>,
 ) -> Result<Vec<u8>> {
     let text = SourceText::make(RcOc::new(env.filepath.clone()), &source_text);
     let mut hhas = Vec::new();
-    let arena = bumpalo::Bump::new();
     compile::from_text(
-        &arena,
         &mut hhas,
         text,
         &env,

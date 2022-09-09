@@ -23,27 +23,27 @@ use crate::BlockIdMap;
 use crate::ClassId;
 use crate::ClassIdMap;
 use crate::Coeffects;
+use crate::Constant;
+use crate::ConstantId;
 use crate::HasEdges;
 use crate::Instr;
 use crate::InstrId;
-use crate::Literal;
-use crate::LiteralId;
 use crate::LocId;
 use crate::SrcLoc;
-use crate::Type;
-use crate::UnitStringId;
+use crate::UnitBytesId;
+use crate::UserType;
 use crate::ValueId;
 use crate::ValueIdMap;
 
 /// Func parameters.
 #[derive(Debug)]
 pub struct Param<'a> {
-    pub name: UnitStringId,
+    pub name: UnitBytesId,
     pub is_variadic: bool,
     pub is_inout: bool,
     pub is_readonly: bool,
     pub user_attributes: Vec<Attribute<'a>>,
-    pub ty: Type<'a>,
+    pub ty: UserType,
     /// This is the BlockId which is the entrypoint for where initialization of
     /// this param begins.  The string is the code string which was used to
     /// compile the initialization value (for reflection).
@@ -154,25 +154,25 @@ pub struct Func<'a> {
     pub instrs: IdVec<InstrId, Instr>,
     pub is_memoize_wrapper: bool,
     pub is_memoize_wrapper_lsb: bool,
-    pub literals: IdVec<LiteralId, Literal<'a>>,
+    pub constants: IdVec<ConstantId, Constant<'a>>,
     pub locs: IdVec<LocId, SrcLoc>,
     pub num_iters: usize,
     pub params: Vec<Param<'a>>,
-    pub return_type: Type<'a>,
+    pub return_type: UserType,
     /// shadowed_tparams are the set of tparams on a method which shadow a
     /// tparam on the containing class.
     pub shadowed_tparams: Vec<ClassId>,
-    pub tparams: ClassIdMap<TParamBounds<'a>>,
+    pub tparams: ClassIdMap<TParamBounds>,
 }
 
 impl<'a> Func<'a> {
     // By definition the entry block is block zero.
     pub const ENTRY_BID: BlockId = BlockId(0);
 
-    pub fn alloc_literal(&mut self, literal: Literal<'a>) -> LiteralId {
-        let lid = LiteralId::from_usize(self.literals.len());
-        self.literals.push(literal);
-        lid
+    pub fn alloc_constant(&mut self, constant: Constant<'a>) -> ConstantId {
+        let cid = ConstantId::from_usize(self.constants.len());
+        self.constants.push(constant);
+        cid
     }
 
     pub fn alloc_instr(&mut self, i: Instr) -> InstrId {
@@ -244,8 +244,8 @@ impl<'a> Func<'a> {
         }
     }
 
-    pub fn literal(&self, lid: LiteralId) -> &Literal<'a> {
-        self.get_literal(lid).unwrap()
+    pub fn constant(&self, cid: ConstantId) -> &Constant<'a> {
+        self.get_constant(cid).unwrap()
     }
 
     pub fn edges(&self, bid: BlockId) -> &[BlockId] {
@@ -266,8 +266,8 @@ impl<'a> Func<'a> {
         self.blocks.get(bid)
     }
 
-    pub fn get_literal(&self, lid: LiteralId) -> Option<&Literal<'a>> {
-        self.literals.get(lid)
+    pub fn get_constant(&self, cid: ConstantId) -> Option<&Constant<'a>> {
+        self.constants.get(cid)
     }
 
     pub fn get_edges(&self, bid: BlockId) -> Option<&[BlockId]> {
@@ -402,6 +402,6 @@ pub struct Method<'a> {
 }
 
 #[derive(Debug)]
-pub struct TParamBounds<'a> {
-    pub bounds: Vec<Type<'a>>,
+pub struct TParamBounds {
+    pub bounds: Vec<UserType>,
 }

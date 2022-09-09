@@ -36,7 +36,7 @@ op::BoolPatch patchType(type::bool_t);
 // - subtract(T value) - Update to the patch to additionally subtract the given
 // value.
 // - operators -, -=, +, += - Alias to the appropriate add and subtract calls.
-I16Patch patchType(type::byte_t);
+BytePatch patchType(type::byte_t);
 I16Patch patchType(type::i16_t);
 I32Patch patchType(type::i32_t);
 I64Patch patchType(type::i64_t);
@@ -49,14 +49,6 @@ DoublePatch patchType(type::double_t);
 // - operators +, += - Alias to the appropriate append and prepend calls.
 op::StringPatch patchType(type::string_t);
 op::BinaryPatch patchType(type::binary_t);
-
-OptionalBoolPatch optPatchType(type::bool_t);
-OptionalI16Patch optPatchType(type::byte_t);
-OptionalI16Patch optPatchType(type::i16_t);
-OptionalI32Patch optPatchType(type::i32_t);
-OptionalI64Patch optPatchType(type::i64_t);
-OptionalFloatPatch optPatchType(type::float_t);
-OptionalDoublePatch optPatchType(type::double_t);
 
 } // namespace detail
 
@@ -79,9 +71,6 @@ OptionalDoublePatch optPatchType(type::double_t);
 //  patch.apply(value); // Sets value to 2;
 template <typename Tag>
 using patch_type = decltype(detail::patchType(Tag{}));
-
-template <typename Tag>
-using optional_patch_type = decltype(detail::optPatchType(Tag{}));
 
 } // namespace op
 } // namespace thrift

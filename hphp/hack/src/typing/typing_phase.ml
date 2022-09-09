@@ -489,7 +489,7 @@ and localize_class_instantiation ~ety_env env r sid tyargs class_info =
     else
       let tparams = Cls.tparams class_info in
       let nkinds = KindDefs.Simple.named_kinds_of_decl_tparams tparams in
-      let (env, tyl) =
+      let ((env, err), tyl) =
         if
           TypecheckerOptions.global_inference (Env.get_tcopt env)
           && (not (List.is_empty tparams))
@@ -511,7 +511,22 @@ and localize_class_instantiation ~ety_env env r sid tyargs class_info =
             tyargs
             nkinds
       in
-      (env, mk (r, Tclass (sid, nonexact, tyl)))
+      (* Hide the class type if its internal and outside of the module *)
+      if Typing_modules.is_class_visible env class_info then
+        ((env, err), mk (r, Tclass (sid, nonexact, tyl)))
+      else
+        let callee_module =
+          match Cls.get_module class_info with
+          | Some m -> m
+          | None ->
+            failwith
+              "Internal error: module must exist for class to be not visible"
+        in
+        let new_r =
+          Reason.Ropaque_type_from_module (Cls.pos class_info, callee_module, r)
+        in
+        let cstr = MakeType.mixed new_r in
+        ((env, err), mk (new_r, Tnewtype (name, [], cstr)))
 
 and localize_typedef_instantiation ~ety_env env r type_name tyargs typedef_info
     =
@@ -563,7 +578,7 @@ and localize_with_kind
           else
             ((env, None), mk (Reason.none, Terr))
         | Some (Env.TypedefResult typedef) ->
-          if Typing_env.is_typedef_visible env typedef then
+          if Typing_env.is_typedef_visible env ~name typedef then
             ((env, None), mk (r, Tunapplied_alias name))
           else
             (* The bound is unused until the newtype is fully applied, thus supplying dummy Tany *)
@@ -955,36 +970,32 @@ and localize_missing_tparams_class_for_global_inference env r sid class_ =
   let ty_err_opt = Option.merge e1 e2 ~f:Typing_error.both in
   ((env, ty_err_opt), tyl)
 
-and localize_refinement ~ety_env env r root { cr_types = trs } =
+and localize_refinement ~ety_env env r root decl_cr =
   let mk_unsupported_err () =
     let pos = Reason.to_pos r in
-    Option.map
-      ety_env.on_error
-      ~f:
+    Option.map ety_env.on_error ~f:(fun on_error ->
         Typing_error.(
-          fun on_error ->
-            apply_reasons ~on_error
-            @@ Secondary.Unsupported_class_refinement pos)
+          apply_reasons ~on_error (Secondary.Unsupported_class_refinement pos)))
   in
   let ((env, ty_err_opt), root) = localize ~ety_env env root in
   match get_node root with
-  | Tclass (c, Nonexact cr, tyl) ->
-    let both_opt e1 e2 = Option.merge e1 e2 ~f:Typing_error.both in
+  | Tclass (cid, Nonexact cr, tyl) ->
+    let both_err e1 e2 = Option.merge e1 e2 ~f:Typing_error.both in
     let ((env, ty_err_opt), cr) =
-      SMap.fold
-        (fun id tr ((env, ty_err_opt), cr) ->
+      Class_refinement.fold_type_refs
+        decl_cr
+        ~init:((env, ty_err_opt), cr)
+        ~f:(fun id tr ((env, ty_err_opt), cr) ->
           match tr with
           | TRexact ty ->
             let ((env, ty_err_opt'), ty) = localize ~ety_env env ty in
             let cr = Class_refinement.add_type_ref id (TRexact ty) cr in
-            ((env, both_opt ty_err_opt ty_err_opt'), cr)
+            ((env, both_err ty_err_opt ty_err_opt'), cr)
           | TRloose _ ->
             let err = mk_unsupported_err () in
-            ((env, both_opt ty_err_opt err), cr))
-        trs
-        ((env, ty_err_opt), cr)
+            ((env, both_err ty_err_opt err), cr))
     in
-    ((env, ty_err_opt), mk (r, Tclass (c, Nonexact cr, tyl)))
+    ((env, ty_err_opt), mk (r, Tclass (cid, Nonexact cr, tyl)))
   | _ -> ((env, mk_unsupported_err ()), TUtils.terr env r)
 
 (* Like localize_no_subst, but uses the supplied kind, enabling support

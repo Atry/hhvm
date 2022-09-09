@@ -547,7 +547,6 @@ fn parse_aast_from_string(input: &str, internal_offset: usize, span: Span) -> Re
     let env = Env {
         codegen: true,
         elaborate_namespaces: false,
-        fail_open: false,
         include_line_comments: false,
         keep_errors: true,
         parser_options,
@@ -574,7 +573,7 @@ fn parse_aast_from_string(input: &str, internal_offset: usize, span: Span) -> Re
         .iter()
         .try_for_each(|e| convert_lowpri_error(e, input, internal_offset, span))?;
 
-    aast.aast.map_err(|s| Error::new(span, s))
+    Ok(aast.aast)
 }
 
 fn span_for_pos(src: &str, internal_offset: usize, span: Span, pos: &Pos) -> Span {

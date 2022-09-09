@@ -50,14 +50,26 @@ class ServiceHandler<::cpp2::C> : public apache::thrift::ServerInterface {
   virtual void f();
   virtual folly::Future<folly::Unit> future_f();
   virtual folly::SemiFuture<folly::Unit> semifuture_f();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_f();
+  virtual folly::coro::Task<void> co_f(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_f(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback);
   virtual ::apache::thrift::ServerStream<::cpp2::number> numbers();
   virtual folly::Future<::apache::thrift::ServerStream<::cpp2::number>> future_numbers();
   virtual folly::SemiFuture<::apache::thrift::ServerStream<::cpp2::number>> semifuture_numbers();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<::apache::thrift::ServerStream<::cpp2::number>> co_numbers();
+  virtual folly::coro::Task<::apache::thrift::ServerStream<::cpp2::number>> co_numbers(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_numbers(std::unique_ptr<apache::thrift::HandlerCallback<::apache::thrift::ServerStream<::cpp2::number>>> callback);
   virtual void thing(::std::string& /*_return*/, ::std::int32_t /*a*/, std::unique_ptr<::std::string> /*b*/, std::unique_ptr<::std::set<::std::int32_t>> /*c*/);
   virtual folly::Future<std::unique_ptr<::std::string>> future_thing(::std::int32_t p_a, std::unique_ptr<::std::string> p_b, std::unique_ptr<::std::set<::std::int32_t>> p_c);
   virtual folly::SemiFuture<std::unique_ptr<::std::string>> semifuture_thing(::std::int32_t p_a, std::unique_ptr<::std::string> p_b, std::unique_ptr<::std::set<::std::int32_t>> p_c);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_thing(::std::int32_t p_a, std::unique_ptr<::std::string> p_b, std::unique_ptr<::std::set<::std::int32_t>> p_c);
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_thing(apache::thrift::RequestParams params, ::std::int32_t p_a, std::unique_ptr<::std::string> p_b, std::unique_ptr<::std::set<::std::int32_t>> p_c);
+#endif
   virtual void async_tm_thing(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::std::string>>> callback, ::std::int32_t p_a, std::unique_ptr<::std::string> p_b, std::unique_ptr<::std::set<::std::int32_t>> p_c);
  private:
   static ::cpp2::CServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -78,7 +90,7 @@ class CSvNull : public ::apache::thrift::ServiceHandler<C> {
   void thing(::std::string& /*_return*/, ::std::int32_t /*a*/, std::unique_ptr<::std::string> /*b*/, std::unique_ptr<::std::set<::std::int32_t>> /*c*/) override;
 };
 
-class CAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class CAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -93,8 +105,8 @@ class CAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<CAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<CAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const CAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const CAsyncProcessor::ProcessMap kOwnProcessMap_;

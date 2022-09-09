@@ -80,6 +80,10 @@ class BadInteractionIf : public apache::thrift::Tile, public apache::thrift::Ser
   virtual ::std::int32_t bar();
   virtual folly::Future<::std::int32_t> future_bar();
   virtual folly::SemiFuture<::std::int32_t> semifuture_bar();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<::std::int32_t> co_bar();
+  virtual folly::coro::Task<::std::int32_t> co_bar(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_bar(std::unique_ptr<apache::thrift::HandlerCallback<::std::int32_t>> callback);
  private:
   static ::cpp2::GoodServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -98,7 +102,7 @@ class GoodServiceSvNull : public ::apache::thrift::ServiceHandler<GoodService> {
   ::std::int32_t bar() override;
 };
 
-class GoodServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class GoodServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -113,10 +117,10 @@ class GoodServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcess
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<GoodServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
-  using InteractionConstructor = GeneratedAsyncProcessor::InteractionConstructor<GoodServiceAsyncProcessor>;
-  using InteractionConstructorMap = GeneratedAsyncProcessor::InteractionConstructorMap<InteractionConstructor>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<GoodServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
+  using InteractionConstructor = GeneratedAsyncProcessorBase::InteractionConstructor<GoodServiceAsyncProcessor>;
+  using InteractionConstructorMap = GeneratedAsyncProcessorBase::InteractionConstructorMap<InteractionConstructor>;
   static const GoodServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
   static const GoodServiceAsyncProcessor::InteractionConstructorMap& getInteractionConstructorMap();
   std::unique_ptr<apache::thrift::Tile> createInteractionImpl(const std::string& name) override;

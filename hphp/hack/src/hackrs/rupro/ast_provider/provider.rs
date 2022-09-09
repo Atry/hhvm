@@ -30,7 +30,6 @@ struct MakeParserEnv {
     keep_errors: bool,
     quick_mode: bool,
     show_all_errors: bool,
-    fail_open: bool,
     #[allow(dead_code)]
     disable_global_state_mutation: bool,
     is_systemlib: bool,
@@ -46,7 +45,6 @@ impl Default for MakeParserEnv {
             keep_errors: true,
             quick_mode: false,
             show_all_errors: false,
-            fail_open: true,
             disable_global_state_mutation: false,
             is_systemlib: false,
         }
@@ -80,6 +78,9 @@ impl AstProvider {
         sc: oxidized::scoured_comments::ScouredComments,
     ) {
         if !sc.error_pos.is_empty() {
+            unimplemented!()
+        }
+        if !sc.bad_ignore_pos.is_empty() {
             unimplemented!()
         }
     }
@@ -162,11 +163,7 @@ impl AstProvider {
         self.process_non_syntax_errors(&mut errs, parsed_file.errors);
         self.process_lint_errors(parsed_file.lint_errors);
 
-        let mut ast = parsed_file.aast.map_err(|msg| ParsingError::Other {
-            file: fln.clone(),
-            msg,
-        })?;
-
+        let mut ast = parsed_file.aast;
         naming::program(&mut ast);
 
         Ok((ast, errs))
@@ -181,7 +178,6 @@ impl AstProvider {
             keep_errors: flags.keep_errors,
             quick_mode: flags.quick_mode,
             show_all_errors: flags.show_all_errors,
-            fail_open: flags.fail_open,
             is_systemlib: flags.is_systemlib,
             parser_options: (*self.parser_options).clone(),
         }

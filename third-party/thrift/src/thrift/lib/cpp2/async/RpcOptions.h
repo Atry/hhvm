@@ -127,7 +127,7 @@ class RpcOptions {
   RpcOptions& setShardId(std::string shardId);
   const std::string& getShardId() const;
 
-  void setWriteHeader(const std::string& key, const std::string& value);
+  void setWriteHeader(std::string_view key, std::string value);
   const transport::THeader::StringToStringMap& getWriteHeaders() const;
   transport::THeader::StringToStringMap releaseWriteHeaders();
 

@@ -941,21 +941,22 @@ let requires_consistent_construct = function
  * strip nullables, so ?t becomes t, as context will always accept a t if a ?t
  * is expected.
  *
- * If for_lambda is true, then we are expecting a function type for the expected type,
+ * If strip_supportdyn is true, then we are expecting a function or shape type for the expected type,
  * and we should decompose supportdyn<t>, and like-push, and return true to
  * indicate that the type supports dynamic.
  *
  * Note: we currently do not generally expand ?t into (null | t), so ~?t is (dynamic | Toption t).
  *)
 let expand_expected_and_get_node
-    ?(for_lambda = false) env (expected : ExpectedTy.t option) =
+    ?(strip_supportdyn = false) env (expected : ExpectedTy.t option) =
   let rec unbox env ty =
+    let (env, ty) = Env.expand_type env ty in
     match TUtils.try_strip_dynamic env ty with
     | Some stripped_ty ->
       if TypecheckerOptions.enable_sound_dynamic env.genv.tcopt then
         let (env, opt_ty) =
           if
-            (not for_lambda)
+            (not strip_supportdyn)
             && TypecheckerOptions.pessimise_builtins (Env.get_tcopt env)
           then
             (env, None)
@@ -986,9 +987,8 @@ let expand_expected_and_get_node
   match expected with
   | None -> (env, None)
   | Some ExpectedTy.{ pos = p; reason = ur; ty = { et_type = ty; _ }; _ } ->
-    let (env, ty) = Env.expand_type env ty in
     let (env, uty, supportdyn) = unbox env ty in
-    if supportdyn && not for_lambda then
+    if supportdyn && not strip_supportdyn then
       (env, None)
     else
       (env, Some (p, ur, supportdyn, uty, get_node uty))
@@ -2062,14 +2062,21 @@ module EnumClassLabelOps = struct
         (env, Success (te, lty))
       | None ->
         let consts =
-          List.map (Cls.consts cls) ~f:(fun (name, const) ->
+          Cls.consts cls
+          |> List.filter ~f:(fun (name, _) ->
+                 not (String.equal name SN.Members.mClass))
+        in
+        let most_similar =
+          match Env.most_similar label_name consts fst with
+          | Some (name, const) ->
+            Some
               ( (if full then
                   Render.strip_ns enum_name ^ "#" ^ name
                 else
                   "#" ^ name),
-                const.cc_pos ))
+                const.cc_pos )
+          | None -> None
         in
-        let most_similar = Env.most_similar label_name consts fst in
         Errors.add_typing_error
           Typing_error.(
             enum
@@ -4863,7 +4870,9 @@ and expr_
         (env, (k, et, ty))
     in
     let (env, tfdm) =
-      match expand_expected_and_get_node env expected with
+      match
+        expand_expected_and_get_node ~strip_supportdyn:true env expected
+      with
       | (env, Some (pos, ur, _, _, Tshape (_, expected_fdm))) ->
         List.map_env
           env
@@ -5142,7 +5151,7 @@ and lambda ~is_anon ?expected p env f idl =
     (env, tefun, ty)
   in
   let (env, eexpected) =
-    expand_expected_and_get_node ~for_lambda:true env expected
+    expand_expected_and_get_node ~strip_supportdyn:true env expected
   in
   match eexpected with
   | Some (_pos, _ur, _, tdyn, Tdynamic)
@@ -5438,10 +5447,6 @@ and closure_bind_param params (env, t_params) ty : env * Tast.fun_param list =
     params := paraml;
     (match hint_of_type_hint param.param_type_hint with
     | Some h ->
-      let (pos, _) = h in
-      (* When creating a closure, the 'this' type will mean the
-       * late bound type of the current enclosing class
-       *)
       let decl_ty = Decl_hint.hint env.decl_env h in
       (match Typing_enforceability.get_enforcement env decl_ty with
       | Unenforced ->
@@ -5456,26 +5461,6 @@ and closure_bind_param params (env, t_params) ty : env * Tast.fun_param list =
         Phase.localize_no_subst env ~ignore_errors:false decl_ty
       in
       Option.iter ~f:Errors.add_typing_error ty_err_opt1;
-      let (env, ty_err_opt2) =
-        Typing_coercion.coerce_type
-          pos
-          Reason.URparam
-          env
-          ty
-          (MakeType.unenforced h)
-          Typing_error.Callback.unify_error
-      in
-      (* Closures are allowed to have explicit type-hints. When
-       * that is the case we should check that the argument passed
-       * is compatible with the type-hint.
-       * The body of the function should be type-checked with the
-       * hint and not the type of the argument passed.
-       * Otherwise it leads to strange results where
-       * foo(?string $x = null) is called with a string and fails to
-       * type-check. If $x is a string instead of ?string, null is not
-       * subtype of string ...
-       *)
-      Option.iter ty_err_opt2 ~f:Errors.add_typing_error;
       let (env, t_param) = bind_param env (h, param) in
       (env, t_params @ [t_param])
     | None ->
@@ -5492,23 +5477,10 @@ and closure_bind_variadic env vparam variadic_ty =
       (* if the hint is missing, use the type we expect *)
       ((env, None), variadic_ty, get_pos variadic_ty)
     | Some hint ->
-      let pos = fst hint in
       let ((env, ty_err_opt1), h) =
         Phase.localize_hint_no_subst env ~ignore_errors:false hint
       in
-      let (env, ty_err_opt2) =
-        Typing_coercion.coerce_type
-          pos
-          Reason.URparam
-          env
-          variadic_ty
-          (MakeType.unenforced h)
-          Typing_error.Callback.unify_error
-      in
-      let ty_err_opt =
-        Option.merge ~f:Typing_error.both ty_err_opt1 ty_err_opt2
-      in
-      ((env, ty_err_opt), h, Pos_or_decl.of_raw_pos vparam.param_pos)
+      ((env, ty_err_opt1), h, Pos_or_decl.of_raw_pos vparam.param_pos)
   in
   Option.iter ty_err_opt ~f:Errors.add_typing_error;
   let r = Reason.Rvar_param_from_decl pos in

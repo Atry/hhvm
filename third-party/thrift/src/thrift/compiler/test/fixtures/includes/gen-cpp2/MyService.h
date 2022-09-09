@@ -51,10 +51,18 @@ class ServiceHandler<::cpp2::MyService> : public apache::thrift::ServerInterface
   virtual void query(std::unique_ptr<::cpp2::MyStruct> /*s*/, std::unique_ptr<::cpp2::Included> /*i*/);
   virtual folly::Future<folly::Unit> future_query(std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
   virtual folly::SemiFuture<folly::Unit> semifuture_query(std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_query(std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
+  virtual folly::coro::Task<void> co_query(apache::thrift::RequestParams params, std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
+#endif
   virtual void async_tm_query(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback, std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
   virtual void has_arg_docs(std::unique_ptr<::cpp2::MyStruct> /*s*/, std::unique_ptr<::cpp2::Included> /*i*/);
   virtual folly::Future<folly::Unit> future_has_arg_docs(std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
   virtual folly::SemiFuture<folly::Unit> semifuture_has_arg_docs(std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_has_arg_docs(std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
+  virtual folly::coro::Task<void> co_has_arg_docs(apache::thrift::RequestParams params, std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
+#endif
   virtual void async_tm_has_arg_docs(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback, std::unique_ptr<::cpp2::MyStruct> p_s, std::unique_ptr<::cpp2::Included> p_i);
  private:
   static ::cpp2::MyServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -74,7 +82,7 @@ class MyServiceSvNull : public ::apache::thrift::ServiceHandler<MyService> {
   void has_arg_docs(std::unique_ptr<::cpp2::MyStruct> /*s*/, std::unique_ptr<::cpp2::Included> /*i*/) override;
 };
 
-class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -89,8 +97,8 @@ class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<MyServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<MyServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const MyServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const MyServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

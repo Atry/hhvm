@@ -54,6 +54,10 @@ class ServiceHandler<::test::fixtures::basic::MyService> : public apache::thrift
   virtual void query(::test::fixtures::basic::MyStruct& /*_return*/, std::unique_ptr<::test::fixtures::basic::MyUnion> /*u*/);
   virtual folly::Future<std::unique_ptr<::test::fixtures::basic::MyStruct>> future_query(std::unique_ptr<::test::fixtures::basic::MyUnion> p_u);
   virtual folly::SemiFuture<std::unique_ptr<::test::fixtures::basic::MyStruct>> semifuture_query(std::unique_ptr<::test::fixtures::basic::MyUnion> p_u);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::test::fixtures::basic::MyStruct>> co_query(std::unique_ptr<::test::fixtures::basic::MyUnion> p_u);
+  virtual folly::coro::Task<std::unique_ptr<::test::fixtures::basic::MyStruct>> co_query(apache::thrift::RequestParams params, std::unique_ptr<::test::fixtures::basic::MyUnion> p_u);
+#endif
   virtual void async_tm_query(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::test::fixtures::basic::MyStruct>>> callback, std::unique_ptr<::test::fixtures::basic::MyUnion> p_u);
  private:
   static ::test::fixtures::basic::MyServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -71,7 +75,7 @@ class MyServiceSvNull : public ::apache::thrift::ServiceHandler<MyService> {
   void query(::test::fixtures::basic::MyStruct& /*_return*/, std::unique_ptr<::test::fixtures::basic::MyUnion> /*u*/) override;
 };
 
-class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -86,8 +90,8 @@ class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<MyServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<MyServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const MyServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const MyServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

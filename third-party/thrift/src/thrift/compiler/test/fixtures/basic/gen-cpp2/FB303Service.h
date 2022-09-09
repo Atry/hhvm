@@ -54,6 +54,10 @@ class ServiceHandler<::test::fixtures::basic::FB303Service> : public apache::thr
   virtual void simple_rpc(::test::fixtures::basic::ReservedKeyword& /*_return*/, ::std::int32_t /*int_parameter*/);
   virtual folly::Future<std::unique_ptr<::test::fixtures::basic::ReservedKeyword>> future_simple_rpc(::std::int32_t p_int_parameter);
   virtual folly::SemiFuture<std::unique_ptr<::test::fixtures::basic::ReservedKeyword>> semifuture_simple_rpc(::std::int32_t p_int_parameter);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::test::fixtures::basic::ReservedKeyword>> co_simple_rpc(::std::int32_t p_int_parameter);
+  virtual folly::coro::Task<std::unique_ptr<::test::fixtures::basic::ReservedKeyword>> co_simple_rpc(apache::thrift::RequestParams params, ::std::int32_t p_int_parameter);
+#endif
   virtual void async_tm_simple_rpc(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::test::fixtures::basic::ReservedKeyword>>> callback, ::std::int32_t p_int_parameter);
  private:
   static ::test::fixtures::basic::FB303ServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -71,7 +75,7 @@ class FB303ServiceSvNull : public ::apache::thrift::ServiceHandler<FB303Service>
   void simple_rpc(::test::fixtures::basic::ReservedKeyword& /*_return*/, ::std::int32_t /*int_parameter*/) override;
 };
 
-class FB303ServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class FB303ServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -86,8 +90,8 @@ class FB303ServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProces
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<FB303ServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<FB303ServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const FB303ServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const FB303ServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

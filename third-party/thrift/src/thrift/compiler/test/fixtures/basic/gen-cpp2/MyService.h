@@ -54,42 +54,82 @@ class ServiceHandler<::test::fixtures::basic::MyService> : public apache::thrift
   virtual void ping();
   virtual folly::Future<folly::Unit> future_ping();
   virtual folly::SemiFuture<folly::Unit> semifuture_ping();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_ping();
+  virtual folly::coro::Task<void> co_ping(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_ping(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback);
   virtual void getRandomData(::std::string& /*_return*/);
   virtual folly::Future<std::unique_ptr<::std::string>> future_getRandomData();
   virtual folly::SemiFuture<std::unique_ptr<::std::string>> semifuture_getRandomData();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_getRandomData();
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_getRandomData(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_getRandomData(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::std::string>>> callback);
   virtual void sink(::std::int64_t /*sink*/);
   virtual folly::Future<folly::Unit> future_sink(::std::int64_t p_sink);
   virtual folly::SemiFuture<folly::Unit> semifuture_sink(::std::int64_t p_sink);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_sink(::std::int64_t p_sink);
+  virtual folly::coro::Task<void> co_sink(apache::thrift::RequestParams params, ::std::int64_t p_sink);
+#endif
   virtual void async_tm_sink(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback, ::std::int64_t p_sink);
   virtual void putDataById(::std::int64_t /*id*/, std::unique_ptr<::std::string> /*data*/);
   virtual folly::Future<folly::Unit> future_putDataById(::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
   virtual folly::SemiFuture<folly::Unit> semifuture_putDataById(::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_putDataById(::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
+  virtual folly::coro::Task<void> co_putDataById(apache::thrift::RequestParams params, ::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
+#endif
   virtual void async_tm_putDataById(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback, ::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
   virtual bool hasDataById(::std::int64_t /*id*/);
   virtual folly::Future<bool> future_hasDataById(::std::int64_t p_id);
   virtual folly::SemiFuture<bool> semifuture_hasDataById(::std::int64_t p_id);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<bool> co_hasDataById(::std::int64_t p_id);
+  virtual folly::coro::Task<bool> co_hasDataById(apache::thrift::RequestParams params, ::std::int64_t p_id);
+#endif
   virtual void async_tm_hasDataById(std::unique_ptr<apache::thrift::HandlerCallback<bool>> callback, ::std::int64_t p_id);
   virtual void getDataById(::std::string& /*_return*/, ::std::int64_t /*id*/);
   virtual folly::Future<std::unique_ptr<::std::string>> future_getDataById(::std::int64_t p_id);
   virtual folly::SemiFuture<std::unique_ptr<::std::string>> semifuture_getDataById(::std::int64_t p_id);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_getDataById(::std::int64_t p_id);
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_getDataById(apache::thrift::RequestParams params, ::std::int64_t p_id);
+#endif
   virtual void async_tm_getDataById(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::std::string>>> callback, ::std::int64_t p_id);
   virtual void deleteDataById(::std::int64_t /*id*/);
   virtual folly::Future<folly::Unit> future_deleteDataById(::std::int64_t p_id);
   virtual folly::SemiFuture<folly::Unit> semifuture_deleteDataById(::std::int64_t p_id);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_deleteDataById(::std::int64_t p_id);
+  virtual folly::coro::Task<void> co_deleteDataById(apache::thrift::RequestParams params, ::std::int64_t p_id);
+#endif
   virtual void async_tm_deleteDataById(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback, ::std::int64_t p_id);
   virtual void lobDataById(::std::int64_t /*id*/, std::unique_ptr<::std::string> /*data*/);
   virtual folly::Future<folly::Unit> future_lobDataById(::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
   virtual folly::SemiFuture<folly::Unit> semifuture_lobDataById(::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_lobDataById(::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
+  virtual folly::coro::Task<void> co_lobDataById(apache::thrift::RequestParams params, ::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
+#endif
   virtual void async_tm_lobDataById(std::unique_ptr<apache::thrift::HandlerCallbackBase> callback, ::std::int64_t p_id, std::unique_ptr<::std::string> p_data);
   virtual void invalid_return_for_hack(::std::set<float>& /*_return*/);
   virtual folly::Future<std::unique_ptr<::std::set<float>>> future_invalid_return_for_hack();
   virtual folly::SemiFuture<std::unique_ptr<::std::set<float>>> semifuture_invalid_return_for_hack();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::std::set<float>>> co_invalid_return_for_hack();
+  virtual folly::coro::Task<std::unique_ptr<::std::set<float>>> co_invalid_return_for_hack(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_invalid_return_for_hack(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::std::set<float>>>> callback);
   virtual void rpc_skipped_codegen();
   virtual folly::Future<folly::Unit> future_rpc_skipped_codegen();
   virtual folly::SemiFuture<folly::Unit> semifuture_rpc_skipped_codegen();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_rpc_skipped_codegen();
+  virtual folly::coro::Task<void> co_rpc_skipped_codegen(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_rpc_skipped_codegen(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback);
  private:
   static ::test::fixtures::basic::MyServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -125,7 +165,7 @@ class MyServiceSvNull : public ::apache::thrift::ServiceHandler<MyService> {
   void rpc_skipped_codegen() override;
 };
 
-class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -140,8 +180,8 @@ class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<MyServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<MyServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const MyServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const MyServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

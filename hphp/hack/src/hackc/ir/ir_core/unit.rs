@@ -11,7 +11,7 @@ pub use hhbc::FunctionName;
 pub use hhbc::IncludePath;
 pub use hhbc::Typedef;
 
-use crate::literal::AdataId;
+use crate::constant::AdataId;
 use crate::string_intern::StringInterner;
 use crate::Attribute;
 use crate::Class;
@@ -95,7 +95,7 @@ pub struct Unit<'a> {
     pub module_use: Option<Str<'a>>,
 
     /// The unit string interning table.
-    pub strings: StringInterner<'a>,
+    pub strings: StringInterner,
 
     /// The list of all external symbols referenced by this Unit.
     //

@@ -46,10 +46,18 @@ class ConstRef final : public detail::BaseRef<ConstRef> {
   // 'capture' any other runtime type.
   /* implicit */ ConstRef(const detail::RuntimeBase& other) noexcept
       : Base(other) {}
+  // 'capture' any native type we can safely infer the tag for.
+  template <typename T, typename Tag = infer_tag<T>>
+  /* implicit */ ConstRef(T&& val) noexcept
+      : ConstRef(Tag{}, std::forward<T>(val)) {}
+  // 'capture' a std::string.
+  // TODO: infer_tag a string_view type instead.
+  /* implicit */ ConstRef(const std::string& val) noexcept
+      : ConstRef(binary_t{}, val) {}
 
  private:
   friend Base;
-  template <typename ConstT, typename MutT>
+  template <typename, typename, typename>
   friend class detail::RuntimeAccessBase;
 
   template <typename Tag, typename T>
@@ -74,21 +82,15 @@ class Ref final : public detail::BaseRef<Ref, ConstRef> {
   void clear() { Base::clear(); }
 
   // Append to a list, string, etc.
-  void append(const RuntimeBase& val) { Base::append(val); }
+  using Base::append;
 
   // Add to a set, number, etc.
-  bool add(const RuntimeBase& val) { return Base::add(val); }
+  using Base::add;
 
   // Put a key-value pair, overwriting any existing entry in a map, struct, etc.
   //
   // Returns true if an existing value was replaced.
-  bool put(FieldId id, const RuntimeBase& val) { return Base::put(id, val); }
-  bool put(const RuntimeBase& key, const RuntimeBase& val) {
-    return Base::put(key, val);
-  }
-  bool put(const std::string& name, const RuntimeBase& val) {
-    return put(asRef(name), val);
-  }
+  using Base::put;
 
   // Throws on mismatch or if const.
   template <typename Tag>
@@ -104,7 +106,7 @@ class Ref final : public detail::BaseRef<Ref, ConstRef> {
 
  private:
   friend class detail::Ptr;
-  template <typename ConstT, typename MutT>
+  template <typename, typename, typename>
   friend class detail::RuntimeAccessBase;
   friend Base;
   using Base::asRef;
@@ -112,6 +114,43 @@ class Ref final : public detail::BaseRef<Ref, ConstRef> {
   explicit Ref(detail::Ptr data) noexcept : Base(data) {}
   template <typename Tag, typename T>
   Ref(Tag, T&& val) : Base(op::detail::getAnyType<Tag>(), &val) {}
+
+  friend bool operator==(const ConstRef& lhs, const Ref& rhs) {
+    return lhs.equal(rhs);
+  }
+  friend bool operator==(const Ref& lhs, const ConstRef& rhs) {
+    return lhs.equal(rhs);
+  }
+  friend bool operator!=(const ConstRef& lhs, const Ref& rhs) {
+    return !lhs.equal(rhs);
+  }
+  friend bool operator!=(const Ref& lhs, const ConstRef& rhs) {
+    return !lhs.equal(rhs);
+  }
+  friend bool operator<(const ConstRef& lhs, const Ref& rhs) {
+    return op::detail::is_lt(lhs.compare(rhs));
+  }
+  friend bool operator<(const Ref& lhs, const ConstRef& rhs) {
+    return op::detail::is_lt(lhs.compare(rhs));
+  }
+  friend bool operator<=(const ConstRef& lhs, const Ref& rhs) {
+    return op::detail::is_lteq(lhs.compare(rhs));
+  }
+  friend bool operator<=(const Ref& lhs, const ConstRef& rhs) {
+    return op::detail::is_lteq(lhs.compare(rhs));
+  }
+  friend bool operator>(const ConstRef& lhs, const Ref& rhs) {
+    return op::detail::is_gt(lhs.compare(rhs));
+  }
+  friend bool operator>(const Ref& lhs, const ConstRef& rhs) {
+    return op::detail::is_gt(lhs.compare(rhs));
+  }
+  friend bool operator>=(const ConstRef& lhs, const Ref& rhs) {
+    return op::detail::is_gteq(lhs.compare(rhs));
+  }
+  friend bool operator>=(const Ref& lhs, const ConstRef& rhs) {
+    return op::detail::is_gteq(lhs.compare(rhs));
+  }
 };
 
 namespace detail {
@@ -123,8 +162,8 @@ inline Ref Ptr::operator*() const noexcept {
 // A runtime Thrift value that owns it's own memory.
 //
 // TODO(afuller): Store small values in-situ.
-class Value : public detail::RuntimeAccessBase<ConstRef, Ref> {
-  using Base = detail::RuntimeAccessBase<ConstRef, Ref>;
+class Value : public detail::RuntimeAccessBase<ConstRef, Ref, Value> {
+  using Base = detail::RuntimeAccessBase<ConstRef, Ref, Value>;
   using RuntimeBase = detail::RuntimeBase;
 
  public:
@@ -198,23 +237,19 @@ class Value : public detail::RuntimeAccessBase<ConstRef, Ref> {
   void clear() { Base::clear(); }
 
   // Append to a list, string, etc.
-  void append(const RuntimeBase& val) { Base::append(val); }
+  using Base::append;
 
   // Add to a set, number, etc.
-  bool add(const RuntimeBase& val) { return Base::add(val); }
+  using Base::add;
 
   // Put a key-value pair, overwriting any existing entry in a map, struct, etc.
   //
   // Returns true if an existing value was replaced.
-  bool put(FieldId id, const RuntimeBase& val) { return Base::put(id, val); }
-  bool put(const RuntimeBase& key, const RuntimeBase& val) {
-    return Base::put(key, val);
-  }
-  bool put(const std::string& name, const RuntimeBase& val) {
-    return put(asRef(name), val);
-  }
+  using Base::put;
 
  private:
+  using Base::Base;
+
   template <typename Tag, typename T = native_type<Tag>>
   explicit Value(Tag, std::nullptr_t)
       : Base(
@@ -245,8 +280,6 @@ class Value : public detail::RuntimeAccessBase<ConstRef, Ref> {
   static ConstRef asRef(const std::string& name) {
     return ConstRef::to<type::string_t>(name);
   }
-
-  using Base::Base;
 };
 
 } // namespace type

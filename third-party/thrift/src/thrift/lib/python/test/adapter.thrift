@@ -24,9 +24,11 @@ include "thrift/annotation/scope.thrift"
   typeHint = "datetime.datetime",
 }
 @scope.Transitive
-struct AsDatetime {}
+struct AsDatetime {
+  1: string signature;
+}
 
-@AsDatetime
+@AsDatetime{signature = "DatetimeTypedef"}
 typedef i32 Datetime
 
 @python.Adapter{
@@ -37,14 +39,14 @@ typedef string AdaptedInt
 
 @python.Adapter{
   name = "thrift.python.test.adapters.noop.Wrapper",
-  typeHint = "thrift.python.test.adapters.noop.Wrapped",
+  typeHint = "thrift.python.test.adapters.noop.Wrapped[]",
 }
 struct Baz {
   1: string name;
 }
 
 struct Foo {
-  @AsDatetime
+  @AsDatetime{signature = "DatetimeField"}
   1: i32 created_at;
   2: Datetime updated_at;
   @AsDatetime
@@ -62,6 +64,9 @@ struct Foo {
 
 union Bar {
   1: string baz;
-  @AsDatetime
+  @AsDatetime{signature = "DatetimeField"}
   2: i32 ts;
 }
+
+@AsDatetime{signature = "DatetimeConstant"}
+const i32 NINETEEN_EIGHTY_FOUR = 441792000;

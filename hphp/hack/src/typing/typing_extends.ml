@@ -141,7 +141,9 @@ module ParentClassElt = struct
     | x -> x
 end
 
-module ParentClassEltSet = Caml.Set.Make (ParentClassElt)
+module ParentClassEltSet =
+  Reordered_argument_collections.Reordered_argument_set
+    (Caml.Set.Make (ParentClassElt))
 
 module ParentClassConst = struct
   type t = {
@@ -1200,7 +1202,7 @@ let check_members_from_all_parents
           member_kind
           member_name
       in
-      ParentClassEltSet.fold check class_elts env
+      ParentClassEltSet.fold ~f:check class_elts ~init:env
     in
     MemberNameMap.fold check member_map env
   in
@@ -1724,19 +1726,19 @@ let check_trait_diamonds
      * Set.find_first_opt only works for 'monotonic' `f` which is
      * not the case for the equality test, and Set.find_opt
      * uses the polymorphic equaliy: we only want to test for origin.
-     * Set doesn't provide a `find with condition` function so we
-     * do it by filter + choose.
+     * Set doesn't provide a `find with condition` so we do an iteration
+     * and bail at the first occurrence we spot
      *
      * This works in a deterministic way because the set we are working
      * with has the invariant that each element have a unique origin.
      *)
-    let candidates =
-      ParentClassEltSet.filter
-        (fun { ParentClassElt.class_elt = prev_class_elt; _ } ->
-          String.equal class_elt.ce_origin prev_class_elt.ce_origin)
+    let candidate =
+      ParentClassEltSet.find_one_opt
         elts
+        ~f:(fun { ParentClassElt.class_elt = prev_class_elt; _ } ->
+          String.equal class_elt.ce_origin prev_class_elt.ce_origin)
     in
-    match ParentClassEltSet.choose_opt candidates with
+    match candidate with
     | None -> ((default_parent_class_elt (), elts), None)
     | Some
         ({
@@ -1783,7 +1785,7 @@ let check_trait_diamonds
                :: err)
         in
         let elts =
-          ParentClassEltSet.remove (default_parent_class_elt ()) elts
+          ParentClassEltSet.remove elts (default_parent_class_elt ())
         in
         ((parent_class_elt, elts), None)
       else if MemberKind.is_property member_kind then
@@ -2067,11 +2069,23 @@ let check_class_extends_parents_typeconsts
                }
              env ->
           (* If class_ is a trait that has a require class C constraint, and C provides a concrete definition
-           * for the type constant, then compare the parent type constant against the type constant defined in
-           * the required class.  Otherwise compare it against the type constant defined in class_, if any *)
+           * for the type constant, and the parent definition is abstract, then compare the parent type constant
+           * against the type constant defined in the required class.
+           * Otherwise compare it against the type constant defined in class_, if any *)
           let class_tconst_opt =
+            (* if the parent definition is a concrete type constant, then we can skip checking type constants
+             * inherited via require class constants, as these must be concrete and a conflict check will be
+             * performed on the class itself *)
+            let is_parent_tconst_abstract =
+              match parent_tconst.ttc_kind with
+              | TCAbstract _ -> true
+              | TCConcrete _ -> false
+            in
             let class_req_tconst_opt =
-              if Ast_defs.is_c_trait (Cls.kind class_) then
+              if
+                Ast_defs.is_c_trait (Cls.kind class_)
+                && is_parent_tconst_abstract
+              then
                 List.find_map
                   (Cls.all_ancestor_req_class_requirements class_)
                   ~f:(fun (_, req_ty) ->
@@ -2180,7 +2194,7 @@ let merge_member_maps
                                (SMap.find_opt parent !errors_per_diamond
                                |> Option.value ~default:SMap.empty))
                             !errors_per_diamond);
-                    Some (ParentClassEltSet.add elt elts))
+                    Some (ParentClassEltSet.add elts elt))
                 members
                 prev_members
             in

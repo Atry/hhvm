@@ -30,7 +30,7 @@ impl<'a> PushCount<'a> for Instr {
                     IrToBc::PopC
                     | IrToBc::PopL(_)
                     | IrToBc::PushL(_)
-                    | IrToBc::PushLiteral(..)
+                    | IrToBc::PushConstant(..)
                     | IrToBc::PushUninit
                     | IrToBc::UnsetL(_),
                 )
@@ -138,8 +138,6 @@ impl<'a> PushCount<'a> for instr::Hhbc {
             | Hhbc::NewKeysetArray(..)
             | Hhbc::NewObj(..)
             | Hhbc::NewObjD(..)
-            | Hhbc::NewObjR(..)
-            | Hhbc::NewObjRD(..)
             | Hhbc::NewObjS(..)
             | Hhbc::NewPair(..)
             | Hhbc::NewStructDict(..)

@@ -27,8 +27,6 @@ namespace compiler {
 namespace {
 
 constexpr auto kGeneratePatchUri = "facebook.com/thrift/op/GeneratePatch";
-constexpr auto kGenerateOptionalPatchUri =
-    "facebook.com/thrift/op/GenerateOptionalPatch";
 
 // TODO(afuller): Index all types by uri, and find them that way.
 const char* getPatchTypeName(t_base_type::type base_type) {
@@ -51,31 +49,6 @@ const char* getPatchTypeName(t_base_type::type base_type) {
       return "patch.StringPatch";
     case t_base_type::type::t_binary:
       return "patch.BinaryPatch";
-    default:
-      return "";
-  }
-}
-// TODO(afuller): Index all types by uri, and find them that way.
-const char* getOptionalPatchTypeName(t_base_type::type base_type) {
-  switch (base_type) {
-    case t_base_type::type::t_bool:
-      return "patch.OptionalBoolPatch";
-    case t_base_type::type::t_byte:
-      return "patch.OptionalBytePatch";
-    case t_base_type::type::t_i16:
-      return "patch.OptionalI16Patch";
-    case t_base_type::type::t_i32:
-      return "patch.OptionalI32Patch";
-    case t_base_type::type::t_i64:
-      return "patch.OptionalI64Patch";
-    case t_base_type::type::t_float:
-      return "patch.OptionalFloatPatch";
-    case t_base_type::type::t_double:
-      return "patch.OptionalDoublePatch";
-    case t_base_type::type::t_string:
-      return "patch.OptionalStringPatch";
-    case t_base_type::type::t_binary:
-      return "patch.OptionalBinaryPatch";
     default:
       return "";
   }
@@ -264,47 +237,16 @@ struct PatchGen : StructGen {
   }
 };
 
-t_type_ref resolve_value_type(t_struct& patch_type) {
-  // All patch types must have an 'optional Value assign' field.
-  t_type_ref result;
-  if (const t_field* field = patch_type.get_field_by_name("assign")) {
-    // The field type is the value_type.
-    result = field->type();
-  }
-  return result;
-}
-
-// Generates an optional patch representation for any patch with the
-// @patch.GenerateOptionalPatch annotation.
-void generate_optional_patch(
-    diagnostic_context& ctx, mutator_context& mctx, t_struct& node) {
-  if (auto* annot =
-          node.find_structured_annotation_or_null(kGenerateOptionalPatchUri)) {
-    // Add a 'optional patch' for the given patch type.
-    if (t_type_ref value_type = resolve_value_type(node)) {
-      patch_generator::get_for(ctx, mctx).add_optional_patch(
-          *annot, value_type, node);
-    } else {
-      ctx.error(
-          "Could not resolve the 'value' type, needed to generate the optional patch struct.");
-    }
-  }
-}
-
 // Generates a patch representation for any struct with the @patch.GeneratePatch
 // annotation.
 void generate_struct_patch(
     diagnostic_context& ctx, mutator_context& mctx, t_struct& node) {
   if (auto* annot =
           ctx.program().inherit_annotation_or_null(node, kGeneratePatchUri)) {
-    auto& generator = patch_generator::get_for(ctx, mctx);
-
     // Add a 'field patch' and 'struct patch' using it.
-    auto& patch = generator.add_field_patch(*annot, node);
-    auto& struct_patch = generator.add_struct_patch(*annot, node, patch);
-
-    // Add an 'optional patch' based on the added patch type.
-    generator.add_optional_patch(*annot, node, struct_patch);
+    auto& generator = patch_generator::get_for(ctx, mctx);
+    generator.add_struct_patch(
+        *annot, node, generator.add_field_patch(*annot, node));
   }
 }
 
@@ -312,14 +254,10 @@ void generate_union_patch(
     diagnostic_context& ctx, mutator_context& mctx, t_union& node) {
   if (auto* annot =
           ctx.program().inherit_annotation_or_null(node, kGeneratePatchUri)) {
+    // Add a 'field patch' and 'union patch' using it.
     auto& generator = patch_generator::get_for(ctx, mctx);
-
-    // Add a 'structured patch' and 'union value patch' using it.
-    auto& patch = generator.add_field_patch(*annot, node);
-    auto& union_patch = generator.add_union_patch(*annot, node, patch);
-
-    // Add an 'optional patch' based on the added patch type.
-    generator.add_optional_patch(*annot, node, union_patch);
+    generator.add_union_patch(
+        *annot, node, generator.add_field_patch(*annot, node));
   }
 }
 
@@ -328,7 +266,6 @@ void generate_union_patch(
 void add_patch_mutators(ast_mutators& mutators) {
   auto& mutator = mutators[standard_mutator_stage::plugin];
   mutator.add_struct_visitor(&generate_struct_patch);
-  mutator.add_struct_visitor(&generate_optional_patch);
   mutator.add_union_visitor(&generate_union_patch);
 }
 
@@ -338,17 +275,6 @@ patch_generator& patch_generator::get_for(
   return ctx.cache().get(program, [&]() {
     return std::make_unique<patch_generator>(ctx, program);
   });
-}
-
-t_struct& patch_generator::add_optional_patch(
-    const t_node& annot, t_type_ref value_type, t_struct& patch_type) {
-  PatchGen gen{{annot, gen_prefix_struct(annot, patch_type, "Optional")}};
-  gen.clearUnion();
-  gen.patchPrior(patch_type);
-  box(gen.ensureUnion(value_type));
-  gen.patchAfter(patch_type);
-  gen.set_adapter("OptionalPatchAdapter", program_);
-  return gen;
 }
 
 t_struct& patch_generator::add_field_patch(
@@ -394,9 +320,7 @@ t_type_ref patch_generator::find_patch_type(
   // Base types use a shared representation defined in patch.thrift.
   const auto* type = field.type()->get_true_type();
   if (auto* base_type = dynamic_cast<const t_base_type*>(type)) {
-    const char* name = field.qualifier() == t_field_qualifier::optional
-        ? getOptionalPatchTypeName(base_type->base_type())
-        : getPatchTypeName(base_type->base_type());
+    const char* name = getPatchTypeName(base_type->base_type());
     if (const auto* result = program_.scope()->find_type(name)) {
       return t_type_ref::from_ptr(result);
     }
@@ -435,10 +359,6 @@ t_type_ref patch_generator::find_patch_type(
 
   if (auto* structured = dynamic_cast<const t_structured*>(type)) {
     std::string name = structured->name() + "Patch";
-    if (field.qualifier() == t_field_qualifier::optional) {
-      name = "Optional" + std::move(name);
-    }
-
     if (!structured->uri().empty()) { // Try to look up by URI.
       if (auto* result = dynamic_cast<const t_type*>(program_.scope()->find_def(
               getSibName(structured->uri(), name)))) {
@@ -493,10 +413,6 @@ t_type_ref patch_generator::find_patch_type(
     }
   } else {
     gen.set_adapter("AssignPatchAdapter", program_);
-  }
-
-  if (field.qualifier() == t_field_qualifier::optional) {
-    return add_optional_patch(annot, field.type(), gen);
   }
   return gen;
 }

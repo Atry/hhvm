@@ -1,6 +1,10 @@
 {
   "__fbthrift": "@generated",
   "thrift_module" : "cpp",
+  "includes": {
+    "scope": "thrift/annotation/scope.thrift",
+    "thrift": "thrift/annotation/thrift.thrift"
+  },
   "namespaces": {
     "go": "thrift.annotation.cpp",
     "java": "com.facebook.thrift.annotation.cpp_deprecated",
@@ -187,6 +191,12 @@
         "is_exception" : false,
         "is_union" : false,
         "lineno" : 161
+      },
+      "UseOpEncode" : {
+        "name" : "UseOpEncode",
+        "is_exception" : false,
+        "is_union" : false,
+        "lineno" : 187
       }
       },
   "source_path" : "thrift/annotation/cpp",

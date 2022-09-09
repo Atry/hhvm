@@ -79,6 +79,7 @@ namespace facebook {
 namespace common {
 namespace mysql_client {
 
+class AsyncConnection;
 class AsyncMysqlClient;
 class SyncMysqlClient;
 class Operation;
@@ -91,6 +92,10 @@ class MysqlConnectionHolder;
 // and use the client it returns, which is shared process-wide.
 class AsyncMysqlClient : public MysqlClientBase {
  public:
+  // Having this type (`uses_one_thread`) tells the pool storage later that we
+  // don't need synchronization - see PoolStorage.h
+  using uses_one_thread = void;
+
   AsyncMysqlClient();
   ~AsyncMysqlClient() override;
 
@@ -199,7 +204,7 @@ class AsyncMysqlClient : public MysqlClientBase {
       std::unique_ptr<db::SquangleLoggerBase> db_logger,
       std::unique_ptr<db::DBCounterBase> db_stats);
 
-  bool runInThread(folly::Cob&& fn) override;
+  bool runInThread(folly::Cob&& fn, bool wait = false) override;
 
   db::SquangleLoggingData makeSquangleLoggingData(
       const ConnectionKey* connKey,
@@ -289,6 +294,8 @@ class AsyncMysqlClient : public MysqlClientBase {
 
   // Private methods, primarily used by Operations and its subclasses.
   friend class AsyncConnectionPool;
+  template <typename Client>
+  friend class ConnectionPool;
 
   void init();
 

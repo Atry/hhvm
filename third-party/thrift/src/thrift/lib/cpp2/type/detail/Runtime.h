@@ -20,8 +20,8 @@
 #include <stdexcept>
 #include <type_traits>
 
-#include <folly/ConstexprMath.h>
 #include <folly/lang/Exception.h>
+#include <thrift/lib/cpp2/type/AlignedPtr.h>
 #include <thrift/lib/cpp2/type/Id.h>
 #include <thrift/lib/cpp2/type/NativeType.h>
 #include <thrift/lib/cpp2/type/Tag.h>
@@ -34,54 +34,6 @@ class Ref;
 namespace detail {
 
 const TypeInfo& voidTypeInfo();
-
-// A pointer for a type that has sufficent alignment to store information
-// in the lower bits.
-//
-// TODO(afuller): Moved to a shared locations, so this can be used to track
-// 'ownership' as well.
-template <typename T, size_t Bits = folly::constexpr_log2(alignof(T))>
-class AlignedPtr {
- public:
-  static_assert(
-      Bits > 0 && Bits <= folly::constexpr_log2(alignof(T)),
-      "insufficent alignment");
-  constexpr static std::uintptr_t kMask = ~std::uintptr_t{} << Bits;
-
-  constexpr AlignedPtr() noexcept = default;
-  /* implicit */ constexpr AlignedPtr(T* ptr, std::uintptr_t bits = {}) noexcept
-      : ptr_((folly::bit_cast<std::uintptr_t>(ptr) & kMask) | (bits & ~kMask)) {
-    assert((bits & kMask) == 0); // Programming error.
-    // Never happens because of T's alignment.
-    assert((folly::bit_cast<std::uintptr_t>(ptr) & ~kMask) == 0);
-  }
-
-  T* get() const noexcept { return reinterpret_cast<T*>(ptr_ & kMask); }
-
-  template <size_t Bit>
-  constexpr bool get() const noexcept {
-    return ptr_ & bitMask<Bit>();
-  }
-
-  template <size_t Bit>
-  constexpr void set() noexcept {
-    ptr_ |= bitMask<Bit>();
-  }
-
-  template <size_t Bit>
-  constexpr void clear() noexcept {
-    ptr_ &= ~bitMask<Bit>();
-  }
-
- private:
-  std::uintptr_t ptr_ = {};
-
-  template <size_t Bit>
-  constexpr static auto bitMask() noexcept {
-    static_assert(Bit < Bits, "out of range");
-    return std::uintptr_t{1} << Bit;
-  }
-};
 
 // The type information associated with a runtime Thrift value.
 //
@@ -165,6 +117,9 @@ class RuntimeBase {
   }
 
   bool equal(const RuntimeBase& rhs) const { return type_->equal(ptr_, rhs); }
+  folly::ordering compare(const RuntimeBase& rhs) const {
+    return type_->compare(ptr_, rhs);
+  }
 
  protected:
   RuntimeType type_;
@@ -217,12 +172,6 @@ class RuntimeBase {
   void reset() noexcept {
     type_ = {};
     ptr_ = {};
-  }
-
- private:
-  friend bool operator==(
-      const RuntimeBase& lhs, const RuntimeBase& rhs) noexcept {
-    return lhs.equal(rhs);
   }
 };
 
@@ -279,7 +228,7 @@ inline Ptr RuntimeBase::get(size_t pos, bool ctxConst, bool ctxRvalue) const {
 }
 
 // A base struct provides helpers for throwing exceptions and default throwing
-// impls type-specific ops.
+// implementations for type-specific ops.
 struct BaseErasedOp {
   [[noreturn]] static void bad_op(const char* msg = "not supported") {
     folly::throw_exception<std::logic_error>(msg);
@@ -306,13 +255,15 @@ struct BaseErasedOp {
 // TODO(afuller): Consider adding asMap(), asList(), etc, to create type-safe
 // views, with APIs that match c++ standard containers (vs the Thrift 'op' names
 // used in the core API).
-template <typename ConstT, typename MutT>
-class RuntimeAccessBase : public RuntimeBase {
+template <typename ConstT, typename MutT, typename Derived>
+class RuntimeAccessBase : public RuntimeBase, protected BaseDerived<Derived> {
   using Base = RuntimeBase;
 
  public:
   using Base::Base;
   explicit RuntimeAccessBase(const Base& other) : Base(other) {}
+
+  bool identical(const ConstT& rhs) const { return Base::identical(rhs); }
 
   // Get by value.
   MutT get(const Base& key) & { return MutT{Base::get(key)}; }
@@ -370,11 +321,47 @@ class RuntimeAccessBase : public RuntimeBase {
   static ConstT asRef(const std::string& name) {
     return ConstT::template to<type::string_t>(name);
   }
+
+  void append(ConstT val) { Base::append(val); }
+  void append(const std::string& val) {
+    append(ConstT::template to<binary_t>(val));
+  }
+
+  bool add(ConstT val) { return Base::add(val); }
+  bool add(const std::string& val) {
+    return add(ConstT::template to<binary_t>(val));
+  }
+
+  bool put(FieldId id, ConstT val) { return Base::put(id, val); }
+  bool put(ConstT key, ConstT val) { return Base::put(key, val); }
+  bool put(const std::string& name, ConstT val) {
+    return put(asRef(name), val);
+  }
+
+ private:
+  friend bool operator==(const Derived& lhs, const Derived& rhs) {
+    return lhs.equal(rhs);
+  }
+  friend bool operator!=(const Derived& lhs, const Derived& rhs) {
+    return !lhs.equal(rhs);
+  }
+  friend bool operator<(const Derived& lhs, const Derived& rhs) {
+    return op::detail::is_lt(lhs.compare(rhs));
+  }
+  friend bool operator<=(const Derived& lhs, const Derived& rhs) {
+    return op::detail::is_lteq(lhs.compare(rhs));
+  }
+  friend bool operator>(const Derived& lhs, const Derived& rhs) {
+    return op::detail::is_gt(lhs.compare(rhs));
+  }
+  friend bool operator>=(const Derived& lhs, const Derived& rhs) {
+    return op::detail::is_gteq(lhs.compare(rhs));
+  }
 };
 
 template <typename Derived, typename ConstT = Derived>
-class BaseRef : public RuntimeAccessBase<ConstT, Derived> {
-  using Base = RuntimeAccessBase<ConstT, Derived>;
+class BaseRef : public RuntimeAccessBase<ConstT, Derived, Derived> {
+  using Base = RuntimeAccessBase<ConstT, Derived, Derived>;
 
  public:
   using Base::Base;
@@ -406,11 +393,11 @@ struct VoidErasedOp : BaseErasedOp {
   }
   static bool empty(const void*) { return true; }
   static bool identical(const void*, const RuntimeBase&) { return true; }
-  static folly::ordering compare(const void*, const RuntimeBase& rhs) {
+  static partial_ordering compare(const void*, const RuntimeBase& rhs) {
     if (!rhs.type().empty()) {
       bad_op();
     }
-    return folly::ordering::eq;
+    return partial_ordering::eq;
   }
   static void clear(void*) {}
 };

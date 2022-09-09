@@ -176,7 +176,7 @@ impl Display for FmtSetOpOp {
     }
 }
 
-pub(crate) struct FmtFuncParams<'a>(pub &'a Func<'a>, pub &'a StringInterner<'a>);
+pub(crate) struct FmtFuncParams<'a>(pub &'a Func<'a>, pub &'a StringInterner);
 
 impl Display for FmtFuncParams<'_> {
     fn fmt(&self, w: &mut Formatter<'_>) -> Result {
@@ -220,38 +220,38 @@ impl Display for FmtIdentifier<'_> {
     }
 }
 
-pub(crate) struct FmtIdentifierId<'a, 'b>(pub UnitStringId, pub &'b StringInterner<'a>);
+pub(crate) struct FmtIdentifierId<'a>(pub UnitBytesId, pub &'a StringInterner);
 
-impl Display for FmtIdentifierId<'_, '_> {
+impl Display for FmtIdentifierId<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let FmtIdentifierId(id, strings) = *self;
-        let id = strings.lookup(id).as_bytes();
+        let id = strings.lookup_bytes(id);
         FmtIdentifier(id).fmt(f)
     }
 }
 
-pub(crate) struct FmtLiteral<'a, 'b>(pub(crate) &'b Literal<'a>);
+pub(crate) struct FmtConstant<'a, 'b>(pub(crate) &'b Constant<'a>);
 
-impl Display for FmtLiteral<'_, '_> {
+impl Display for FmtConstant<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        let FmtLiteral(literal) = self;
-        match literal {
-            Literal::Bool(false) => write!(f, "false")?,
-            Literal::Bool(true) => write!(f, "true")?,
-            Literal::Dict(name) => write!(f, "dict({})", FmtQuotedStr(name))?,
-            Literal::Dir => write!(f, "dir")?,
-            Literal::Double(value) => write!(f, "{}", value.0)?,
-            Literal::File => write!(f, "file")?,
-            Literal::FuncCred => write!(f, "func_cred")?,
-            Literal::Int(value) => write!(f, "{}", value)?,
-            Literal::Keyset(name) => write!(f, "keyset({})", FmtQuotedStr(name))?,
-            Literal::Method => write!(f, "method")?,
-            Literal::Named(name) => write!(f, "literal({})", FmtIdentifier(name.as_bytes()))?,
-            Literal::NewCol(k) => write!(f, "new_col({:?})", k)?,
-            Literal::Null => write!(f, "null")?,
-            Literal::String(value) => FmtQuotedStr(value).fmt(f)?,
-            Literal::Uninit => write!(f, "uninit")?,
-            Literal::Vec(name) => write!(f, "vec({})", FmtQuotedStr(name))?,
+        let FmtConstant(constant) = self;
+        match constant {
+            Constant::Bool(false) => write!(f, "false")?,
+            Constant::Bool(true) => write!(f, "true")?,
+            Constant::Dict(name) => write!(f, "dict({})", FmtQuotedStr(name))?,
+            Constant::Dir => write!(f, "dir")?,
+            Constant::Double(value) => write!(f, "{}", value.0)?,
+            Constant::File => write!(f, "file")?,
+            Constant::FuncCred => write!(f, "func_cred")?,
+            Constant::Int(value) => write!(f, "{}", value)?,
+            Constant::Keyset(name) => write!(f, "keyset({})", FmtQuotedStr(name))?,
+            Constant::Method => write!(f, "method")?,
+            Constant::Named(name) => write!(f, "constant({})", FmtIdentifier(name.as_bytes()))?,
+            Constant::NewCol(k) => write!(f, "new_col({:?})", k)?,
+            Constant::Null => write!(f, "null")?,
+            Constant::String(value) => FmtQuotedStr(value).fmt(f)?,
+            Constant::Uninit => write!(f, "uninit")?,
+            Constant::Vec(name) => write!(f, "vec({})", FmtQuotedStr(name))?,
         }
 
         Ok(())
@@ -264,11 +264,11 @@ impl Display for FmtVid<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let FmtVid(body, vid, verbose) = *self;
         match vid.full() {
-            FullInstrId::Literal(lid) => {
+            FullInstrId::Constant(cid) => {
                 if verbose {
                     FmtRawVid(vid).fmt(f)
                 } else {
-                    FmtLiteralId(body, lid).fmt(f)
+                    FmtConstantId(body, cid).fmt(f)
                 }
             }
             FullInstrId::Instr(iid) => {
@@ -326,7 +326,7 @@ impl Display for FmtInitPropOp {
     }
 }
 
-pub struct FmtInstr<'a, 'b>(pub &'b Func<'a>, pub &'b StringInterner<'a>, pub InstrId);
+pub struct FmtInstr<'a, 'b>(pub &'b Func<'a>, pub &'b StringInterner, pub InstrId);
 
 impl Display for FmtInstr<'_, '_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
@@ -370,9 +370,9 @@ impl Display for FmtIsTypeOp {
     }
 }
 
-pub struct FmtLid<'a, 'b>(pub LocalId, pub &'b StringInterner<'a>);
+pub struct FmtLid<'a>(pub LocalId, pub &'a StringInterner);
 
-impl Display for FmtLid<'_, '_> {
+impl Display for FmtLid<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let FmtLid(ref lid, strings) = *self;
         match *lid {
@@ -382,9 +382,9 @@ impl Display for FmtLid<'_, '_> {
     }
 }
 
-pub(crate) struct FmtLids<'a, 'b>(pub(crate) &'b [LocalId], pub &'b StringInterner<'a>);
+pub(crate) struct FmtLids<'a>(pub(crate) &'a [LocalId], pub &'a StringInterner);
 
-impl Display for FmtLids<'_, '_> {
+impl Display for FmtLids<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let FmtLids(slice, strings) = *self;
         write!(
@@ -395,13 +395,13 @@ impl Display for FmtLids<'_, '_> {
     }
 }
 
-pub(crate) struct FmtLiteralId<'a>(pub(crate) &'a Func<'a>, pub(crate) LiteralId);
+pub(crate) struct FmtConstantId<'a>(pub(crate) &'a Func<'a>, pub(crate) ConstantId);
 
-impl Display for FmtLiteralId<'_> {
+impl Display for FmtConstantId<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        let FmtLiteralId(body, lid) = *self;
-        let literal = body.literal(lid);
-        FmtLiteral(literal).fmt(f)
+        let FmtConstantId(body, cid) = *self;
+        let constant = body.constant(cid);
+        FmtConstant(constant).fmt(f)
     }
 }
 
@@ -446,13 +446,9 @@ impl Display for FmtMOpMode {
     }
 }
 
-pub(crate) struct FmtOptKeyValue<'a, 'b>(
-    pub Option<LocalId>,
-    pub LocalId,
-    pub &'b StringInterner<'a>,
-);
+pub(crate) struct FmtOptKeyValue<'a>(pub Option<LocalId>, pub LocalId, pub &'a StringInterner);
 
-impl Display for FmtOptKeyValue<'_, '_> {
+impl Display for FmtOptKeyValue<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let FmtOptKeyValue(key, value, strings) = *self;
         match key {
@@ -470,19 +466,16 @@ impl Display for FmtQuotedStr<'_> {
     }
 }
 
-pub(crate) struct FmtQuotedStringId<'a, 'b>(
-    pub(crate) UnitStringId,
-    pub(crate) &'b StringInterner<'a>,
-);
+pub(crate) struct FmtQuotedStringId<'a>(pub(crate) UnitBytesId, pub(crate) &'a StringInterner);
 
-impl Display for FmtQuotedStringId<'_, '_> {
+impl Display for FmtQuotedStringId<'_> {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let FmtQuotedStringId(id, strings) = *self;
-        if id == UnitStringId::NONE {
+        if id == UnitBytesId::NONE {
             write!(f, "none")
         } else {
-            let name = strings.lookup(id);
-            FmtEscapedString(name.as_bytes()).fmt(f)
+            let name = strings.lookup_bytes(id);
+            FmtEscapedString(name).fmt(f)
         }
     }
 }
@@ -512,11 +505,11 @@ impl Display for FmtRawVid {
                     write!(f, "%{}", iid.as_usize())
                 }
             }
-            FullInstrId::Literal(lid) => {
-                if lid == LiteralId::NONE {
+            FullInstrId::Constant(cid) => {
+                if cid == ConstantId::NONE {
                     f.write_str("#none")
                 } else {
-                    write!(f, "#{}", lid.as_usize())
+                    write!(f, "#{}", cid.as_usize())
                 }
             }
             FullInstrId::None => f.write_str("none"),
@@ -554,8 +547,8 @@ impl Display for FmtSpecialClsRef {
 }
 
 pub(crate) struct FmtTParams<'a>(
-    pub(crate) &'a ClassIdMap<TParamBounds<'a>>,
-    pub &'a StringInterner<'a>,
+    pub(crate) &'a ClassIdMap<TParamBounds>,
+    pub &'a StringInterner,
 );
 
 impl Display for FmtTParams<'_> {
@@ -573,7 +566,7 @@ impl Display for FmtTParams<'_> {
                         write!(f, ": ")?;
                         let mut sep = "";
                         for bound in bounds.bounds.iter() {
-                            write!(f, "{sep}{}", FmtType(bound))?;
+                            write!(f, "{sep}{}", bound.display(strings))?;
                             sep = " + ";
                         }
                     }
@@ -586,7 +579,7 @@ impl Display for FmtTParams<'_> {
 
 pub(crate) struct FmtShadowedTParams<'a>(
     pub(crate) &'a Vec<ClassId>,
-    pub(crate) &'a StringInterner<'a>,
+    pub(crate) &'a StringInterner,
 );
 
 impl Display for FmtShadowedTParams<'_> {
@@ -602,31 +595,6 @@ impl Display for FmtShadowedTParams<'_> {
                     FmtIdentifierId(name.id, strings).fmt(f)
                 })
             )
-        }
-    }
-}
-
-pub(crate) struct FmtType<'a>(pub(crate) &'a Type<'a>);
-
-impl Display for FmtType<'_> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        match self.0 {
-            Type::Empty => write!(f, "empty"),
-            Type::Flags(flags, inner) => write!(f, "flags({}, {})", flags, FmtType(inner)),
-            Type::None => write!(f, "unspecified"),
-            Type::User(name) => write!(f, "{}", FmtIdentifier(name.as_ref())),
-            Type::UserNoConstraint(name) => {
-                write!(f, "unconstrained({})", FmtIdentifier(name.as_ref()))
-            }
-            Type::UserWithConstraint(name, constraint) => {
-                write!(
-                    f,
-                    "constrained({}, {})",
-                    FmtIdentifier(name.as_ref()),
-                    FmtIdentifier(constraint.as_ref())
-                )
-            }
-            Type::Void => write!(f, "void"),
         }
     }
 }

@@ -223,7 +223,8 @@ type t = {
   po_disable_xhp_children_declarations: bool;
   (* Enable enum class syntax *)
   po_enable_enum_classes: bool;
-  po_disable_hh_ignore_error: bool;
+  (* Disable HH_IGNORE_ERROR comments, either raising an error if 1 or treating them as normal comments if 2. *)
+  po_disable_hh_ignore_error: int;
   (* Enable features used to typecheck systemlib *)
   tco_is_systemlib: bool;
   (* Controls if higher-kinded types are supported *)
@@ -329,6 +330,7 @@ type t = {
   (* When set, mutates generic entities by substituting type parameters and
      typechecks the mutated program *)
   tco_substitution_mutation: bool;
+  tco_use_type_alias_heap: bool;
 }
 [@@deriving eq, show]
 
@@ -417,7 +419,7 @@ val make :
   ?po_disable_xhp_element_mangling:bool ->
   ?po_disable_xhp_children_declarations:bool ->
   ?po_enable_enum_classes:bool ->
-  ?po_disable_hh_ignore_error:bool ->
+  ?po_disable_hh_ignore_error:int ->
   ?po_allow_unstable_features:bool ->
   ?tco_is_systemlib:bool ->
   ?tco_higher_kinded_types:bool ->
@@ -464,6 +466,7 @@ val make :
   ?tco_loop_iteration_upper_bound:int option ->
   ?tco_expression_tree_virtualize_functions:bool ->
   ?tco_substitution_mutation:bool ->
+  ?tco_use_type_alias_heap:bool ->
   unit ->
   t
 

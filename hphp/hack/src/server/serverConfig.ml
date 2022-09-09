@@ -427,7 +427,7 @@ let load ~silent config_filename options : t * ServerLocalConfig.t =
         (bool_opt "disable_xhp_children_declarations" config)
       ?po_enable_xhp_class_modifier:
         (bool_opt "enable_xhp_class_modifier" config)
-      ?po_disable_hh_ignore_error:(bool_opt "disable_hh_ignore_error" config)
+      ?po_disable_hh_ignore_error:(int_opt "disable_hh_ignore_error" config)
       ?tco_method_call_inference:(bool_opt "method_call_inference" config)
       ?tco_report_pos_from_reason:(bool_opt "report_pos_from_reason" config)
       ?tco_typecheck_sample_rate:(float_opt "typecheck_sample_rate" config)
@@ -493,6 +493,7 @@ let load ~silent config_filename options : t * ServerLocalConfig.t =
         (bool_opt "allow_all_files_for_module_declarations" config)
       ?tco_expression_tree_virtualize_functions:
         (bool_opt "expression_tree_virtualize_functions" config)
+      ?tco_use_type_alias_heap:(bool_opt "use_type_alias_heap" config)
       ()
   in
   Errors.allowed_fixme_codes_strict :=

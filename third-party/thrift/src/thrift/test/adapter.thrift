@@ -196,6 +196,13 @@ struct AlsoMoveOnly {
   1: i64 ptr;
 }
 
+@cpp.Adapter{name = "::apache::thrift::test::TemplatedTestAdapter"}
+@scope.Transitive
+struct ApplyAdapter {}
+
+@ApplyAdapter
+struct TransitiveAdapted {}
+
 @cpp.Adapter{name = "::apache::thrift::test::CountingAdapter<true, int>"}
 typedef i64 CountingInt
 struct CountingStruct {
@@ -239,3 +246,9 @@ const string msg_no_transitive = "hello, world 2";
 
 @cpp.Adapter{name = "::apache::thrift::test::VariableAdapter"}
 const Person2 person_no_transitive = Person2{name = "DefaultName 2"};
+
+const AdaptedBool type_adapted = true;
+
+const MoveOnly nested_adapted = {"ptr": {}};
+
+const list<AdaptedByte> container_of_adapted = [1, 2, 3];

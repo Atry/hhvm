@@ -5,6 +5,7 @@
 
 use std::ops::BitAnd;
 use std::ops::BitOr;
+use std::ops::Not;
 
 #[allow(unreachable_patterns)]
 #[cxx::bridge(namespace = "HPHP")]
@@ -42,7 +43,8 @@ pub mod ffi {
         AttrIsReadonly = 0x4000,
         AttrReadonlyThis = 0x4000,
         AttrReadonlyReturn = 0x8000,
-        AttrInternal = 0x20000,
+        AttrInternal = 0x10000,
+        AttrInternalSoft = 0x20000,
         AttrPersistent = 0x40000,
         AttrDynamicallyCallable = 0x80000,
         AttrDynamicallyConstructible = 0x80000,
@@ -119,6 +121,10 @@ impl TypeConstraintFlags {
     pub fn is_empty(&self) -> bool {
         *self == TypeConstraintFlags::NoFlags
     }
+
+    pub fn contains(&self, flag: Self) -> bool {
+        (self.repr & flag.repr) != 0
+    }
 }
 
 impl BitOr for TypeConstraintFlags {
@@ -138,6 +144,14 @@ impl BitAnd for TypeConstraintFlags {
         TypeConstraintFlags {
             repr: self.repr & other.repr,
         }
+    }
+}
+
+impl Not for TypeConstraintFlags {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self { repr: !self.repr }
     }
 }
 

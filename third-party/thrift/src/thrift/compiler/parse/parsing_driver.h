@@ -25,9 +25,8 @@
 #include <vector>
 
 #include <boost/optional.hpp>
-#include <fmt/core.h>
+#include <fmt/format.h>
 
-#include <thrift/compiler/ast/diagnostic_context.h>
 #include <thrift/compiler/ast/node_list.h>
 #include <thrift/compiler/ast/t_const_value.h>
 #include <thrift/compiler/ast/t_field.h>
@@ -36,6 +35,7 @@
 #include <thrift/compiler/ast/t_program.h>
 #include <thrift/compiler/ast/t_program_bundle.h>
 #include <thrift/compiler/ast/t_scope.h>
+#include <thrift/compiler/ast/t_union.h>
 #include <thrift/compiler/diagnostic.h>
 #include <thrift/compiler/parse/parser.h>
 #include <thrift/compiler/source_location.h>
@@ -100,7 +100,7 @@ class parsing_driver : public parser_actions {
  public:
   parsing_driver(
       source_manager& sm,
-      diagnostic_context& ctx,
+      diagnostics_engine& diags,
       std::string path,
       parsing_params parse_params);
   ~parsing_driver() override;
@@ -116,25 +116,25 @@ class parsing_driver : public parser_actions {
       std::unique_ptr<stmt_attrs> attrs,
       std::unique_ptr<t_annotations> annotations) override;
 
-  void on_package(source_range range, std::string name) override;
+  void on_package(source_range range, fmt::string_view name) override;
 
-  void on_include(source_range range, std::string literal) override {
-    add_include(std::move(literal), range);
+  void on_include(source_range range, fmt::string_view str) override {
+    add_include(fmt::to_string(str), range);
   }
 
-  void on_cpp_include(source_range, std::string literal) override {
+  void on_cpp_include(source_range, fmt::string_view str) override {
     if (mode == parsing_mode::PROGRAM) {
-      program->add_cpp_include(std::move(literal));
+      program->add_cpp_include(fmt::to_string(str));
     }
   }
 
-  void on_hs_include(source_range, std::string) override {
+  void on_hs_include(source_range, fmt::string_view) override {
     // Do nothing. This syntax is handled by the hs compiler.
   }
 
-  void on_namespace(std::string language, std::string ns) override {
+  void on_namespace(const identifier& language, fmt::string_view ns) override {
     if (mode == parsing_mode::PROGRAM) {
-      program->set_namespace(std::move(language), std::move(ns));
+      program->set_namespace(fmt::to_string(language.str), fmt::to_string(ns));
     }
   }
 
@@ -154,7 +154,7 @@ class parsing_driver : public parser_actions {
     set_doctext(*program, pop_doctext());
   }
 
-  comment on_inline_doc(source_location loc, std::string text) override {
+  comment on_inline_doc(source_location loc, fmt::string_view text) override {
     return {strip_doctext(text), loc};
   }
 
@@ -167,11 +167,11 @@ class parsing_driver : public parser_actions {
   }
 
   std::unique_ptr<t_const> on_structured_annotation(
-      source_range range, std::string name) override {
+      source_range range, fmt::string_view name) override {
     auto value = std::make_unique<t_const_value>();
     value->set_map();
     value->set_ttype(
-        new_type_ref(std::move(name), nullptr, range, /*is_const=*/true));
+        new_type_ref(fmt::to_string(name), nullptr, range, /*is_const=*/true));
     return new_struct_annotation(std::move(value), range);
   }
 
@@ -186,16 +186,16 @@ class parsing_driver : public parser_actions {
 
   std::unique_ptr<t_service> on_service(
       source_range range,
-      std::string name,
-      const std::string& base_name,
+      const identifier& name,
+      const identifier& base,
       std::unique_ptr<t_function_list> functions) override;
 
   std::unique_ptr<t_interaction> on_interaction(
       source_range range,
-      std::string name,
+      const identifier& name,
       std::unique_ptr<t_function_list> functions) override {
     auto interaction =
-        std::make_unique<t_interaction>(program, std::move(name));
+        std::make_unique<t_interaction>(program, fmt::to_string(name.str));
     interaction->set_src_range(range);
     set_functions(*interaction, std::move(functions));
     return interaction;
@@ -206,13 +206,12 @@ class parsing_driver : public parser_actions {
       std::unique_ptr<stmt_attrs> attrs,
       t_function_qualifier qual,
       std::vector<t_type_ref> return_type,
-      source_location,
-      std::string name,
+      const identifier& name,
       t_field_list params,
       std::unique_ptr<t_throws> throws,
       std::unique_ptr<t_annotations> annotations) override {
     auto function = std::make_unique<t_function>(
-        program, std::move(return_type), std::move(name));
+        program, std::move(return_type), fmt::to_string(name.str));
     function->set_qualifier(qual);
     set_fields(function->params(), std::move(params));
     function->set_exceptions(std::move(throws));
@@ -280,24 +279,30 @@ class parsing_driver : public parser_actions {
   }
 
   std::unique_ptr<t_typedef> on_typedef(
-      source_range range, t_type_ref type, std::string name) override {
-    auto typedef_node =
-        std::make_unique<t_typedef>(program, std::move(name), std::move(type));
+      source_range range, t_type_ref type, const identifier& name) override {
+    auto typedef_node = std::make_unique<t_typedef>(
+        program, fmt::to_string(name.str), std::move(type));
     typedef_node->set_src_range(range);
     return typedef_node;
   }
 
   std::unique_ptr<t_struct> on_struct(
-      source_range range, std::string name, t_field_list fields) override {
-    auto struct_node = std::make_unique<t_struct>(program, std::move(name));
+      source_range range,
+      const identifier& name,
+      t_field_list fields) override {
+    auto struct_node =
+        std::make_unique<t_struct>(program, fmt::to_string(name.str));
     struct_node->set_src_range(range);
     set_fields(*struct_node, std::move(fields));
     return struct_node;
   }
 
   std::unique_ptr<t_union> on_union(
-      source_range range, std::string name, t_field_list fields) override {
-    auto union_node = std::make_unique<t_union>(program, std::move(name));
+      source_range range,
+      const identifier& name,
+      t_field_list fields) override {
+    auto union_node =
+        std::make_unique<t_union>(program, fmt::to_string(name.str));
     union_node->set_src_range(range);
     set_fields(*union_node, std::move(fields));
     return union_node;
@@ -308,9 +313,10 @@ class parsing_driver : public parser_actions {
       t_error_safety safety,
       t_error_kind kind,
       t_error_blame blame,
-      std::string name,
+      const identifier& name,
       t_field_list fields) override {
-    auto exception = std::make_unique<t_exception>(program, std::move(name));
+    auto exception =
+        std::make_unique<t_exception>(program, fmt::to_string(name.str));
     exception->set_src_range(range);
     exception->set_safety(safety);
     exception->set_kind(kind);
@@ -325,14 +331,13 @@ class parsing_driver : public parser_actions {
       boost::optional<int64_t> id,
       t_field_qualifier qual,
       t_type_ref type,
-      source_location,
-      std::string name,
+      const identifier& name,
       std::unique_ptr<t_const_value> value,
       std::unique_ptr<t_annotations> annotations,
       boost::optional<comment> doc) override {
     auto field = std::make_unique<t_field>(
         std::move(type),
-        std::move(name),
+        fmt::to_string(name.str),
         id ? to_field_id(range.begin, *id) : boost::optional<t_field_id>());
     field->set_qualifier(qual);
     if (mode == parsing_mode::PROGRAM) {
@@ -354,14 +359,17 @@ class parsing_driver : public parser_actions {
 
   t_type_ref on_field_type(
       source_range range,
-      std::string name,
+      fmt::string_view name,
       std::unique_ptr<t_annotations> annotations) override {
-    return new_type_ref(std::move(name), std::move(annotations), range);
+    return new_type_ref(fmt::to_string(name), std::move(annotations), range);
   }
 
   std::unique_ptr<t_enum> on_enum(
-      source_range range, std::string name, t_enum_value_list values) override {
-    auto enum_node = std::make_unique<t_enum>(program, std::move(name));
+      source_range range,
+      const identifier& name,
+      t_enum_value_list values) override {
+    auto enum_node =
+        std::make_unique<t_enum>(program, fmt::to_string(name.str));
     enum_node->set_src_range(range);
     enum_node->set_values(std::move(values));
     return enum_node;
@@ -370,12 +378,11 @@ class parsing_driver : public parser_actions {
   std::unique_ptr<t_enum_value> on_enum_value(
       source_range range,
       std::unique_ptr<stmt_attrs> attrs,
-      source_location,
-      std::string name,
+      const identifier& name,
       int64_t* value,
       std::unique_ptr<t_annotations> annotations,
       boost::optional<comment> doc) override {
-    auto enum_value = std::make_unique<t_enum_value>(std::move(name));
+    auto enum_value = std::make_unique<t_enum_value>(fmt::to_string(name.str));
     enum_value->set_src_range(range);
     set_attributes(
         *enum_value, std::move(attrs), std::move(annotations), range);
@@ -391,60 +398,26 @@ class parsing_driver : public parser_actions {
   std::unique_ptr<t_const> on_const(
       source_range range,
       t_type_ref type,
-      std::string name,
+      const identifier& name,
       std::unique_ptr<t_const_value> value) override {
-    auto const_node = std::make_unique<t_const>(
-        program, std::move(type), std::move(name), std::move(value));
-    const_node->set_src_range(range);
-    return const_node;
+    auto constant = std::make_unique<t_const>(
+        program, std::move(type), fmt::to_string(name.str), std::move(value));
+    constant->set_src_range(range);
+    return constant;
   }
 
-  std::unique_ptr<t_const_value> on_bool_const(bool value) override {
-    auto const_value = std::make_unique<t_const_value>();
-    const_value->set_bool(value);
-    return const_value;
-  }
+  std::unique_ptr<t_const_value> on_const_ref(const identifier& name) override;
 
-  std::unique_ptr<t_const_value> on_int_const(
-      source_location loc, int64_t value) override {
-    return to_const_value(loc, value);
-  }
-
-  std::unique_ptr<t_const_value> on_double_const(double value) override {
-    auto const_value = std::make_unique<t_const_value>();
-    const_value->set_double(value);
-    return const_value;
-  }
-
-  std::unique_ptr<t_const_value> on_reference_const(
-      source_location loc, std::string name) override {
-    return copy_const_value(loc, std::move(name));
-  }
-
-  std::unique_ptr<t_const_value> on_string_literal(std::string value) override {
-    return std::make_unique<t_const_value>(std::move(value));
-  }
-
-  std::unique_ptr<t_const_value> on_const_list() override {
-    auto const_value = std::make_unique<t_const_value>();
-    const_value->set_list();
-    return const_value;
-  }
-
-  std::unique_ptr<t_const_value> on_const_map() override {
-    auto const_value = std::make_unique<t_const_value>();
-    const_value->set_map();
-    return const_value;
-  }
-
-  std::unique_ptr<t_const_value> on_const_struct(
-      source_range range, std::string name) override {
-    auto const_value = std::make_unique<t_const_value>();
-    const_value->set_map();
-    const_value->set_ttype(
-        new_type_ref(std::move(name), nullptr, range, /*is_const=*/true));
-    return const_value;
-  }
+  std::unique_ptr<t_const_value> on_bool_literal(bool value) override;
+  std::unique_ptr<t_const_value> on_int_literal(
+      source_location loc, int64_t value) override;
+  std::unique_ptr<t_const_value> on_float_literal(double value) override;
+  std::unique_ptr<t_const_value> on_string_literal(
+      fmt::string_view value) override;
+  std::unique_ptr<t_const_value> on_list_literal() override;
+  std::unique_ptr<t_const_value> on_map_literal() override;
+  std::unique_ptr<t_const_value> on_struct_literal(
+      source_range range, fmt::string_view name) override;
 
   int64_t on_integer(source_range range, sign s, uint64_t value) override;
 
@@ -479,24 +452,12 @@ class parsing_driver : public parser_actions {
    */
   std::map<std::string, t_program*> program_cache;
 
-  int get_lineno(source_location loc = {});
-
   /**
    * Parses a program and returns the resulted AST.
    * Diagnostic messages (warnings, debug messages, etc.) are reported via the
    * context provided in the constructor.
    */
   std::unique_ptr<t_program_bundle> parse();
-
-  template <typename... T>
-  void warning(source_location loc, fmt::format_string<T...> msg, T&&... args) {
-    ctx_.report(loc, diagnostic_level::warning, msg, std::forward<T>(args)...);
-  }
-
-  template <typename... T>
-  void error(source_location loc, fmt::format_string<T...> msg, T&&... args) {
-    ctx_.report(loc, diagnostic_level::error, msg, std::forward<T>(args)...);
-  }
 
   [[noreturn]] void end_parsing();
 
@@ -602,13 +563,8 @@ class parsing_driver : public parser_actions {
   int32_t to_enum_value(source_location loc, int64_t value) {
     return narrow_int<int32_t>(loc, value, "enum values");
   }
-  std::unique_ptr<t_const_value> to_const_value(
-      source_location loc, int64_t value);
 
   const t_const* find_const(source_location loc, const std::string& name);
-
-  std::unique_ptr<t_const_value> copy_const_value(
-      source_location loc, const std::string& name);
 
   void set_parsed_definition();
   void set_program_annotations(
@@ -618,11 +574,10 @@ class parsing_driver : public parser_actions {
 
  private:
   source_manager& source_mgr_;
-
   std::set<std::string> already_parsed_paths_;
   std::set<std::string> circular_deps_;
 
-  diagnostic_context& ctx_;
+  diagnostics_engine& diags_;
   parsing_params params_;
 
   std::unordered_set<std::string> programs_that_parsed_definition_;
@@ -655,7 +610,7 @@ class parsing_driver : public parser_actions {
     using limits = std::numeric_limits<T>;
     if (mode == parsing_mode::PROGRAM &&
         (value < limits::min() || value > limits::max())) {
-      error(
+      diags_.error(
           loc,
           "Integer constant {} outside the range of {} ([{}, {}]).",
           value,

@@ -55,10 +55,18 @@ class ServiceHandler<::test::fixtures::basic-structured-annotations::MyService> 
   virtual void first(::test::fixtures::basic-structured-annotations::annotated_inline_string& /*_return*/);
   virtual folly::Future<std::unique_ptr<::test::fixtures::basic-structured-annotations::annotated_inline_string>> future_first();
   virtual folly::SemiFuture<std::unique_ptr<::test::fixtures::basic-structured-annotations::annotated_inline_string>> semifuture_first();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::test::fixtures::basic-structured-annotations::annotated_inline_string>> co_first();
+  virtual folly::coro::Task<std::unique_ptr<::test::fixtures::basic-structured-annotations::annotated_inline_string>> co_first(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_first(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::test::fixtures::basic-structured-annotations::annotated_inline_string>>> callback);
   virtual bool second(::std::int64_t /*count*/);
   virtual folly::Future<bool> future_second(::std::int64_t p_count);
   virtual folly::SemiFuture<bool> semifuture_second(::std::int64_t p_count);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<bool> co_second(::std::int64_t p_count);
+  virtual folly::coro::Task<bool> co_second(apache::thrift::RequestParams params, ::std::int64_t p_count);
+#endif
   virtual void async_tm_second(std::unique_ptr<apache::thrift::HandlerCallback<bool>> callback, ::std::int64_t p_count);
  private:
   static ::test::fixtures::basic-structured-annotations::MyServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -78,7 +86,7 @@ class MyServiceSvNull : public ::apache::thrift::ServiceHandler<MyService> {
   bool second(::std::int64_t /*count*/) override;
 };
 
-class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -93,8 +101,8 @@ class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<MyServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<MyServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const MyServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const MyServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

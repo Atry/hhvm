@@ -22,6 +22,14 @@
       }
     }
   },
+  "includes": {
+    "included" : {
+      "path" : "included.thrift"
+    },
+    "namespaced" : {
+      "path" : "namespaced.thrift"
+    }
+  },
   "enumerations" : {
     "MyEnum" : {
       "lineno" : 112,
@@ -547,6 +555,7 @@
           },
           "args" : [
             {
+              "name" : "count",
               "type_enum" : "I64",
               "spec_args" : null,
               "structured_annotations" : {

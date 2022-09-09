@@ -1,6 +1,14 @@
 {
   "__fbthrift": {"@generated": 0},
   "thrift_module" : "service",
+  "includes": {
+    "module" : {
+      "path" : "module.thrift"
+    },
+    "includes" : {
+      "path" : "includes.thrift"
+    }
+  },
   "typedefs" : {
     "IncludesIncluded" : {
       "lineno" : 32,
@@ -44,10 +52,12 @@
           },
           "args" : [
             {
+              "name" : "s",
               "type_enum" : "STRUCT",
               "spec_args" : "module.MyStruct"
             },
             {
+              "name" : "i",
               "type_enum" : "STRUCT",
               "spec_args" : "includes.Included"
             }
@@ -71,10 +81,12 @@
           },
           "args" : [
             {
+              "name" : "s",
               "type_enum" : "STRUCT",
               "spec_args" : "module.MyStruct"
             },
             {
+              "name" : "i",
               "type_enum" : "STRUCT",
               "spec_args" : "includes.Included"
             }

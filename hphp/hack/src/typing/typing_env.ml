@@ -657,14 +657,16 @@ let is_typedef env x =
   | Some Naming_types.TTypedef -> true
   | _ -> false
 
-let is_typedef_visible env ?(expand_visible_newtype = true) td =
-  let { Typing_defs.td_vis; td_pos; td_module; _ } = td in
+let is_typedef_visible env ?(expand_visible_newtype = true) ~name td =
+  let { Typing_defs.td_vis; td_module; _ } = td in
   match td_vis with
   | Aast.Opaque ->
     expand_visible_newtype
-    && Relative_path.equal
-         (Pos.filename (Pos_or_decl.unsafe_to_raw_pos td_pos))
-         (get_file env)
+    &&
+    let td_path = Naming_provider.get_typedef_path (get_ctx env) name in
+    (match td_path with
+    | Some s -> Relative_path.equal s (get_file env)
+    | None -> (* Not the right place to raise an error *) false)
   | Aast.OpaqueModule ->
     expand_visible_newtype
     && Option.equal
@@ -814,10 +816,14 @@ let get_static_member is_method env class_ mid =
 
   ce_opt
 
-(* Given a list of things whose name we can extract with `f`, return
-   the item whose name is closest to `name`. *)
+(* Given a list of [possibilities] whose name we can extract with [f], return
+   the item whose name is closest to [name]. *)
 let most_similar (name : string) (possibilities : 'a list) (f : 'a -> string) :
     'a option =
+  (* Compare strings case-insensitively. *)
+  let name = String.lowercase name in
+  let f x = String.lowercase (f x) in
+
   let distance upper_bound = String_utils.levenshtein_distance ~upper_bound in
   let choose_closest ~best:(best, best_distance) candidate =
     let candidate_distance = distance (best_distance + 1) (f candidate) name in

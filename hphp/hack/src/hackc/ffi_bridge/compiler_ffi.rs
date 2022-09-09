@@ -16,6 +16,8 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use compile::EnvFlags;
+use compile::HhbcFlags;
+use compile::ParserFlags;
 use cxx::CxxString;
 use decl_provider::DeclProvider;
 use external_decl_provider::ExternalDeclProvider;
@@ -30,7 +32,7 @@ use sha1::Digest;
 use sha1::Sha1;
 
 #[allow(clippy::derivable_impls)]
-#[cxx::bridge]
+#[cxx::bridge(namespace = "HPHP::hackc")]
 pub mod compile_ffi {
     struct NativeEnv {
         /// Pointer to decl_provider opaque object, cast to usize. 0 means null.
@@ -42,14 +44,46 @@ pub mod compile_ffi {
         emit_class_pointers: i32,
         check_int_overflow: i32,
 
-        /// compiler::HHBCFlags
-        hhbc_flags: u32,
+        hhbc_flags: HhbcFlags,
+        parser_flags: ParserFlags,
+        flags: EnvFlags,
+    }
 
-        /// compiler::ParserFlags
-        parser_flags: u32,
+    /// compiler::EnvFlags exposed to C++
+    struct EnvFlags {
+        is_systemlib: bool,
+        for_debugger_eval: bool,
+        disable_toplevel_elaboration: bool,
+        enable_ir: bool,
+    }
 
-        /// compiler::EnvFlags
-        flags: u8,
+    /// compiler::HhbcFlags exposed to C++
+    struct HhbcFlags {
+        ltr_assign: bool,
+        uvs: bool,
+        repo_authoritative: bool,
+        jit_enable_rename_function: bool,
+        log_extern_compiler_perf: bool,
+        enable_intrinsics_extension: bool,
+        emit_cls_meth_pointers: bool,
+        emit_meth_caller_func_pointers: bool,
+        fold_lazy_class_keys: bool,
+    }
+
+    struct ParserFlags {
+        abstract_static_props: bool,
+        allow_new_attribute_syntax: bool,
+        allow_unstable_features: bool,
+        const_default_func_args: bool,
+        const_static_props: bool,
+        disable_lval_as_an_expression: bool,
+        disallow_inst_meth: bool,
+        disable_xhp_element_mangling: bool,
+        disallow_fun_and_cls_meth_pseudo_funcs: bool,
+        disallow_func_ptrs_in_constants: bool,
+        enable_enum_classes: bool,
+        enable_xhp_class_modifier: bool,
+        enable_class_level_where_clauses: bool,
     }
 
     pub struct DeclResult {
@@ -133,33 +167,22 @@ pub mod compile_ffi {
         type DeclParserOptions;
         type UnitWrapper;
 
-        fn make_env_flags(
-            is_systemlib: bool,
-            is_evaled: bool,
-            for_debugger_eval: bool,
-            disable_toplevel_elaboration: bool,
-            enable_ir: bool,
-        ) -> u8;
-
         /// Compile Hack source code to a Unit or an error.
-        unsafe fn hackc_compile_unit_from_text_cpp_ffi(
+        unsafe fn compile_unit_from_text_cpp_ffi(
             env: &NativeEnv,
             source_text: &CxxString,
         ) -> Result<Box<UnitWrapper>>;
 
         /// Compile Hack source code to either HHAS or an error.
-        fn hackc_compile_from_text_cpp_ffi(
-            env: &NativeEnv,
-            source_text: &CxxString,
-        ) -> Result<Vec<u8>>;
+        fn compile_from_text_cpp_ffi(env: &NativeEnv, source_text: &CxxString) -> Result<Vec<u8>>;
 
-        fn hackc_create_direct_decl_parse_options(
+        fn create_direct_decl_parse_options(
             flags: i32,
             aliased_namespaces: &CxxString,
         ) -> Box<DeclParserOptions>;
 
         /// Invoke the hackc direct decl parser and return every shallow decl in the file.
-        fn hackc_direct_decl_parse(
+        fn direct_decl_parse(
             options: &DeclParserOptions,
             filename: &CxxString,
             text: &CxxString,
@@ -168,16 +191,16 @@ pub mod compile_ffi {
         fn hash_unit(unit: &UnitWrapper) -> [u8; 20];
 
         /// Return true if this type (class or alias) is in the given Decls.
-        fn hackc_type_exists(decls: &DeclResult, symbol: &str) -> bool;
+        fn type_exists(decls: &DeclResult, symbol: &str) -> bool;
 
         /// For testing: return true if deserializing produces the expected Decls.
-        fn hackc_verify_deserialization(decls: &DeclResult) -> bool;
+        fn verify_deserialization(decls: &DeclResult) -> bool;
 
         /// Serialize a FactsResult to JSON
-        fn hackc_facts_to_json_cpp_ffi(facts: FactsResult, pretty: bool) -> String;
+        fn facts_to_json_cpp_ffi(facts: FactsResult, pretty: bool) -> String;
 
         /// Extract Facts from Decls, passing along the source text hash.
-        fn hackc_decls_to_facts_cpp_ffi(
+        fn decls_to_facts_cpp_ffi(
             decl_flags: i32,
             decls: &DeclResult,
             sha1sum: &CxxString,
@@ -200,46 +223,56 @@ pub struct UnitWrapper(Unit<'static>, bumpalo::Bump);
 
 ///////////////////////////////////////////////////////////////////////////////////
 
-fn make_env_flags(
-    is_systemlib: bool,
-    is_evaled: bool,
-    for_debugger_eval: bool,
-    disable_toplevel_elaboration: bool,
-    enable_ir: bool,
-) -> u8 {
-    let mut flags = EnvFlags::empty();
-    if is_systemlib {
-        flags |= EnvFlags::IS_SYSTEMLIB;
-    }
-    if is_evaled {
-        flags |= EnvFlags::IS_EVALED;
-    }
-    if for_debugger_eval {
-        flags |= EnvFlags::FOR_DEBUGGER_EVAL;
-    }
-    if disable_toplevel_elaboration {
-        flags |= EnvFlags::DISABLE_TOPLEVEL_ELABORATION;
-    }
-    if enable_ir {
-        flags |= EnvFlags::ENABLE_IR;
-    }
-    flags.bits()
-}
-
 impl compile_ffi::NativeEnv {
-    fn to_compile_env<'a>(env: &'a compile_ffi::NativeEnv) -> Option<compile::NativeEnv<'a>> {
+    fn to_compile_env(&self) -> Option<compile::NativeEnv> {
         Some(compile::NativeEnv {
             filepath: RelativePath::make(
                 Prefix::Dummy,
-                PathBuf::from(OsStr::from_bytes(env.filepath.as_bytes())),
+                PathBuf::from(OsStr::from_bytes(self.filepath.as_bytes())),
             ),
-            aliased_namespaces: &env.aliased_namespaces,
-            include_roots: &env.include_roots,
-            emit_class_pointers: env.emit_class_pointers,
-            check_int_overflow: env.check_int_overflow,
-            hhbc_flags: compile::HHBCFlags::from_bits(env.hhbc_flags)?,
-            parser_flags: compile::ParserFlags::from_bits(env.parser_flags)?,
-            flags: compile::EnvFlags::from_bits(env.flags)?,
+            aliased_namespaces: self.aliased_namespaces.clone(),
+            include_roots: self.include_roots.clone(),
+            emit_class_pointers: self.emit_class_pointers,
+            check_int_overflow: self.check_int_overflow,
+            hhbc_flags: HhbcFlags {
+                ltr_assign: self.hhbc_flags.ltr_assign,
+                uvs: self.hhbc_flags.uvs,
+                repo_authoritative: self.hhbc_flags.repo_authoritative,
+                jit_enable_rename_function: self.hhbc_flags.jit_enable_rename_function,
+                log_extern_compiler_perf: self.hhbc_flags.log_extern_compiler_perf,
+                enable_intrinsics_extension: self.hhbc_flags.enable_intrinsics_extension,
+                emit_cls_meth_pointers: self.hhbc_flags.emit_cls_meth_pointers,
+                emit_meth_caller_func_pointers: self.hhbc_flags.emit_meth_caller_func_pointers,
+                fold_lazy_class_keys: self.hhbc_flags.fold_lazy_class_keys,
+                ..Default::default()
+            },
+            parser_flags: ParserFlags {
+                abstract_static_props: self.parser_flags.abstract_static_props,
+                allow_new_attribute_syntax: self.parser_flags.allow_new_attribute_syntax,
+                allow_unstable_features: self.parser_flags.allow_unstable_features,
+                const_default_func_args: self.parser_flags.const_default_func_args,
+                const_static_props: self.parser_flags.const_static_props,
+                disable_lval_as_an_expression: self.parser_flags.disable_lval_as_an_expression,
+                disallow_inst_meth: self.parser_flags.disallow_inst_meth,
+                disable_xhp_element_mangling: self.parser_flags.disable_xhp_element_mangling,
+                disallow_fun_and_cls_meth_pseudo_funcs: self
+                    .parser_flags
+                    .disallow_fun_and_cls_meth_pseudo_funcs,
+                disallow_func_ptrs_in_constants: self.parser_flags.disallow_func_ptrs_in_constants,
+                enable_enum_classes: self.parser_flags.enable_enum_classes,
+                enable_xhp_class_modifier: self.parser_flags.enable_xhp_class_modifier,
+                enable_class_level_where_clauses: self
+                    .parser_flags
+                    .enable_class_level_where_clauses,
+                ..Default::default()
+            },
+            flags: EnvFlags {
+                is_systemlib: self.flags.is_systemlib,
+                for_debugger_eval: self.flags.for_debugger_eval,
+                disable_toplevel_elaboration: self.flags.disable_toplevel_elaboration,
+                enable_ir: self.flags.enable_ir,
+                ..Default::default()
+            },
         })
     }
 }
@@ -251,17 +284,15 @@ fn hash_unit(UnitWrapper(unit, _): &UnitWrapper) -> [u8; 20] {
     hasher.finalize().into()
 }
 
-fn hackc_compile_from_text_cpp_ffi(
+fn compile_from_text_cpp_ffi(
     env: &compile_ffi::NativeEnv,
     source_text: &CxxString,
 ) -> Result<Vec<u8>, String> {
-    let native_env = compile_ffi::NativeEnv::to_compile_env(env).unwrap();
+    let native_env = env.to_compile_env().unwrap();
     let text = SourceText::make(
         ocamlrep::rc::RcOc::new(native_env.filepath.clone()),
         source_text.as_bytes(),
     );
-    let mut output = Vec::new();
-    let alloc = bumpalo::Bump::new();
     let decl_allocator = bumpalo::Bump::new();
 
     let decl_provider = if env.decl_provider != 0 {
@@ -273,8 +304,8 @@ fn hackc_compile_from_text_cpp_ffi(
         None
     };
 
+    let mut output = Vec::new();
     compile::from_text(
-        &alloc,
         &mut output,
         text,
         &native_env,
@@ -287,12 +318,12 @@ fn hackc_compile_from_text_cpp_ffi(
     Ok(output)
 }
 
-fn hackc_type_exists(result: &compile_ffi::DeclResult, symbol: &str) -> bool {
+fn type_exists(result: &compile_ffi::DeclResult, symbol: &str) -> bool {
     // TODO T123158488: fix case insensitive lookups
     result.decls.decls.types().any(|(sym, _)| sym == symbol)
 }
 
-pub fn hackc_create_direct_decl_parse_options(
+pub fn create_direct_decl_parse_options(
     flags: i32,
     aliased_namespaces: &CxxString,
 ) -> Box<DeclParserOptions> {
@@ -314,7 +345,7 @@ pub fn hackc_create_direct_decl_parse_options(
     }))
 }
 
-pub fn hackc_direct_decl_parse(
+pub fn direct_decl_parse(
     opts: &DeclParserOptions,
     filename: &CxxString,
     text: &CxxString,
@@ -340,20 +371,20 @@ pub fn hackc_direct_decl_parse(
     }
 }
 
-fn hackc_verify_deserialization(result: &compile_ffi::DeclResult) -> bool {
+fn verify_deserialization(result: &compile_ffi::DeclResult) -> bool {
     let arena = bumpalo::Bump::new();
     let decls = decl_provider::deserialize_decls(&arena, &result.serialized).unwrap();
     decls == result.decls.decls
 }
 
-fn hackc_compile_unit_from_text_cpp_ffi(
+fn compile_unit_from_text_cpp_ffi(
     env: &compile_ffi::NativeEnv,
     source_text: &CxxString,
 ) -> Result<Box<UnitWrapper>, String> {
     let bump = bumpalo::Bump::new();
     let alloc: &'static bumpalo::Bump =
         unsafe { std::mem::transmute::<&'_ bumpalo::Bump, &'static bumpalo::Bump>(&bump) };
-    let native_env = compile_ffi::NativeEnv::to_compile_env(env).unwrap();
+    let native_env = env.to_compile_env().unwrap();
     let text = SourceText::make(
         ocamlrep::rc::RcOc::new(native_env.filepath.clone()),
         source_text.as_bytes(),
@@ -382,7 +413,7 @@ fn hackc_compile_unit_from_text_cpp_ffi(
     .map_err(|e| e.to_string())
 }
 
-pub fn hackc_facts_to_json_cpp_ffi(facts_result: compile_ffi::FactsResult, pretty: bool) -> String {
+pub fn facts_to_json_cpp_ffi(facts_result: compile_ffi::FactsResult, pretty: bool) -> String {
     if facts_result.has_errors {
         String::new()
     } else {
@@ -391,7 +422,7 @@ pub fn hackc_facts_to_json_cpp_ffi(facts_result: compile_ffi::FactsResult, prett
     }
 }
 
-pub fn hackc_decls_to_facts_cpp_ffi(
+pub fn decls_to_facts_cpp_ffi(
     decl_flags: i32,
     decl_result: &compile_ffi::DeclResult,
     sha1sum: &CxxString,

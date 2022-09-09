@@ -1,6 +1,11 @@
 {
   "__fbthrift": {"@generated": 0},
   "thrift_module" : "module",
+  "includes": {
+    "hack" : {
+      "path" : "thrift/annotation/hack.thrift"
+    }
+  },
   "enumerations" : {
     "MyEnum" : {
       "lineno" : 25,
@@ -395,6 +400,7 @@
           },
           "args" : [
             {
+              "name" : "int_parameter",
               "type_enum" : "I32",
               "spec_args" : null
             }
@@ -470,6 +476,7 @@
           },
           "args" : [
             {
+              "name" : "sink",
               "type_enum" : "I64",
               "spec_args" : null
             }
@@ -493,10 +500,12 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             },
             {
+              "name" : "data",
               "type_enum" : "STRING",
               "spec_args" : null
             }
@@ -520,6 +529,7 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             }
@@ -543,6 +553,7 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             }
@@ -566,6 +577,7 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             }
@@ -589,10 +601,12 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             },
             {
+              "name" : "data",
               "type_enum" : "STRING",
               "spec_args" : null
             }
@@ -668,6 +682,7 @@
           },
           "args" : [
             {
+              "name" : "key",
               "type_enum" : "STRING",
               "spec_args" : null
             }
@@ -691,6 +706,7 @@
           },
           "args" : [
             {
+              "name" : "key",
               "type_enum" : "STRING",
               "spec_args" : null
             }

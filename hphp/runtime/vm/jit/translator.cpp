@@ -254,9 +254,7 @@ static const struct {
   /*** 8. Call instructions ***/
 
   { OpNewObj,      {Stack1,           Stack1,       OutObject       }},
-  { OpNewObjR,     {StackTop2,        Stack1,       OutObject       }},
   { OpNewObjD,     {None,             Stack1,       OutObject       }},
-  { OpNewObjRD,    {Stack1,           Stack1,       OutObject       }},
   { OpNewObjS,     {None,             Stack1,       OutObject       }},
   { OpLockObj,     {Stack1,           Stack1,       OutSameAsInput1 }},
 
@@ -369,9 +367,7 @@ static const struct {
                    {Stack1,           Stack1,       OutClsMethLike  }},
   { OpResolveRClsMethodS,
                    {Stack1,           Stack1,       OutClsMethLike  }},
-
-  // TODO (T61651936): ResolveClass may return a classptr or a string
-  { OpResolveClass,{None,             Stack1,       OutUnknown      }},
+  { OpResolveClass,{None,             Stack1,       OutClass      }},
   { OpSetImplicitContextByValue,
                    {Stack1,           Stack1,       OutUnknown      }},
   { OpVerifyImplicitContextState,
@@ -1018,9 +1014,7 @@ bool dontGuardAnyInputs(const NormalizedInstruction& ni) {
   case Op::NewVec:
   case Op::NewKeysetArray:
   case Op::NewObj:
-  case Op::NewObjR:
   case Op::NewObjD:
-  case Op::NewObjRD:
   case Op::NewObjS:
   case Op::Not:
   case Op::Null:

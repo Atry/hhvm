@@ -59,7 +59,7 @@ ExternalProject_add(
     -DOPENSSL_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}
     -DOPENSSL_CRYPTO_LIBRARY=${OPENSSL_CRYPTO_LIBRARY}
     -DGLOG_INCLUDE_DIR=${LIBGLOG_INCLUDE_DIR}
-    -DGLOG_LIBRARY=${LIBGLOG_LIBRARY}
+    -DGLOG_LIBRARY=glog::glog
     -DBoost_NO_SYSTEM_PATHS=ON
     -DBoost_NO_BOOST_CMAKE=ON
     -DBoost_USE_STATIC_LIBS=${Boost_USE_STATIC_LIBS}
@@ -92,6 +92,7 @@ set(
   libsodium
   jemalloc
   zstd
+  glog::glog
 )
 add_dependencies(bundled_folly ${FOLLY_DEPS})
 add_library(folly_deps INTERFACE)
@@ -121,7 +122,7 @@ endif()
 if(UNIX AND NOT APPLE)
   # symbolizer implementation details
   find_package(Libiberty)
-  find_package(LibUnwind)
+  find_package(LibUnwind NO_MODULE)
   target_link_libraries(folly INTERFACE ${LIBIBERTY_LIBRARIES} ${LIBELF_LIBRARIES} ${LIBDWARF_LIBRARIES} ${LIBUNWIND_LIBRARIES})
   target_include_directories(folly INTERFACE ${LIBIBERTY_INCLUDE_DIRS} ${LIBUNWIND_INCLUDE_DIRS})
 endif()

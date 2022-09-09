@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 
-pub use hh24_types::ToplevelCanonSymbolHash;
 use oxidized::file_info::Mode;
 use oxidized::relative_path::Prefix;
 use rusqlite::types::FromSql;
@@ -44,10 +43,21 @@ impl FromSql for SqlitePathBuf {
     }
 }
 
+/// This uses NonZeroU64 instead of i64 (used elsewhere in sqlite) just as a bit-packing optimization
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, PartialOrd, Ord)]
 pub struct FileInfoId(std::num::NonZeroU64);
 
 impl nohash_hasher::IsEnabled for FileInfoId {}
+
+impl FileInfoId {
+    pub fn last_insert_rowid(conn: &rusqlite::Connection) -> Self {
+        Self::from_i64(conn.last_insert_rowid())
+    }
+
+    fn from_i64(i: i64) -> Self {
+        Self(std::num::NonZeroU64::new(i as u64).expect("SQLite autoincrement indices start at 1"))
+    }
+}
 
 impl rusqlite::ToSql for FileInfoId {
     fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
@@ -57,10 +67,7 @@ impl rusqlite::ToSql for FileInfoId {
 
 impl FromSql for FileInfoId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        Ok(Self(
-            std::num::NonZeroU64::new(value.as_i64()? as u64)
-                .expect("SQLite autoincrement indices start at 1"),
-        ))
+        Ok(Self::from_i64(value.as_i64()?))
     }
 }
 
@@ -92,21 +99,5 @@ pub(crate) mod convert {
         // interpret the same bit pattern as the same positive integer. When we store
         // in sqlite, it will also be stored as a positive integer.
         typing_deps_hash::hash1(dep_type, name.as_bytes()) as i64
-    }
-}
-
-/// The flags associated with types. Used to denote whether a type is a TypeDef or Class
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub struct ToplevelSymbolFlags(u64);
-
-impl rusqlite::ToSql for ToplevelSymbolFlags {
-    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
-        Ok(rusqlite::types::ToSqlOutput::from(self.0 as i64))
-    }
-}
-
-impl rusqlite::types::FromSql for ToplevelSymbolFlags {
-    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        Ok(Self(value.as_i64()? as u64))
     }
 }

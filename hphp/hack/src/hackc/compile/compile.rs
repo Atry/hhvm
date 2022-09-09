@@ -6,14 +6,16 @@
 pub mod dump_expr_tree;
 
 use std::fmt;
+use std::time::Duration;
+use std::time::Instant;
 
 use aast_parser::rust_aast_parser_types::Env as AastEnv;
+use aast_parser::rust_aast_parser_types::ParserProfile;
 use aast_parser::rust_aast_parser_types::ParserResult;
 use aast_parser::AastParser;
 use aast_parser::Error as AastError;
 use anyhow::anyhow;
 use anyhow::Result;
-use bitflags::bitflags;
 use bytecode_printer::Context;
 use decl_provider::DeclProvider;
 use emit_unit::emit_unit;
@@ -47,189 +49,205 @@ use types::readonly_nonlocal_infer;
 
 /// Common input needed for compilation.
 #[derive(Debug)]
-pub struct NativeEnv<'a> {
+pub struct NativeEnv {
     pub filepath: RelativePath,
-    pub aliased_namespaces: &'a str,
-    pub include_roots: &'a str,
+    pub aliased_namespaces: String,
+    pub include_roots: String,
     pub emit_class_pointers: i32,
     pub check_int_overflow: i32,
-    pub hhbc_flags: HHBCFlags,
+    pub hhbc_flags: HhbcFlags,
     pub parser_flags: ParserFlags,
     pub flags: EnvFlags,
 }
 
-impl Default for NativeEnv<'_> {
+impl Default for NativeEnv {
     fn default() -> Self {
         Self {
             filepath: RelativePath::make(Prefix::Dummy, Default::default()),
-            aliased_namespaces: "",
-            include_roots: "",
+            aliased_namespaces: "".into(),
+            include_roots: "".into(),
             emit_class_pointers: 0,
             check_int_overflow: 0,
-            hhbc_flags: HHBCFlags::empty(),
-            parser_flags: ParserFlags::empty(),
-            flags: EnvFlags::empty(),
+            hhbc_flags: HhbcFlags::default(),
+            parser_flags: ParserFlags::default(),
+            flags: EnvFlags::default(),
         }
     }
 }
 
-bitflags! {
-    pub struct EnvFlags: u8 {
-        const IS_SYSTEMLIB = 1 << 0;
-        const IS_EVALED = 1 << 1;
-        const FOR_DEBUGGER_EVAL = 1 << 2;
-        const UNUSED_PLACEHOLDER = 1 << 3;
-        const DISABLE_TOPLEVEL_ELABORATION = 1 << 4;
-        const DUMP_IR = 1 << 5;
-        const ENABLE_IR = 1 << 6;
-    }
+#[derive(Debug, Default, Clone, clap::Parser)]
+pub struct EnvFlags {
+    /// Enable features only allowed in systemlib
+    #[clap(long)]
+    pub is_systemlib: bool,
+
+    /// Mutate the program as if we're in the debuger REPL
+    #[clap(long)]
+    pub for_debugger_eval: bool,
+
+    /// Disable namespace elaboration for toplevel definitions
+    #[clap(long)]
+    pub disable_toplevel_elaboration: bool,
+
+    /// Dump IR instead of HHAS
+    #[clap(long)]
+    pub dump_ir: bool,
+
+    /// Compile files using the IR pass
+    #[clap(long)]
+    pub enable_ir: bool,
 }
 
-// Keep in sync with compiler_ffi.rs
-bitflags! {
-      pub struct HHBCFlags: u32 {
-        const LTR_ASSIGN=1 << 0;
-        const UVS=1 << 1;
-        // No longer using bit 3.
-        const AUTHORITATIVE=1 << 4;
-        const JIT_ENABLE_RENAME_FUNCTION=1 << 5;
-        const LOG_EXTERN_COMPILER_PERF=1 << 6;
-        const ENABLE_INTRINSICS_EXTENSION=1 << 7;
-        // No longer using bit 8.
-        // No longer using bit 9.
-        const EMIT_CLS_METH_POINTERS=1 << 10;
-        const EMIT_METH_CALLER_FUNC_POINTERS=1 << 11;
-        // No longer using bit 12.
-        const ARRAY_PROVENANCE=1 << 13;
-        // No longer using bit 14.
-        const FOLD_LAZY_CLASS_KEYS=1 << 15;
-        // No longer using bit 16.
-    }
+#[derive(Debug, Default, Clone, clap::Parser)]
+pub struct HhbcFlags {
+    /// PHP7 left-to-right assignment semantics
+    #[clap(long)]
+    pub ltr_assign: bool,
+
+    /// PHP7 Uniform Variable Syntax
+    #[clap(long)]
+    pub uvs: bool,
+
+    #[clap(long)]
+    pub repo_authoritative: bool,
+    #[clap(long)]
+    pub jit_enable_rename_function: bool,
+    #[clap(long)]
+    pub log_extern_compiler_perf: bool,
+    #[clap(long)]
+    pub enable_intrinsics_extension: bool,
+    #[clap(long)]
+    pub emit_cls_meth_pointers: bool,
+    #[clap(long)]
+    pub emit_meth_caller_func_pointers: bool,
+    #[clap(long)]
+    pub array_provenance: bool,
+    #[clap(long)]
+    pub fold_lazy_class_keys: bool,
 }
 
-// Mapping must match getParserFlags() in runtime-option.cpp and compiler_ffi.rs
-bitflags! {
-    pub struct ParserFlags: u32 {
-        const ABSTRACT_STATIC_PROPS=1 << 0;
-        const ALLOW_NEW_ATTRIBUTE_SYNTAX=1 << 1;
-        const ALLOW_UNSTABLE_FEATURES=1 << 2;
-        const CONST_DEFAULT_FUNC_ARGS=1 << 3;
-        const CONST_STATIC_PROPS=1 << 4;
-        // No longer using bits 5-7
-        const DISABLE_LVAL_AS_AN_EXPRESSION=1 << 8;
-        // No longer using bit 9
-        const DISALLOW_INST_METH=1 << 10;
-        const DISABLE_XHP_ELEMENT_MANGLING=1 << 11;
-        const DISALLOW_FUN_AND_CLS_METH_PSEUDO_FUNCS=1 << 12;
-        const DISALLOW_FUNC_PTRS_IN_CONSTANTS=1 << 13;
-        // No longer using bit 14.
-        // No longer using bit 15.
-        const ENABLE_ENUM_CLASSES=1 << 16;
-        const ENABLE_XHP_CLASS_MODIFIER=1 << 17;
-        // No longer using bits 18-19.
-        const ENABLE_CLASS_LEVEL_WHERE_CLAUSES=1 << 20;
-  }
+#[derive(Debug, Default, Clone, clap::Parser)]
+pub struct ParserFlags {
+    #[clap(long)]
+    pub abstract_static_props: bool,
+    #[clap(long)]
+    pub allow_new_attribute_syntax: bool,
+    #[clap(long)]
+    pub allow_unstable_features: bool,
+    #[clap(long)]
+    pub const_default_func_args: bool,
+    #[clap(long)]
+    pub const_static_props: bool,
+    #[clap(long)]
+    pub disable_lval_as_an_expression: bool,
+    #[clap(long)]
+    pub disallow_inst_meth: bool,
+    #[clap(long)]
+    pub disable_xhp_element_mangling: bool,
+    #[clap(long)]
+    pub disallow_fun_and_cls_meth_pseudo_funcs: bool,
+    #[clap(long)]
+    pub disallow_func_ptrs_in_constants: bool,
+    #[clap(long)]
+    pub enable_enum_classes: bool,
+    #[clap(long)]
+    pub enable_xhp_class_modifier: bool,
+    #[clap(long)]
+    pub enable_class_level_where_clauses: bool,
 }
 
-impl HHBCFlags {
+impl HhbcFlags {
     pub fn from_hhvm_config(config: &HhvmConfig) -> Result<Self> {
-        let mut hhbc_options = Self::empty();
+        let mut flags = Self::default();
 
-        // Only ini version in use
-        if let Some(true) = config.get_bool("php7.ltr_assign")? {
-            hhbc_options |= Self::LTR_ASSIGN;
-        }
-        // Only ini version in use
-        if let Some(true) = config.get_bool("php7.uvs")? {
-            hhbc_options |= Self::UVS;
-        }
-        // Both variants in use
-        if let Some(true) = config.get_bool("Repo.Authoritative")? {
-            hhbc_options |= Self::AUTHORITATIVE;
-        }
-        // HDF uses both Eval.JitEnableRenameFunction and JitEnableRenameFunction
-        // ini only uses the hhvm.jit_enable_rename_function
-        if let Some(true) = config.get_bool("Eval.JitEnableRenameFunction")? {
-            hhbc_options |= Self::JIT_ENABLE_RENAME_FUNCTION;
-        }
-        if let Some(true) = config.get_bool("JitEnableRenameFunction")? {
-            hhbc_options |= Self::JIT_ENABLE_RENAME_FUNCTION;
-        }
-        // Only hdf version in use
-        if let Some(true) = config.get_bool("Eval.LogExternCompilerPerf")? {
-            hhbc_options |= Self::LOG_EXTERN_COMPILER_PERF;
-        }
-        // I think only the hdf is used correctly
-        if let Some(true) = config.get_bool("Eval.EnableIntrinsicsExtension")? {
-            hhbc_options |= Self::ENABLE_INTRINSICS_EXTENSION;
-        }
-        // Only the hdf versions used
-        if let Some(true) = config.get_bool("Eval.EmitClsMethPointers")? {
-            hhbc_options |= Self::EMIT_CLS_METH_POINTERS;
-        }
+        // Use the config setting if provided; otherwise preserve default.
+        let init = |flag: &mut bool, name: &str| -> Result<()> {
+            match config.get_bool(name)? {
+                Some(b) => Ok(*flag = b),
+                None => Ok(()),
+            }
+        };
+
+        init(&mut flags.ltr_assign, "php7.ltr_assign")?;
+        init(&mut flags.uvs, "php7.uvs")?;
+        init(&mut flags.repo_authoritative, "Repo.Authoritative")?;
+        init(
+            &mut flags.jit_enable_rename_function,
+            "Eval.JitEnableRenameFunction",
+        )?;
+        init(
+            &mut flags.jit_enable_rename_function,
+            "JitEnableRenameFunction",
+        )?;
+        init(
+            &mut flags.log_extern_compiler_perf,
+            "Eval.LogExternCompilerPerf",
+        )?;
+        init(
+            &mut flags.enable_intrinsics_extension,
+            "Eval.EnableIntrinsicsExtension",
+        )?;
+        init(
+            &mut flags.emit_cls_meth_pointers,
+            "Eval.EmitClsMethPointers",
+        )?;
+
         // Only the hdf versions used. Can kill variant in options_cli.rs
-        if config
+        flags.emit_meth_caller_func_pointers = config
             .get_bool("Eval.EmitMethCallerFuncPointers")?
-            .unwrap_or(true)
-        {
-            hhbc_options |= Self::EMIT_METH_CALLER_FUNC_POINTERS;
-        }
+            .unwrap_or(true);
+
         // ini might use hhvm.array_provenance
         // hdf might use Eval.ArrayProvenance
         // But super unclear here
-        if let Some(true) = config.get_bool("Eval.ArrayProvenance")? {
-            hhbc_options |= Self::ARRAY_PROVENANCE;
-        }
-        if let Some(true) = config.get_bool("array_provenance")? {
-            hhbc_options |= Self::ARRAY_PROVENANCE;
-        }
+        init(&mut flags.array_provenance, "Eval.ArrayProvenance")?;
+        init(&mut flags.array_provenance, "array_provenance")?;
+
         // Only hdf version
-        if config.get_bool("Eval.FoldLazyClassKeys")?.unwrap_or(true) {
-            hhbc_options |= Self::FOLD_LAZY_CLASS_KEYS;
-        }
-        Ok(hhbc_options)
+        flags.fold_lazy_class_keys = config.get_bool("Eval.FoldLazyClassKeys")?.unwrap_or(true);
+        Ok(flags)
     }
 
-    fn to_php7_flags(self) -> Php7Flags {
+    fn to_php7_flags(&self) -> Php7Flags {
         let mut f = Php7Flags::empty();
-        if self.contains(Self::UVS) {
+        if self.uvs {
             f |= Php7Flags::UVS;
         }
-        if self.contains(Self::LTR_ASSIGN) {
+        if self.ltr_assign {
             f |= Php7Flags::LTR_ASSIGN;
         }
         f
     }
 
-    fn to_hhvm_flags(self) -> HhvmFlags {
+    fn to_hhvm_flags(&self) -> HhvmFlags {
         let mut f = HhvmFlags::empty();
-        if self.contains(Self::ARRAY_PROVENANCE) {
+        if self.array_provenance {
             f |= HhvmFlags::ARRAY_PROVENANCE;
         }
-        if self.contains(Self::EMIT_CLS_METH_POINTERS) {
+        if self.emit_cls_meth_pointers {
             f |= HhvmFlags::EMIT_CLS_METH_POINTERS;
         }
-        if self.contains(Self::EMIT_METH_CALLER_FUNC_POINTERS) {
+        if self.emit_meth_caller_func_pointers {
             f |= HhvmFlags::EMIT_METH_CALLER_FUNC_POINTERS;
         }
-        if self.contains(Self::ENABLE_INTRINSICS_EXTENSION) {
+        if self.enable_intrinsics_extension {
             f |= HhvmFlags::ENABLE_INTRINSICS_EXTENSION;
         }
-        if self.contains(Self::FOLD_LAZY_CLASS_KEYS) {
+        if self.fold_lazy_class_keys {
             f |= HhvmFlags::FOLD_LAZY_CLASS_KEYS;
         }
-        if self.contains(Self::JIT_ENABLE_RENAME_FUNCTION) {
+        if self.jit_enable_rename_function {
             f |= HhvmFlags::JIT_ENABLE_RENAME_FUNCTION;
         }
-        if self.contains(Self::LOG_EXTERN_COMPILER_PERF) {
+        if self.log_extern_compiler_perf {
             f |= HhvmFlags::LOG_EXTERN_COMPILER_PERF;
         }
         f
     }
 
-    fn to_repo_flags(self) -> RepoFlags {
+    fn to_repo_flags(&self) -> RepoFlags {
         let mut f = RepoFlags::empty();
-        if self.contains(Self::AUTHORITATIVE) {
+        if self.repo_authoritative {
             f |= RepoFlags::AUTHORITATIVE;
         }
         f
@@ -238,108 +256,138 @@ impl HHBCFlags {
 
 impl ParserFlags {
     pub fn from_hhvm_config(config: &HhvmConfig) -> Result<Self> {
-        let mut parser_options = ParserFlags::empty();
+        let mut flags = Self::default();
+
+        // Use the config setting if provided; otherwise preserve default.
+        let init = |flag: &mut bool, name: &str| -> Result<()> {
+            match config.get_bool(name)? {
+                Some(b) => Ok(*flag = b),
+                None => Ok(()),
+            }
+        };
+
         // Note: Could only find examples of Hack.Lang.AbstractStaticProps
-        if let Some(true) = config.get_bool("Hack.Lang.AbstractStaticProps")? {
-            parser_options |= ParserFlags::ABSTRACT_STATIC_PROPS;
-        }
+        init(
+            &mut flags.abstract_static_props,
+            "Hack.Lang.AbstractStaticProps",
+        )?;
+
         // TODO: I'm pretty sure allow_new_attribute_syntax is dead and we can kill this option
-        if let Some(true) = config.get_bool("hack.lang.allow_new_attribute_syntax")? {
-            parser_options |= ParserFlags::ALLOW_NEW_ATTRIBUTE_SYNTAX;
-        }
+        init(
+            &mut flags.allow_new_attribute_syntax,
+            "hack.lang.allow_new_attribute_syntax",
+        )?;
+
         // Both hdf and ini versions are being used
-        if let Some(true) = config.get_bool("Hack.Lang.AllowUnstableFeatures")? {
-            parser_options |= ParserFlags::ALLOW_UNSTABLE_FEATURES;
-        }
+        init(
+            &mut flags.allow_unstable_features,
+            "Hack.Lang.AllowUnstableFeatures",
+        )?;
+
         // TODO: could not find examples of const_default_func_args, kill it in options_cli.rs
-        if let Some(true) = config.get_bool("Hack.Lang.ConstDefaultFuncArgs")? {
-            parser_options |= ParserFlags::CONST_DEFAULT_FUNC_ARGS;
-        }
+        init(
+            &mut flags.const_default_func_args,
+            "Hack.Lang.ConstDefaultFuncArgs",
+        )?;
+
         // Only hdf version found in use
-        if let Some(true) = config.get_bool("Hack.Lang.ConstStaticProps")? {
-            parser_options |= ParserFlags::CONST_STATIC_PROPS;
-        }
+        init(&mut flags.const_static_props, "Hack.Lang.ConstStaticProps")?;
+
         // TODO: Kill disable_lval_as_an_expression
+
         // Only hdf option in use
-        if let Some(true) = config.get_bool("Hack.Lang.DisallowInstMeth")? {
-            parser_options |= ParserFlags::DISALLOW_INST_METH;
-        }
+        init(&mut flags.disallow_inst_meth, "Hack.Lang.DisallowInstMeth")?;
+
         // Both ini and hdf variants in use
-        if let Some(true) = config.get_bool("Hack.Lang.DisableXHPElementMangling")? {
-            parser_options |= ParserFlags::DISABLE_XHP_ELEMENT_MANGLING;
-        }
+        init(
+            &mut flags.disable_xhp_element_mangling,
+            "Hack.Lang.DisableXHPElementMangling",
+        )?;
+
         // Both ini and hdf variants in use
-        if let Some(true) = config.get_bool("Hack.Lang.DisallowFunAndClsMethPseudoFuncs")? {
-            parser_options |= ParserFlags::DISALLOW_FUN_AND_CLS_METH_PSEUDO_FUNCS;
-        }
+        init(
+            &mut flags.disallow_fun_and_cls_meth_pseudo_funcs,
+            "Hack.Lang.DisallowFunAndClsMethPseudoFuncs",
+        )?;
+
         // Only hdf option in use
-        if let Some(true) = config.get_bool("Hack.Lang.DisallowFuncPtrsInConstants")? {
-            parser_options |= ParserFlags::DISALLOW_FUNC_PTRS_IN_CONSTANTS;
-        }
+        init(
+            &mut flags.disallow_func_ptrs_in_constants,
+            "Hack.Lang.DisallowFuncPtrsInConstants",
+        )?;
+
         // Only hdf option in use
-        if let Some(true) = config.get_bool("Hack.Lang.EnableEnumClasses")? {
-            parser_options |= ParserFlags::ENABLE_ENUM_CLASSES;
-        }
+        init(
+            &mut flags.enable_enum_classes,
+            "Hack.Lang.EnableEnumClasses",
+        )?;
+
         // Both options in use
-        if let Some(true) = config.get_bool("Hack.Lang.EnableXHPClassModifier")? {
-            parser_options |= ParserFlags::ENABLE_XHP_CLASS_MODIFIER;
-        }
+        init(
+            &mut flags.enable_xhp_class_modifier,
+            "Hack.Lang.EnableXHPClassModifier",
+        )?;
+
         // Only hdf option in use. Kill variant in options_cli.rs
-        if let Some(true) = config.get_bool("Hack.Lang.EnableClassLevelWhereClauses")? {
-            parser_options |= ParserFlags::ENABLE_CLASS_LEVEL_WHERE_CLAUSES;
-        }
-        Ok(parser_options)
+        init(
+            &mut flags.enable_class_level_where_clauses,
+            "Hack.Lang.EnableClassLevelWhereClauses",
+        )?;
+        Ok(flags)
     }
 
-    fn to_lang_flags(self) -> LangFlags {
+    fn to_lang_flags(&self) -> LangFlags {
         let mut f = LangFlags::empty();
-        if self.contains(Self::ABSTRACT_STATIC_PROPS) {
+        if self.abstract_static_props {
             f |= LangFlags::ABSTRACT_STATIC_PROPS;
         }
-        if self.contains(Self::ALLOW_NEW_ATTRIBUTE_SYNTAX) {
+        if self.allow_new_attribute_syntax {
             f |= LangFlags::ALLOW_NEW_ATTRIBUTE_SYNTAX;
         }
-        if self.contains(Self::ALLOW_UNSTABLE_FEATURES) {
+        if self.allow_unstable_features {
             f |= LangFlags::ALLOW_UNSTABLE_FEATURES;
         }
-        if self.contains(Self::CONST_DEFAULT_FUNC_ARGS) {
+        if self.const_default_func_args {
             f |= LangFlags::CONST_DEFAULT_FUNC_ARGS;
         }
-        if self.contains(Self::CONST_STATIC_PROPS) {
+        if self.const_static_props {
             f |= LangFlags::CONST_STATIC_PROPS;
         }
-        if self.contains(Self::DISABLE_LVAL_AS_AN_EXPRESSION) {
+        if self.disable_lval_as_an_expression {
             f |= LangFlags::DISABLE_LVAL_AS_AN_EXPRESSION;
         }
-        if self.contains(Self::DISALLOW_INST_METH) {
+        if self.disallow_inst_meth {
             f |= LangFlags::DISALLOW_INST_METH;
         }
-        if self.contains(Self::DISABLE_XHP_ELEMENT_MANGLING) {
+        if self.disable_xhp_element_mangling {
             f |= LangFlags::DISABLE_XHP_ELEMENT_MANGLING;
         }
-        if self.contains(Self::DISALLOW_FUN_AND_CLS_METH_PSEUDO_FUNCS) {
+        if self.disallow_fun_and_cls_meth_pseudo_funcs {
             f |= LangFlags::DISALLOW_FUN_AND_CLS_METH_PSEUDO_FUNCS;
         }
-        if self.contains(Self::DISALLOW_FUNC_PTRS_IN_CONSTANTS) {
+        if self.disallow_func_ptrs_in_constants {
             f |= LangFlags::DISALLOW_FUNC_PTRS_IN_CONSTANTS;
         }
-        if self.contains(Self::ENABLE_ENUM_CLASSES) {
+        if self.enable_enum_classes {
             f |= LangFlags::ENABLE_ENUM_CLASSES;
         }
-        if self.contains(Self::ENABLE_XHP_CLASS_MODIFIER) {
+        if self.enable_xhp_class_modifier {
             f |= LangFlags::ENABLE_XHP_CLASS_MODIFIER;
         }
-        if self.contains(Self::ENABLE_CLASS_LEVEL_WHERE_CLAUSES) {
+        if self.enable_class_level_where_clauses {
             f |= LangFlags::ENABLE_CLASS_LEVEL_WHERE_CLAUSES;
         }
         f
     }
 }
 
-impl<'a> NativeEnv<'a> {
-    fn to_options(native_env: &NativeEnv<'a>) -> Options {
-        let hhbc_flags = native_env.hhbc_flags;
-        let config = [native_env.aliased_namespaces, native_env.include_roots];
+impl NativeEnv {
+    fn to_options(native_env: &NativeEnv) -> Options {
+        let hhbc_flags = &native_env.hhbc_flags;
+        let config = [
+            native_env.aliased_namespaces.as_str(),
+            native_env.include_roots.as_str(),
+        ];
         let opts = Options::from_configs(&config).unwrap();
         let hhvm = Hhvm {
             aliased_namespaces: opts.hhvm.aliased_namespaces,
@@ -363,63 +411,58 @@ impl<'a> NativeEnv<'a> {
 /// Compilation profile. All times are in seconds,
 /// except when they are ignored and should not be reported,
 /// such as in the case hhvm.log_extern_compiler_perf is false.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct Profile {
-    /// Time in seconds spent in parsing and lowering.
-    pub parsing_t: f64,
+    pub parser_profile: ParserProfile,
 
     /// Time in seconds spent in emitter.
-    pub codegen_t: f64,
+    pub codegen_t: Duration,
 
     /// Time in seconds spent in bytecode_printer.
-    pub printing_t: f64,
+    pub printing_t: Duration,
 
-    /// Parser arena allocation volume in bytes.
-    pub parsing_bytes: i64,
+    /// Time taken by bc_to_ir
+    pub bc_to_ir_t: Duration,
+
+    /// Time taken by ir_to_bc
+    pub ir_to_bc_t: Duration,
 
     /// Emitter arena allocation volume in bytes.
-    pub codegen_bytes: i64,
-
-    /// Peak stack size during parsing, before lowering.
-    pub parse_peak: i64,
-
-    /// Peak stack size during parsing and lowering.
-    pub lower_peak: i64,
-    pub error_peak: i64,
+    pub codegen_bytes: u64,
 
     /// Peak stack size during codegen
-    pub rewrite_peak: i64,
-    pub emitter_peak: i64,
+    pub rewrite_peak: u64,
+    pub emitter_peak: u64,
 
     /// Was the log_extern_compiler_perf flag set?
     pub log_enabled: bool,
 }
 
-impl std::ops::AddAssign for Profile {
-    fn add_assign(&mut self, p: Self) {
-        self.parsing_t += p.parsing_t;
-        self.codegen_t += p.codegen_t;
-        self.printing_t += p.printing_t;
-        self.codegen_bytes += p.codegen_bytes;
-        self.parse_peak += p.parse_peak;
-        self.lower_peak += p.lower_peak;
-        self.error_peak += p.error_peak;
-        self.rewrite_peak += p.rewrite_peak;
-        self.emitter_peak += p.emitter_peak;
-    }
-}
-
-impl std::ops::Add for Profile {
-    type Output = Self;
-    fn add(mut self, p2: Self) -> Self {
-        self += p2;
-        self
-    }
-}
-
 impl Profile {
-    pub fn total_sec(&self) -> f64 {
-        self.parsing_t + self.codegen_t + self.printing_t
+    pub fn fold(a: Self, b: Self) -> Profile {
+        Profile {
+            parser_profile: a.parser_profile.fold(b.parser_profile),
+
+            codegen_t: a.codegen_t + b.codegen_t,
+            printing_t: a.printing_t + b.printing_t,
+            codegen_bytes: a.codegen_bytes + b.codegen_bytes,
+
+            bc_to_ir_t: a.bc_to_ir_t + b.bc_to_ir_t,
+            ir_to_bc_t: a.ir_to_bc_t + b.ir_to_bc_t,
+
+            rewrite_peak: std::cmp::max(a.rewrite_peak, b.rewrite_peak),
+            emitter_peak: std::cmp::max(a.emitter_peak, b.emitter_peak),
+
+            log_enabled: a.log_enabled | b.log_enabled,
+        }
+    }
+
+    pub fn total_t(&self) -> Duration {
+        self.parser_profile.total_t
+            + self.codegen_t
+            + self.bc_to_ir_t
+            + self.ir_to_bc_t
+            + self.printing_t
     }
 }
 
@@ -427,23 +470,28 @@ impl Profile {
 /// Update `profile` with stats from any passes that run,
 /// even if the compiler ultimately returns Err.
 pub fn from_text<'decl>(
-    alloc: &bumpalo::Bump,
     writer: &mut dyn std::io::Write,
     source_text: SourceText<'_>,
-    native_env: &NativeEnv<'_>,
+    native_env: &NativeEnv,
     decl_provider: Option<&'decl dyn DeclProvider>,
     profile: &mut Profile,
 ) -> Result<()> {
-    let mut emitter = create_emitter(native_env.flags, native_env, decl_provider, alloc);
-    let mut unit = emit_unit_from_text(&mut emitter, native_env.flags, source_text, profile)?;
+    let alloc = bumpalo::Bump::new();
+    let mut emitter = create_emitter(&native_env.flags, native_env, decl_provider, &alloc);
+    let mut unit = emit_unit_from_text(&mut emitter, &native_env.flags, source_text, profile)?;
 
-    if native_env.flags.contains(EnvFlags::ENABLE_IR) {
+    if native_env.flags.enable_ir {
+        let bc_to_ir_t = Instant::now();
         let ir = bc_to_ir::bc_to_ir(&unit);
-        unit = ir_to_bc::ir_to_bc(alloc, ir);
+        profile.bc_to_ir_t = bc_to_ir_t.elapsed();
+
+        let ir_to_bc_t = Instant::now();
+        unit = ir_to_bc::ir_to_bc(&alloc, ir);
+        profile.ir_to_bc_t = ir_to_bc_t.elapsed();
     }
 
     unit_to_string(native_env, writer, &unit, profile)?;
-    profile.codegen_bytes = alloc.allocated_bytes() as i64;
+    profile.codegen_bytes = alloc.allocated_bytes() as u64;
     Ok(())
 }
 
@@ -456,7 +504,7 @@ fn rewrite_and_emit<'p, 'arena, 'decl>(
     // First rewrite and modify `ast` in place.
     stack_limit::reset();
     let result = rewrite_program::rewrite_program(emitter, ast, RcOc::clone(&namespace_env));
-    profile.rewrite_peak = stack_limit::peak() as i64;
+    profile.rewrite_peak = stack_limit::peak() as u64;
     stack_limit::reset();
     let unit = match result {
         Ok(()) => {
@@ -470,28 +518,28 @@ fn rewrite_and_emit<'p, 'arena, 'decl>(
             ErrorKind::Unrecoverable(x) => Err(Error::unrecoverable(x)),
         },
     };
-    profile.emitter_peak = stack_limit::peak() as i64;
+    profile.emitter_peak = stack_limit::peak() as u64;
     unit
 }
 
 pub fn unit_from_text<'arena, 'decl>(
     alloc: &'arena bumpalo::Bump,
     source_text: SourceText<'_>,
-    native_env: &NativeEnv<'_>,
+    native_env: &NativeEnv,
     decl_provider: Option<&'decl dyn DeclProvider>,
     profile: &mut Profile,
 ) -> Result<Unit<'arena>> {
-    let mut emitter = create_emitter(native_env.flags, native_env, decl_provider, alloc);
-    emit_unit_from_text(&mut emitter, native_env.flags, source_text, profile)
+    let mut emitter = create_emitter(&native_env.flags, native_env, decl_provider, alloc);
+    emit_unit_from_text(&mut emitter, &native_env.flags, source_text, profile)
 }
 
 pub fn unit_to_string(
-    native_env: &NativeEnv<'_>,
+    native_env: &NativeEnv,
     writer: &mut dyn std::io::Write,
     program: &Unit<'_>,
     profile: &mut Profile,
 ) -> Result<()> {
-    if native_env.flags.contains(EnvFlags::DUMP_IR) {
+    if native_env.flags.dump_ir {
         let ir = bc_to_ir::bc_to_ir(program);
         struct FmtFromIo<'a>(&'a mut dyn std::io::Write);
         impl fmt::Write for FmtFromIo<'_> {
@@ -500,14 +548,14 @@ pub fn unit_to_string(
             }
         }
         let print_result;
-        (print_result, profile.printing_t) = time(|| {
+        (print_result, profile.printing_t) = profile_rust::time(|| {
             let verbose = false;
             ir::print_unit(&mut FmtFromIo(writer), &ir, verbose)
         });
         print_result?;
     } else {
         let print_result;
-        (print_result, profile.printing_t) = time(|| {
+        (print_result, profile.printing_t) = profile_rust::time(|| {
             let opts = NativeEnv::to_options(native_env);
             bytecode_printer::print_unit(
                 &Context::new(&opts, Some(&native_env.filepath), opts.array_provenance()),
@@ -552,7 +600,7 @@ fn check_readonly_and_emit<'arena, 'decl>(
 
 fn emit_unit_from_text<'arena, 'decl>(
     emitter: &mut Emitter<'arena, 'decl>,
-    flags: EnvFlags,
+    flags: &EnvFlags,
     source_text: SourceText<'_>,
     profile: &mut Profile,
 ) -> Result<Unit<'arena>> {
@@ -570,23 +618,20 @@ fn emit_unit_from_text<'arena, 'decl>(
             .contains(LangFlags::DISABLE_XHP_ELEMENT_MANGLING),
     ));
 
-    let (parse_result, parsing_t) = time(|| {
-        parse_file(
-            emitter.options(),
-            source_text,
-            !flags.contains(EnvFlags::DISABLE_TOPLEVEL_ELABORATION),
-            RcOc::clone(&namespace_env),
-            flags.contains(EnvFlags::IS_SYSTEMLIB),
-            type_directed,
-            profile,
-        )
-    });
-    profile.parsing_t = parsing_t;
+    let parse_result = parse_file(
+        emitter.options(),
+        source_text,
+        !flags.disable_toplevel_elaboration,
+        RcOc::clone(&namespace_env),
+        flags.is_systemlib,
+        type_directed,
+        profile,
+    );
 
     let ((unit, profile), codegen_t) = match parse_result {
         Ok(mut ast) => {
             elaborate_namespaces_visitor::elaborate_program(RcOc::clone(&namespace_env), &mut ast);
-            time(move || {
+            profile_rust::time(move || {
                 (
                     check_readonly_and_emit(emitter, namespace_env, &mut ast, profile),
                     profile,
@@ -594,7 +639,7 @@ fn emit_unit_from_text<'arena, 'decl>(
             })
         }
         Err(ParseError(pos, msg, fatal_op)) => {
-            time(move || (emit_fatal(emitter.alloc, fatal_op, pos, msg), profile))
+            profile_rust::time(move || (emit_fatal(emitter.alloc, fatal_op, pos, msg), profile))
         }
     };
     profile.codegen_t = codegen_t;
@@ -614,15 +659,15 @@ fn emit_fatal<'arena>(
 }
 
 fn create_emitter<'arena, 'decl>(
-    flags: EnvFlags,
-    native_env: &NativeEnv<'_>,
+    flags: &EnvFlags,
+    native_env: &NativeEnv,
     decl_provider: Option<&'decl dyn DeclProvider>,
     alloc: &'arena bumpalo::Bump,
 ) -> Emitter<'arena, 'decl> {
     Emitter::new(
         NativeEnv::to_options(native_env),
-        flags.contains(EnvFlags::IS_SYSTEMLIB),
-        flags.contains(EnvFlags::FOR_DEBUGGER_EVAL),
+        flags.is_systemlib,
+        flags.for_debugger_eval,
         alloc,
         decl_provider,
     )
@@ -678,7 +723,6 @@ fn parse_file(
 ) -> Result<ast::Program, ParseError> {
     let aast_env = AastEnv {
         codegen: true,
-        fail_open: false,
         php5_compat_mode: !opts.php7_flags.contains(Php7Flags::UVS),
         keep_errors: false,
         is_systemlib,
@@ -726,16 +770,10 @@ fn parse_file(
             ParserResult {
                 errors,
                 aast,
-                parse_peak,
-                lower_peak,
-                error_peak,
-                arena_bytes,
+                profile: parser_profile,
                 ..
             } => {
-                profile.parse_peak = parse_peak;
-                profile.lower_peak = lower_peak;
-                profile.error_peak = error_peak;
-                profile.parsing_bytes = arena_bytes;
+                profile.parser_profile = parser_profile;
                 let mut errors = errors.iter().filter(|e| {
                     e.code() != 2086
                         /* Naming.MethodNeedsVisibility */
@@ -749,22 +787,14 @@ fn parse_file(
                         String::from(e.msg()),
                         FatalOp::Parse,
                     )),
-                    None => match aast {
-                        Ok(aast) => Ok(aast),
-                        Err(msg) => Err(ParseError(Pos::make_none(), msg, FatalOp::Parse)),
-                    },
+                    None => Ok(aast),
                 }
             }
         },
     }
 }
 
-fn time<T>(f: impl FnOnce() -> T) -> (T, f64) {
-    let (r, t) = profile_rust::time(f);
-    (r, t.as_secs_f64())
-}
-
-pub fn expr_to_string_lossy(flags: EnvFlags, expr: &ast::Expr) -> String {
+pub fn expr_to_string_lossy(flags: &EnvFlags, expr: &ast::Expr) -> String {
     use print_expr::Context;
 
     let opts = Options::from_configs(&[]).expect("Malformed options");
@@ -772,8 +802,8 @@ pub fn expr_to_string_lossy(flags: EnvFlags, expr: &ast::Expr) -> String {
     let alloc = bumpalo::Bump::new();
     let emitter = Emitter::new(
         opts,
-        flags.contains(EnvFlags::IS_SYSTEMLIB),
-        flags.contains(EnvFlags::FOR_DEBUGGER_EVAL),
+        flags.is_systemlib,
+        flags.for_debugger_eval,
         &alloc,
         None,
     );

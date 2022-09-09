@@ -14,6 +14,7 @@
 
 namespace fizz {
 class HybridKeyExFactory : public OpenSSLFactory {
+ public:
   std::unique_ptr<KeyExchange> makeKeyExchange(
       NamedGroup group,
       KeyExchangeMode mode) const override {
@@ -26,8 +27,32 @@ class HybridKeyExFactory : public OpenSSLFactory {
         return std::make_unique<HybridKeyExchange>(
             std::make_unique<OpenSSLECKeyExchange<P384>>(),
             OQSKeyExchange::createOQSKeyExchange(mode, OQS_KEM_alg_bike_l3));
+      case NamedGroup::cecpq2:
+        return std::make_unique<HybridKeyExchange>(
+            std::make_unique<X25519KeyExchange>(),
+            OQSKeyExchange::createOQSKeyExchange(
+                mode, OQS_KEM_alg_ntru_hrss701));
+      case NamedGroup::x25519_kyber512:
+        return std::make_unique<HybridKeyExchange>(
+            std::make_unique<X25519KeyExchange>(),
+            OQSKeyExchange::createOQSKeyExchange(mode, OQS_KEM_alg_kyber_512));
+      case NamedGroup::secp256r1_kyber512:
+        return std::make_unique<HybridKeyExchange>(
+            std::make_unique<OpenSSLECKeyExchange<P256>>(),
+            OQSKeyExchange::createOQSKeyExchange(mode, OQS_KEM_alg_kyber_512));
+      case NamedGroup::kyber512:
+        return OQSKeyExchange::createOQSKeyExchange(
+            mode, OQS_KEM_alg_kyber_512);
+      case NamedGroup::x25519_kyber768:
+        return std::make_unique<HybridKeyExchange>(
+            std::make_unique<X25519KeyExchange>(),
+            OQSKeyExchange::createOQSKeyExchange(mode, OQS_KEM_alg_kyber_768));
+      case NamedGroup::secp384r1_kyber768:
+        return std::make_unique<HybridKeyExchange>(
+            std::make_unique<OpenSSLECKeyExchange<P384>>(),
+            OQSKeyExchange::createOQSKeyExchange(mode, OQS_KEM_alg_kyber_768));
       default:
-        throw std::runtime_error("ke: not implemented");
+        return OpenSSLFactory::makeKeyExchange(group, mode);
     }
   }
 };

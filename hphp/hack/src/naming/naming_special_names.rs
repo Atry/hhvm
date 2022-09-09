@@ -249,10 +249,6 @@ pub mod user_attributes {
 
     pub const MEMOIZE_LSB: &str = "__MemoizeLSB";
 
-    pub const POLICY_SHARDED_MEMOIZE: &str = "__PolicyShardedMemoize";
-
-    pub const POLICY_SHARDED_MEMOIZE_LSB: &str = "__PolicyShardedMemoizeLSB";
-
     pub const PHP_STD_LIB: &str = "__PHPStdLib";
 
     pub const ACCEPT_DISPOSABLE: &str = "__AcceptDisposable";
@@ -333,8 +329,6 @@ pub mod user_attributes {
             ENTRY_POINT,
             MEMOIZE,
             MEMOIZE_LSB,
-            POLICY_SHARDED_MEMOIZE,
-            POLICY_SHARDED_MEMOIZE_LSB,
             PHP_STD_LIB,
             ACCEPT_DISPOSABLE,
             RETURN_DISPOSABLE,
@@ -368,16 +362,8 @@ pub mod user_attributes {
         .collect();
     }
 
-    pub fn is_memoized_regular(name: &str) -> bool {
-        name == MEMOIZE || name == MEMOIZE_LSB
-    }
-
-    pub fn is_memoized_policy_sharded(name: &str) -> bool {
-        name == POLICY_SHARDED_MEMOIZE || name == POLICY_SHARDED_MEMOIZE_LSB
-    }
-
     pub fn is_memoized(name: &str) -> bool {
-        is_memoized_regular(name) || is_memoized_policy_sharded(name)
+        name == MEMOIZE || name == MEMOIZE_LSB
     }
 
     // TODO(hrust) these should probably be added to the above map/fields, too
@@ -610,42 +596,59 @@ pub mod typehints {
     use lazy_static::lazy_static;
 
     pub const NULL: &str = "null";
+    pub const HH_NULL: &str = "\\HH\\null";
 
     pub const VOID: &str = "void";
+    pub const HH_VOID: &str = "\\HH\\void";
 
     pub const RESOURCE: &str = "resource";
+    pub const HH_RESOURCE: &str = "\\HH\\resource";
 
     pub const NUM: &str = "num";
+    pub const HH_NUM: &str = "\\HH\\num";
 
     pub const ARRAYKEY: &str = "arraykey";
+    pub const HH_ARRAYKEY: &str = "\\HH\\arraykey";
 
     pub const NORETURN: &str = "noreturn";
+    pub const HH_NORETURN: &str = "\\HH\\noreturn";
 
     pub const MIXED: &str = "mixed";
 
     pub const NONNULL: &str = "nonnull";
+    pub const HH_NONNULL: &str = "\\HH\\nonnull";
 
     pub const THIS: &str = "this";
+    pub const HH_THIS: &str = "\\HH\\this";
 
     pub const DYNAMIC: &str = "dynamic";
 
     pub const NOTHING: &str = "nothing";
+    pub const HH_NOTHING: &str = "\\HH\\nothing";
 
     pub const INT: &str = "int";
+    pub const HH_INT: &str = "\\HH\\int";
 
     pub const BOOL: &str = "bool";
+    pub const HH_BOOL: &str = "\\HH\\bool";
 
     pub const FLOAT: &str = "float";
+    pub const HH_FLOAT: &str = "\\HH\\float";
 
     pub const STRING: &str = "string";
+    pub const HH_STRING: &str = "\\HH\\string";
 
     pub const DARRAY: &str = "darray";
+    pub const HH_DARRAY: &str = "\\HH\\darray";
 
     pub const VARRAY: &str = "varray";
+    pub const HH_VARRAY: &str = "\\HH\\varray";
 
     pub const VARRAY_OR_DARRAY: &str = "varray_or_darray";
+    pub const HH_VARRAY_OR_DARRAY: &str = "\\HH\\varray_or_darray";
 
     pub const VEC_OR_DICT: &str = "vec_or_dict";
+    pub const HH_VEC_OR_DICT: &str = "\\HH\\vec_or_dict";
 
     pub const CALLABLE: &str = "callable";
 

@@ -60,10 +60,10 @@ class lex_handler_impl : public lex_handler {
 
 parsing_driver::parsing_driver(
     source_manager& sm,
-    diagnostic_context& ctx,
+    diagnostics_engine& diags,
     std::string path,
     parsing_params parse_params)
-    : source_mgr_(sm), ctx_(ctx), params_(std::move(parse_params)) {
+    : source_mgr_(sm), diags_(diags), params_(std::move(parse_params)) {
   program_bundle =
       std::make_unique<t_program_bundle>(std::make_unique<t_program>(path));
   program = program_bundle->root_program();
@@ -83,12 +83,12 @@ void parsing_driver::on_standard_header(
     std::unique_ptr<t_annotations> annotations) {
   validate_header_location(range.begin);
   if (attrs && attrs->struct_annotations) {
-    ctx_.error(
+    diags_.error(
         *attrs->struct_annotations->front(),
         "Structured annotations are not supported for a given entity.");
   }
   if (annotations) {
-    error(
+    diags_.error(
         annotations->loc, "Annotations are not supported for a given entity.");
   }
 }
@@ -101,27 +101,28 @@ void parsing_driver::on_program_header(
   set_program_annotations(std::move(attrs), std::move(annotations), range);
 }
 
-void parsing_driver::on_package(source_range range, std::string name) {
+void parsing_driver::on_package(source_range range, fmt::string_view name) {
   if (mode != parsing_mode::PROGRAM) {
     return;
   }
   if (!program->package().empty()) {
-    error(range.begin, "Package already specified.");
+    diags_.error(range.begin, "Package already specified.");
   }
   try {
-    program->set_package(t_package(std::move(name)));
+    program->set_package(t_package(fmt::to_string(name)));
   } catch (const std::exception& e) {
-    error(range.begin, "{}", e.what());
+    diags_.error(range.begin, "{}", e.what());
   }
 }
 
 std::unique_ptr<t_service> parsing_driver::on_service(
     source_range range,
-    std::string name,
-    const std::string& base_name,
+    const identifier& name,
+    const identifier& base,
     std::unique_ptr<t_function_list> functions) {
   auto find_base_service = [&]() -> const t_service* {
-    if (mode == parsing_mode::PROGRAM && !base_name.empty()) {
+    if (mode == parsing_mode::PROGRAM && base.str.size() != 0) {
+      auto base_name = fmt::to_string(base.str);
       if (auto* result = scope_cache->find_service(base_name)) {
         return result;
       }
@@ -129,34 +130,106 @@ std::unique_ptr<t_service> parsing_driver::on_service(
               scope_cache->find_service(program->scope_name(base_name))) {
         return result;
       }
-      error(range.begin, "Service \"{}\" has not been defined.", base_name);
+      diags_.error(
+          range.begin, "Service \"{}\" has not been defined.", base_name);
     }
     return nullptr;
   };
   auto service = std::make_unique<t_service>(
-      program, std::move(name), find_base_service());
+      program, fmt::to_string(name.str), find_base_service());
   service->set_src_range(range);
   set_functions(*service, std::move(functions));
   return service;
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_const_ref(
+    const identifier& name) {
+  auto name_str = fmt::to_string(name.str);
+  if (const t_const* constant = find_const(name.loc, name_str)) {
+    // Copy const_value to perform isolated mutations
+    auto result = constant->get_value()->clone();
+    // We only want to clone the value, while discarding all real type
+    // information.
+    result->set_ttype({});
+    result->set_is_enum(false);
+    result->set_enum(nullptr);
+    result->set_enum_value(nullptr);
+    return result;
+  }
+
+  // TODO(afuller): Make this an error.
+  if (mode == parsing_mode::PROGRAM) {
+    diags_.warning(
+        name.loc,
+        "The identifier '{}' is not defined yet. Constants and enums should "
+        "be defined before using them as default values.",
+        name.str);
+  }
+  return std::make_unique<t_const_value>(std::move(name_str));
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_bool_literal(bool value) {
+  auto const_value = std::make_unique<t_const_value>();
+  const_value->set_bool(value);
+  return const_value;
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_int_literal(
+    source_location loc, int64_t value) {
+  if (mode == parsing_mode::PROGRAM && !params_.allow_64bit_consts &&
+      (value < INT32_MIN || value > INT32_MAX)) {
+    diags_.warning(
+        loc, "64-bit constant {} may not work in all languages", value);
+  }
+  auto node = std::make_unique<t_const_value>();
+  node->set_integer(value);
+  return node;
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_float_literal(double value) {
+  auto const_value = std::make_unique<t_const_value>();
+  const_value->set_double(value);
+  return const_value;
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_string_literal(
+    fmt::string_view value) {
+  return std::make_unique<t_const_value>(fmt::to_string(value));
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_list_literal() {
+  auto const_value = std::make_unique<t_const_value>();
+  const_value->set_list();
+  return const_value;
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_map_literal() {
+  auto const_value = std::make_unique<t_const_value>();
+  const_value->set_map();
+  return const_value;
+}
+
+std::unique_ptr<t_const_value> parsing_driver::on_struct_literal(
+    source_range range, fmt::string_view name) {
+  auto const_value = std::make_unique<t_const_value>();
+  const_value->set_map();
+  const_value->set_ttype(
+      new_type_ref(fmt::to_string(name), nullptr, range, /*is_const=*/true));
+  return const_value;
 }
 
 int64_t parsing_driver::on_integer(source_range range, sign s, uint64_t value) {
   constexpr uint64_t max = std::numeric_limits<int64_t>::max();
   if (s == sign::minus) {
     if (mode == parsing_mode::PROGRAM && value > max + 1) {
-      error(range.begin, "integer constant -{} is too small", value);
+      diags_.error(range.begin, "integer constant -{} is too small", value);
     }
     return -value;
   }
   if (mode == parsing_mode::PROGRAM && value > max) {
-    error(range.begin, "integer constant {} is too large", value);
+    diags_.error(range.begin, "integer constant {} is too large", value);
   }
   return value;
-}
-
-int parsing_driver::get_lineno(source_location loc) {
-  return loc != source_location() ? resolved_location(loc, source_mgr_).line()
-                                  : 0;
 }
 
 std::unique_ptr<t_program_bundle> parsing_driver::parse() {
@@ -182,26 +255,24 @@ void parsing_driver::parse_file() {
   try {
     src = source_mgr_.add_file(path);
   } catch (const std::runtime_error& e) {
-    error(source_location(), "{}", e.what());
+    diags_.error(source_location(), "{}", e.what());
     end_parsing();
   }
   auto lex_handler = lex_handler_impl(*this);
-  auto lexer = compiler::lexer(src, lex_handler, ctx_);
+  auto lexer = compiler::lexer(src, lex_handler, diags_);
   program->set_src_range({src.start, src.start});
 
   // Create a new scope and scan for includes.
-  assert(!ctx_.visiting());
-  ctx_.begin_visit(*program);
-  ctx_.report(
+  diags_.report(
       src.start, diagnostic_level::info, "Scanning {} for includes\n", path);
   mode = parsing_mode::INCLUDES;
   try {
-    if (!compiler::parse(lexer, *this, ctx_)) {
-      ctx_.error(*program, "Parser error during include pass.");
+    if (!compiler::parse(lexer, *this, diags_)) {
+      diags_.error(*program, "Parser error during include pass.");
       end_parsing();
     }
   } catch (const std::string& x) {
-    error(source_location(), "{}", x);
+    diags_.error(source_location(), "{}", x);
     assert(false);
     end_parsing();
   }
@@ -219,7 +290,7 @@ void parsing_driver::parse_file() {
 
     // Fail on circular dependencies.
     if (circular_deps_.count(included_program->path()) != 0) {
-      ctx_.error(
+      diags_.error(
           *include,
           "Circular dependency found: file `{}` is already parsed.",
           included_program->path());
@@ -229,10 +300,8 @@ void parsing_driver::parse_file() {
     // This must be after the previous circular include check, since the emitted
     // error message above is supposed to reference the parent file name.
     params_.allow_neg_field_keys = true;
-    ctx_.end_visit(*old_program);
     program = included_program;
     parse_file();
-    ctx_.begin_visit(*old_program);
 
     size_t num_removed = circular_deps_.erase(path);
     (void)num_removed;
@@ -245,25 +314,24 @@ void parsing_driver::parse_file() {
   try {
     src = source_mgr_.add_file(path);
   } catch (const std::runtime_error& e) {
-    error(source_location(), "{}", e.what());
+    diags_.error(source_location(), "{}", e.what());
     end_parsing();
   }
-  lexer = compiler::lexer(src, lex_handler, ctx_);
+  lexer = compiler::lexer(src, lex_handler, diags_);
 
   mode = parsing_mode::PROGRAM;
-  ctx_.report(
+  diags_.report(
       src.start, diagnostic_level::info, "Parsing {} for types\n", path);
   try {
-    if (!compiler::parse(lexer, *this, ctx_)) {
-      ctx_.error(*program, "Parser error during types pass.");
+    if (!compiler::parse(lexer, *this, diags_)) {
+      diags_.error(*program, "Parser error during types pass.");
       end_parsing();
     }
   } catch (const std::string& x) {
-    error(source_location(), "{}", x);
+    diags_.error(source_location(), "{}", x);
     assert(false);
     end_parsing();
   }
-  ctx_.end_visit(*program);
 }
 
 [[noreturn]] void parsing_driver::end_parsing() {
@@ -273,7 +341,7 @@ void parsing_driver::parse_file() {
 void parsing_driver::validate_header_location(source_location loc) {
   if (programs_that_parsed_definition_.find(program->path()) !=
       programs_that_parsed_definition_.end()) {
-    error(loc, "Headers must be specified before definitions.");
+    diags_.error(loc, "Headers must be specified before definitions.");
   }
 }
 
@@ -298,7 +366,8 @@ std::string parsing_driver::find_include_file(
     try {
       return boost::filesystem::canonical(path).string();
     } catch (const boost::filesystem::filesystem_error& e) {
-      error(loc, "Could not find file: {}. Error: {}", filename, e.what());
+      diags_.error(
+          loc, "Could not find file: {}. Error: {}", filename, e.what());
       end_parsing();
     }
   }
@@ -317,10 +386,11 @@ std::string parsing_driver::find_include_file(
     if (boost::filesystem::exists(sfilename)) {
       return sfilename.string();
     }
-    ctx_.report(loc, diagnostic_level::debug, "Could not find: {}.", filename);
+    diags_.report(
+        loc, diagnostic_level::debug, "Could not find: {}.", filename);
   }
   // File was not found.
-  error(loc, "Could not find include file {}", filename);
+  diags_.error(loc, "Could not find include file {}", filename);
   end_parsing();
 }
 
@@ -329,7 +399,7 @@ void parsing_driver::validate_not_ambiguous_enum(
   if (scope_cache->is_ambiguous_enum_value(name)) {
     std::string possible_enums =
         scope_cache->get_fully_qualified_enum_value_names(name).c_str();
-    warning(
+    diags_.warning(
         loc,
         "The ambiguous enum `{}` is defined in more than one place. "
         "Please refer to this enum using ENUM_NAME.ENUM_VALUE.{}",
@@ -340,7 +410,7 @@ void parsing_driver::validate_not_ambiguous_enum(
 
 void parsing_driver::clear_doctext() {
   if (doctext && mode == parsing_mode::PROGRAM) {
-    ctx_.warning_legacy_strict(doctext->loc, "uncaptured doctext");
+    diags_.warning_legacy_strict(doctext->loc, "uncaptured doctext");
   }
   doctext = boost::none;
 }
@@ -554,23 +624,15 @@ void parsing_driver::set_fields(t_structured& tstruct, t_field_list&& fields) {
     return;
   }
   assert(tstruct.fields().empty());
-  if (mode != parsing_mode::PROGRAM) {
-    return;
-  }
   t_field_id next_id = -1;
   for (auto& field : fields) {
     maybe_allocate_field_id(next_id, *field);
     if (!tstruct.try_append_field(std::move(field))) {
-      // Since we process root_program twice, we need to check parsing mode to
-      // avoid double reporting
-      if (mode == parsing_mode::PROGRAM ||
-          program != program_bundle->root_program()) {
-        ctx_.error(
-            *field,
-            "Field identifier {} for \"{}\" has already been used.",
-            field->get_key(),
-            field->get_name());
-      }
+      diags_.error(
+          *field,
+          "Field identifier {} for \"{}\" has already been used.",
+          field->get_key(),
+          field->get_name());
     }
   }
 }
@@ -633,7 +695,7 @@ t_type_ref parsing_driver::new_type_ref(
   // TODO(afuller): Remove this special case for const, which requires a
   // specific declaration order.
   if (!result.resolved() && is_const) {
-    error(
+    diags_.error(
         range.begin,
         "The type '{}' is not defined yet. Types must be "
         "defined before the usage in constant values.",
@@ -717,12 +779,12 @@ const t_type* parsing_driver::add_unnamed_typedef(
 
 void parsing_driver::allocate_field_id(t_field_id& next_id, t_field& field) {
   if (params_.strict >= 192) {
-    ctx_.error(
+    diags_.error(
         field,
         "Implicit field keys are deprecated and not allowed with -strict");
   }
   if (next_id < t_field::min_id) {
-    ctx_.error(
+    diags_.error(
         field,
         "Cannot allocate an id for `{}`. Automatic field ids are exhausted.",
         field.name());
@@ -748,7 +810,7 @@ void parsing_driver::maybe_allocate_field_id(
        * protocol compatibility.
        */
       if (field.id() != next_id) {
-        ctx_.warning(
+        diags_.warning(
             field,
             "Nonpositive field id ({}) differs from what would be "
             "auto-assigned by thrift ({}).",
@@ -756,13 +818,13 @@ void parsing_driver::maybe_allocate_field_id(
             next_id);
       }
     } else if (field.id() == next_id) {
-      ctx_.warning(
+      diags_.warning(
           field,
           "Nonpositive value ({}) not allowed as a field id.",
           field.id());
     } else {
       // TODO(afuller): Make ignoring the user provided value a failure.
-      ctx_.warning(
+      diags_.warning(
           field,
           "Nonpositive field id ({}) differs from what is auto-assigned by "
           "thrift. The id must be positive or {}.",
@@ -780,17 +842,6 @@ void parsing_driver::maybe_allocate_field_id(
       next_id = field.id() - 1;
     }
   }
-}
-
-std::unique_ptr<t_const_value> parsing_driver::to_const_value(
-    source_location loc, int64_t value) {
-  if (mode == parsing_mode::PROGRAM && !params_.allow_64bit_consts &&
-      (value < INT32_MIN || value > INT32_MAX)) {
-    warning(loc, "64-bit constant {} may not work in all languages", value);
-  }
-  auto node = std::make_unique<t_const_value>();
-  node->set_integer(value);
-  return node;
 }
 
 std::string parsing_driver::strip_doctext(fmt::string_view text) {
@@ -823,31 +874,6 @@ const t_const* parsing_driver::find_const(
     return constant;
   }
   return nullptr;
-}
-
-std::unique_ptr<t_const_value> parsing_driver::copy_const_value(
-    source_location loc, const std::string& name) {
-  if (const t_const* constant = find_const(loc, name)) {
-    // Copy const_value to perform isolated mutations
-    auto result = constant->get_value()->clone();
-    // We only want to clone the value, while discarding all real type
-    // information.
-    result->set_ttype({});
-    result->set_is_enum(false);
-    result->set_enum(nullptr);
-    result->set_enum_value(nullptr);
-    return result;
-  }
-
-  // TODO(afuller): Make this an error.
-  if (mode == parsing_mode::PROGRAM) {
-    warning(
-        loc,
-        "The identifier '{}' is not defined yet. Constants and enums should "
-        "be defined before using them as default values.",
-        name);
-  }
-  return std::make_unique<t_const_value>(name);
 }
 
 void parsing_driver::set_parsed_definition() {

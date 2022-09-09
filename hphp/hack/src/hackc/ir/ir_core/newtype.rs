@@ -24,39 +24,26 @@ pub use hhbc::TypeStructResolveOp;
 use newtype::newtype_int;
 
 use crate::string_intern::StringInterner;
-use crate::UnitStringId;
+use crate::UnitBytesId;
 
 macro_rules! interned_hhbc_id {
     ($name: ident, $hhbc: ident) => {
         #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
         pub struct $name {
-            pub id: UnitStringId,
+            pub id: UnitBytesId,
         }
 
         impl $name {
-            pub fn new(id: UnitStringId) -> Self {
+            pub fn new(id: UnitBytesId) -> Self {
                 Self { id }
             }
 
-            pub fn from_hhbc<'a>(id: hhbc::$hhbc<'a>, strings: &mut StringInterner<'a>) -> Self {
-                Self::new(strings.intern_str(id.as_ffi_str()))
+            pub fn from_hhbc<'a>(id: hhbc::$hhbc<'a>, strings: &mut StringInterner) -> Self {
+                Self::new(strings.intern_bytes(id.as_bytes()))
             }
 
-            pub fn from_str<'a>(
-                name: &str,
-                alloc: &'a bumpalo::Bump,
-                strings: &mut StringInterner<'a>,
-            ) -> Self {
-                let name = ffi::Str::new_str(alloc, name);
+            pub fn from_str(name: &str, strings: &mut StringInterner) -> Self {
                 Self::new(strings.intern_str(name))
-            }
-
-            pub fn to_hhbc<'a>(
-                self,
-                alloc: &'a bumpalo::Bump,
-                strings: &StringInterner<'a>,
-            ) -> hhbc::$hhbc<'a> {
-                hhbc::$hhbc::new(strings.lookup(self.id).to_ffi_str(alloc))
             }
         }
     };
@@ -77,8 +64,8 @@ newtype_int!(BlockId, u32, BlockIdMap, BlockIdSet);
 newtype_int!(InstrId, u32, InstrIdMap, InstrIdSet);
 pub type InstrIdIndexSet = indexmap::set::IndexSet<InstrId, newtype::BuildIdHasher<u32>>;
 
-// A LiteralId represents a Literal within a Func.
-newtype_int!(LiteralId, u32, LiteralIdMap, LiteralIdSet);
+// A ConstantId represents a Constant within a Func.
+newtype_int!(ConstantId, u32, ConstantIdMap, ConstantIdSet);
 
 // A LocId represents a SrcLoc interned within a Func.
 newtype_int!(LocId, u32, LocIdMap, LocIdSet);
@@ -87,12 +74,12 @@ newtype_int!(LocId, u32, LocIdMap, LocIdSet);
 // They are disjoint from LocalIds.
 newtype_int!(VarId, u32, VarIdMap, VarIdSet);
 
-/// An ValueId can be either an InstrId or a LiteralId.
+/// An ValueId can be either an InstrId or a ConstantId.
 ///
 /// Note that special care has been taken to make sure this encodes to the same
 /// size as a u32:
 ///   InstrId values are encoded as non-negative values.
-///   LiteralId values are encoded as binary negation (so negative values).
+///   ConstantId values are encoded as binary negation (so negative values).
 ///   None is encoded as i32::MIN_INT.
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ValueId {
@@ -112,9 +99,9 @@ impl ValueId {
         Self { raw: idx as i32 }
     }
 
-    pub fn from_literal(idx: LiteralId) -> Self {
-        assert!(idx != LiteralId::NONE);
-        let LiteralId(idx) = idx;
+    pub fn from_constant(idx: ConstantId) -> Self {
+        assert!(idx != ConstantId::NONE);
+        let ConstantId(idx) = idx;
         Self { raw: !(idx as i32) }
     }
 
@@ -136,15 +123,15 @@ impl ValueId {
         } else if self.raw == Self::NONE {
             FullInstrId::None
         } else {
-            FullInstrId::Literal(LiteralId((!self.raw) as u32))
+            FullInstrId::Constant(ConstantId((!self.raw) as u32))
         }
     }
 
-    pub fn literal(self) -> Option<LiteralId> {
+    pub fn constant(self) -> Option<ConstantId> {
         if self.raw >= 0 || self.raw == Self::NONE {
             None
         } else {
-            Some(LiteralId((!self.raw) as u32))
+            Some(ConstantId((!self.raw) as u32))
         }
     }
 
@@ -156,7 +143,7 @@ impl ValueId {
         }
     }
 
-    pub fn is_literal(self) -> bool {
+    pub fn is_constant(self) -> bool {
         self.raw < 0 && self.raw != Self::NONE
     }
 
@@ -170,11 +157,11 @@ impl ValueId {
 }
 
 // A 'FullInstrId' can be used with match but takes more memory than
-// ValueId. Note that the Literal and Instr variants will never contain
-// LiteralId::NONE or InstrId::NONE.
+// ValueId. Note that the Constant and Instr variants will never contain
+// ConstantId::NONE or InstrId::NONE.
 pub enum FullInstrId {
     Instr(InstrId),
-    Literal(LiteralId),
+    Constant(ConstantId),
     None,
 }
 

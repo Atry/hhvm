@@ -41,8 +41,9 @@ struct Baz {
 }
 
 struct Foo2 {
+  // They have different types to use op::get_ with type tags.
   1: optional i32 field_1;
-  2: optional i32 field_2;
+  2: optional i64 field_2;
 }
 
 struct Bar2 {
@@ -67,6 +68,13 @@ struct SmartPointerStruct {
   2: optional Foo2 shared;
   @thrift.Box
   3: optional Foo2 boxed;
+}
+
+struct SharedConstPointerStruct {
+  @cpp.Ref{type = cpp.RefType.Unique}
+  1: Foo2 unique;
+  @cpp.Ref{type = cpp.RefType.Shared}
+  2: optional Foo2 shared_const;
 }
 
 @cpp.Adapter{name = "::apache::thrift::protocol::MaskAdapter<Bar>"}

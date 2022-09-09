@@ -53,6 +53,10 @@ class ServiceHandler<::test::namespace_from_package::module::TestService> : publ
   virtual ::std::int64_t init(::std::int64_t /*int1*/);
   virtual folly::Future<::std::int64_t> future_init(::std::int64_t p_int1);
   virtual folly::SemiFuture<::std::int64_t> semifuture_init(::std::int64_t p_int1);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<::std::int64_t> co_init(::std::int64_t p_int1);
+  virtual folly::coro::Task<::std::int64_t> co_init(apache::thrift::RequestParams params, ::std::int64_t p_int1);
+#endif
   virtual void async_tm_init(std::unique_ptr<apache::thrift::HandlerCallback<::std::int64_t>> callback, ::std::int64_t p_int1);
  private:
   static ::test::namespace_from_package::module::TestServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -70,7 +74,7 @@ class TestServiceSvNull : public ::apache::thrift::ServiceHandler<TestService> {
   ::std::int64_t init(::std::int64_t /*int1*/) override;
 };
 
-class TestServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class TestServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -85,8 +89,8 @@ class TestServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcess
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<TestServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<TestServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const TestServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const TestServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

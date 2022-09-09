@@ -17,9 +17,9 @@
 #pragma once
 
 #include <folly/Portability.h>
-#include <thrift/lib/cpp2/FieldMask.h>
 #include <thrift/lib/cpp2/protocol/Object.h>
 #include <thrift/lib/thrift/detail/protocol.h>
+#include <thrift/lib/thrift/gen-cpp2/field_mask_types.h>
 
 namespace apache {
 namespace thrift {
@@ -63,6 +63,10 @@ Mask extractMaskFromPatch(const protocol::Object& patch);
 
 // Extracting mask from a temporary patch is dangerous and should be disallowed.
 protocol::Mask extractMaskFromPatch(Object&& patch) = delete;
+
+template <type::StandardProtocol Protocol>
+std::unique_ptr<folly::IOBuf> applyPatchToSerializedData(
+    const protocol::Object& patch, const folly::IOBuf& buf);
 
 } // namespace protocol
 } // namespace thrift

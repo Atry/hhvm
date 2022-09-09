@@ -459,7 +459,7 @@ TEST_F(PatchTest, List) {
   }
   {
     auto expected = *value.listValue_ref();
-    expected.push_back(asValueStruct<type::binary_t>("best"));
+    expected.insert(expected.begin(), asValueStruct<type::binary_t>("best"));
     Object patchObj = makePatch(
         op::PatchOp::Add,
         asValueStruct<type::set<type::binary_t>>(std::set{"best"}));
@@ -1115,6 +1115,64 @@ TEST_F(PatchTest, ExtractMaskFromPatchNested) {
       EXPECT_EQ(value, expectedMask);
     }
   }
+}
+
+TEST_F(PatchTest, ExtractMaskFromPatchEdgeCase) {
+  // patch = Patch{1: Put{true}}
+  Value boolPatch;
+  boolPatch.objectValue_ref() =
+      makePatch(op::PatchOp::Put, asValueStruct<type::bool_t>(true));
+  Value objPatch;
+  objPatch.objectValue_ref().ensure()[FieldId{1}] = boolPatch;
+  Object patchObj = makePatch(op::PatchOp::Patch, objPatch);
+  // Add noops (this should not make the extractedMask allMask).
+  patchObj = patchAddOperation(
+      std::move(patchObj),
+      op::PatchOp::Clear,
+      asValueStruct<type::bool_t>(false));
+  patchObj = patchAddOperation(
+      std::move(patchObj), op::PatchOp::Add, asValueStruct<type::i32_t>(0));
+  patchObj = patchAddOperation(
+      std::move(patchObj),
+      op::PatchOp::Put,
+      asValueStruct<type::set<type::i32_t>>(std::set<int>{}));
+  Mask expectedMask;
+  expectedMask.includes_ref().emplace()[1] = allMask();
+  EXPECT_EQ(extractMaskFromPatch(patchObj), expectedMask);
+}
+
+TEST_F(PatchTest, ApplyPatchToSerializedData) {
+  // patch = Patch{1: mapPatch{"key": Put{"foo"}}}
+  Value fieldPatchValue;
+  fieldPatchValue.objectValue_ref() =
+      makePatch(op::PatchOp::Put, asValueStruct<type::binary_t>("foo"));
+  Value mapPatchValue;
+  mapPatchValue.mapValue_ref().ensure()[asValueStruct<type::binary_t>("key")] =
+      fieldPatchValue;
+  Value mapPatch;
+  mapPatch.objectValue_ref() = makePatch(op::PatchOp::Patch, mapPatchValue);
+  Value objPatch;
+  objPatch.objectValue_ref().ensure()[FieldId{1}] = mapPatch;
+  Object patchObj = makePatch(op::PatchOp::Patch, objPatch);
+
+  // obj{1: map{"key": "string",
+  //            "foo": "bar"},
+  //     2: 2}
+  Object obj;
+  std::map<std::string, std::string> map = {{"key", "string"}, {"foo", "bar"}};
+  obj[FieldId{1}] =
+      asValueStruct<type::map<type::binary_t, type::binary_t>>(map);
+  obj[FieldId{2}].i32Value_ref() = 2;
+  Value value;
+  value.objectValue_ref() = obj;
+
+  auto original = protocol::serializeObject<CompactProtocolWriter>(obj);
+  auto serialized = applyPatchToSerializedData<type::StandardProtocol::Compact>(
+      patchObj, *original);
+  Object modifiedObj = parseObject<CompactProtocolReader>(*serialized);
+  // Compare with directly applying the patch to entire object.
+  applyPatch(patchObj, value);
+  EXPECT_EQ(modifiedObj, *value.objectValue_ref());
 }
 } // namespace
 } // namespace apache::thrift::protocol

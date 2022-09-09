@@ -3,6 +3,8 @@
 // This source code is licensed under the MIT license found in the
 // LICENSE file in the "hack" directory of this source tree.
 
+#![feature(const_option)]
+
 //! # The HackC IR
 //!
 //! This is an IR representation of the Hack code.
@@ -29,10 +31,10 @@ pub mod block;
 pub mod class;
 pub mod coeffects;
 pub mod common;
+pub mod constant;
 pub mod func;
 pub mod func_builder;
 pub mod instr;
-pub mod literal;
 pub mod module;
 pub mod newtype;
 pub mod string_intern;
@@ -47,6 +49,8 @@ pub use self::coeffects::CtxConstant;
 pub use self::common::Attr;
 pub use self::common::Attribute;
 pub use self::common::TypedValue;
+pub use self::constant::Constant;
+pub use self::constant::HackConstant;
 pub use self::func::ExFrameId;
 pub use self::func::Func;
 pub use self::func::Function;
@@ -65,8 +69,6 @@ pub use self::instr::LocalId;
 pub use self::instr::Predicate;
 pub use self::instr::SrcLoc;
 pub use self::instr::UnnamedLocalId;
-pub use self::literal::HackConstant;
-pub use self::literal::Literal;
 pub use self::module::Module;
 pub use self::newtype::BlockId;
 pub use self::newtype::BlockIdMap;
@@ -74,12 +76,12 @@ pub use self::newtype::BlockIdSet;
 pub use self::newtype::ClassId;
 pub use self::newtype::ClassIdMap;
 pub use self::newtype::ConstId;
+pub use self::newtype::ConstantId;
 pub use self::newtype::FullInstrId;
 pub use self::newtype::FunctionId;
 pub use self::newtype::InstrId;
 pub use self::newtype::InstrIdMap;
 pub use self::newtype::InstrIdSet;
-pub use self::newtype::LiteralId;
 pub use self::newtype::LocId;
 pub use self::newtype::MethodId;
 pub use self::newtype::PropId;
@@ -88,8 +90,11 @@ pub use self::newtype::ValueIdMap;
 pub use self::newtype::ValueIdSet;
 pub use self::newtype::VarId;
 pub use self::string_intern::StringInterner;
-pub use self::string_intern::UnitStringId;
+pub use self::string_intern::UnitBytesId;
 pub use self::type_const::TypeConstant;
-pub use self::types::Type;
+pub use self::types::BaseType;
+pub use self::types::EnforceableType;
+pub use self::types::TypeConstraintFlags;
+pub use self::types::UserType;
 pub use self::unit::FatalOp;
 pub use self::unit::Unit;

@@ -19,6 +19,11 @@
       }
     }
   },
+  "includes": {
+    "cpp" : {
+      "path" : "thrift/annotation/cpp.thrift"
+    }
+  },
   "enumerations" : {
     "MyEnum" : {
       "lineno" : 22,
@@ -607,6 +612,7 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             }
@@ -630,6 +636,7 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             }
@@ -653,10 +660,12 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             },
             {
+              "name" : "data",
               "type_enum" : "STRING",
               "spec_args" : null,
               "structured_annotations" : {
@@ -683,10 +692,12 @@
           },
           "args" : [
             {
+              "name" : "id",
               "type_enum" : "I64",
               "spec_args" : null
             },
             {
+              "name" : "data",
               "type_enum" : "STRING",
               "spec_args" : null,
               "annotations" : {
@@ -739,6 +750,20 @@
                 }
               }
             }
+,
+            "go.name" : {
+              "value" : "GoDoNothing",
+              "source_range" : {
+                "begin" : {
+                  "line" : 81,
+                  "column" : 48
+                },
+                "end" : {
+                  "line" : 81,
+                  "column" : 71
+                }
+              }
+            }
           },
           "source_range" : {
             "begin" : {
@@ -747,7 +772,7 @@
             },
             "end" : {
               "line" : 81,
-              "column" : 47
+              "column" : 72
             }
           }
         }

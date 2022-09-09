@@ -344,15 +344,65 @@ enum class NamedGroup : uint16_t {
   secp384r1 = 24,
   secp521r1 = 25,
   x25519 = 29,
+
   // experimental
-  secp521r1_x25519 =
-      510, // Hybrid of secp521r1 and x25519. TLS Supported Group 510 is
-           // reserved for private use, see
-           // https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-8
-  secp384r1_bikel3 =
-      12091, // Experimental, currently aligning with boringssl for inter-op
-             // purposes. See
-             // https://github.com/open-quantum-safe/boringssl/blob/master/include/openssl/ssl.h#L2406
+  /**
+   * Hybrid of secp521r1 and x25519. TLS Supported Group 510 is reserved for
+   * private use, see
+   * https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-8
+   */
+  secp521r1_x25519 = 510,
+
+  /**
+   * Experimental, currently aligning with boringssl for inter-op purposes. See
+   * https://github.com/open-quantum-safe/boringssl/blob/master/include/openssl/ssl.h#L2406
+   */
+  secp384r1_bikel3 = 12091,
+
+  /**
+   * cecpq2 is used by Chrome. see https://www.chromium.org/cecpq2/ and
+   * https://github.com/open-quantum-safe/boringssl/blob/master/include/openssl/ssl.h#L2392
+   */
+  /**
+   * TODO: this is NOT a real cecpq2: we used x25519+ntru_hrss701 while cecpq2
+   * is x25519+ntru_hrss. Use cecpq2 just for test purposes and would change to
+   * the correct implementation in future. CECPQ = Combined Elliptic-Curve and
+   * Post-Quantum
+   */
+  cecpq2 = 16696,
+
+  // Standardized algorithms. See
+  // https://datatracker.ietf.org/doc/html/draft-ietf-tls-hybrid-design-05#section-5
+
+  /**
+   * Experimental ID, see
+   * https://github.com/aws/s2n-tls/blob/main/tls/s2n_tls_parameters.h#L69
+   */
+  x25519_kyber512 = 12089,
+
+  /**
+   * Experimental ID, see
+   * https://github.com/aws/s2n-tls/blob/main/tls/s2n_tls_parameters.h#L70
+   */
+  secp256r1_kyber512 = 12090,
+
+  /**
+   * Performance test only. Purely rely on unverified post-quantum crypto may
+   * cause security flaws.
+   */
+  kyber512 = 511,
+
+  /**
+   * Experimental ID. Private use, see
+   * https://www.iana.org/assignments/tls-parameters/tls-parameters.xhtml#tls-parameters-8
+   */
+  x25519_kyber768 = 65024,
+
+  /**
+   * Experimental ID, see
+   * https://github.com/open-quantum-safe/boringssl/blob/master/include/openssl/ssl.h#L2410
+   */
+  secp384r1_kyber768 = 12092,
 };
 
 std::string toString(NamedGroup);

@@ -11,6 +11,7 @@
 #include <thrift/lib/cpp2/gen/module_types_tcc.h>
 #include <thrift/lib/cpp2/op/Clear.h>
 #include <thrift/lib/cpp2/op/Get.h>
+#include <thrift/lib/cpp2/op/Encode.h>
 
 
 namespace apache {
@@ -7501,7 +7502,7 @@ void StructWithFieldAdapter::readNoXfer(Protocol_* iprot) {
 _readField_field:
   {
     constexpr bool hasInplaceToThrift = ::apache::thrift::adapt_detail::has_inplace_toThrift<my::Adapter1, folly::remove_cvref_t<decltype(this->__fbthrift_field_field)>>::value;
-    ::apache::thrift::detail::pm::IfConstexpr<hasInplaceToThrift>{}(
+    ::folly::if_constexpr<hasInplaceToThrift>(
       [&](auto& field) { ::apache::thrift::detail::pm::protocol_methods<::apache::thrift::type_class::integral, ::std::int32_t>::readWithContext(*iprot, my::Adapter1::toThrift(field), _readState); },
       [&](auto&) {})(this->__fbthrift_field_field);
     if (!hasInplaceToThrift) {
@@ -7626,7 +7627,7 @@ void UnionWithTypedefFieldAdapter::readNoXfer(Protocol_* iprot) {
         if (_readState.isCompatibleWithType(iprot, apache::thrift::protocol::T_I32)) {
           this->set_field();
           constexpr bool hasInplaceToThrift = ::apache::thrift::adapt_detail::has_inplace_toThrift<my::Adapter1, folly::remove_cvref_t<decltype(value_.field)>>::value;
-          ::apache::thrift::detail::pm::IfConstexpr<hasInplaceToThrift>{}(
+          ::folly::if_constexpr<hasInplaceToThrift>(
             [&](auto& field) { ::apache::thrift::detail::pm::protocol_methods<::apache::thrift::type_class::integral, ::std::int32_t>::readWithContext(*iprot, my::Adapter1::toThrift(field), _readState); },
             [&](auto&) {})(value_.field);
           if (!hasInplaceToThrift) {

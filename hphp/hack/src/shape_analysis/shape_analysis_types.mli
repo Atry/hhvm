@@ -6,6 +6,7 @@
  *
  *)
 
+open Hh_prelude
 module A = Ast_defs
 module T = Typing_defs
 module LMap = Local_id.Map
@@ -13,12 +14,18 @@ module KMap = Typing_continuations.Map
 module HT = Hips_types
 
 (** Useful extension to sets *)
-module CommonSet (S : Set.S) : sig
+module CommonSet (S : Caml.Set.S) : sig
   val unions_map : f:(S.elt -> S.t) -> S.t -> S.t
 end
 
+module Error : sig
+  type t [@@deriving show]
+
+  val mk : string -> t
+end
+
 (** A generic exception for all shape analysis specific failures *)
-exception Shape_analysis_exn of string
+exception Shape_analysis_exn of Error.t
 
 (** Container to collect potential dicts that can be addressed with the shape
     analysis. *)
@@ -76,6 +83,7 @@ type marker_kind =
   | Debug
       (** A dict argument to a function or method such as `$d = dict[]; f($d)`
        *)
+  | Constant  (** A dict constant such as `const dict<string, mixed> DICT` *)
 [@@deriving ord, show]
 
 module Codemod : sig
@@ -86,20 +94,24 @@ module Codemod : sig
   [@@deriving show { with_path = false }]
 end
 
-(** When embedded in a constraint, it indicates if it originates by traversing
-    the source code or by deduction in the solver *)
-type source =
-  | Base
-  | Derived
+(** When embedded in a constraint, it conveys the degree of certainty for that
+    constraint. This is useful in determining if a field is optional. *)
+type certainty =
+  | Definite
+  | Maybe
+[@@deriving show]
+
+(** Indicates whether the constraint provides information or requires it. *)
+type variety =
+  | Has
+  | Needs
 [@@deriving show]
 
 type constraint_ =
   | Marks of marker_kind * Pos.t  (** Marks a point of interest *)
-  | Has_static_key of source * entity_ * T.TShapeMap.key * T.locl_ty
-      (** Records a static key an entity is accessed with along with the Hack
-          type of that key *)
-  | Has_optional_key of entity_ * T.TShapeField.t
-      (** Records an optional static key *)
+  | Static_key of variety * certainty * entity_ * T.TShapeMap.key * T.locl_ty
+      (** Records a static field that is available along with the Hack type of
+          that key *)
   | Has_dynamic_key of entity_
       (** Records that an entity is accessed with a dynamic key *)
   | Subsets of entity_ * entity_
@@ -146,29 +158,27 @@ type env = {
   return: entity;  (** Entity for the return of a callable *)
   tast_env: Tast_env.env;
       (** TAST env associated with the definition being analysed *)
+  errors: Error.t list;
+      (** An append only stash of errors. If this list is non-empty, the
+          analysis was performed in a best effort fashion. *)
 }
 
-module PointsToSet : Set.S with type elt = entity_ * entity_
+module PointsToSet : Caml.Set.S with type elt = entity_ * entity_
 
-module EntityMap : Map.S with type key = entity_
+module EntityMap : Caml.Map.S with type key = entity_
 
 module EntitySet : sig
-  include Set.S with type elt = entity_
+  include Caml.Set.S with type elt = entity_
 
   val unions_map : f:(elt -> t) -> t -> t
 end
 
-module ConstraintSet : Set.S with type elt = constraint_
+module ConstraintSet : Caml.Set.S with type elt = constraint_
 
-(** Events used for logging purposes *)
-type log_event =
-  | Result of {
-      id: string;
-      shape_result: shape_result;
-    }  (** Indicates a successfuly analysis result *)
-  | Failure of {
-      id: string;
-      error_message: string;
-    }  (** Indicates that the analysis malfunctioned *)
+(** Either an analysis result or an error, in either case paired with an
+    identifier for its origin *)
+type event = string * (shape_result, Error.t) Either.t
 
 type any_constraint = (constraint_, inter_constraint_) HT.any_constraint_
+
+val compare_any_constraint : any_constraint -> any_constraint -> int

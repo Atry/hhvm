@@ -855,10 +855,13 @@ and simplify_subtype_i
         | Some TL.CoerceToDynamic -> " <:D"
         | Some TL.CoerceFromDynamic -> " D<:")
       ^
-      if super_like then
-        " super-like"
-      else
-        "")
+      let flag str = function
+        | true -> str
+        | false -> ""
+      in
+      flag " super-like" super_like
+      ^ flag " require_soundness" subtype_env.require_soundness
+      ^ flag " require_completeness" subtype_env.require_completeness)
     env
     ty_sub
     ty_super;
@@ -1766,7 +1769,7 @@ and simplify_subtype_i
       when TypecheckerOptions.enable_sound_dynamic env.genv.tcopt
            && (coercing_to_dynamic subtype_env
               || env.in_support_dynamic_type_method_check) ->
-      let open Aast_defs in
+      let open Ast_defs in
       (match ety_sub with
       | ConstraintType _cty ->
         (* TODO *)
@@ -2211,7 +2214,8 @@ and simplify_subtype_i
         | (_, (Tfun _ | Ttuple _ | Tshape _ | Tprim _)) -> valid env
         | _ -> default_subtype env))
     | (r_super, Tclass (x_super, Nonexact cr_super, tyl_super))
-      when not (Class_refinement.is_empty cr_super) ->
+      when (not (Class_refinement.is_empty cr_super))
+           && subtype_env.require_soundness ->
       (* We discharge class refinements before anything
        * else ... *)
       Class_refinement.fold_type_refs
@@ -2376,6 +2380,11 @@ and simplify_subtype_i
                   Ast_defs.is_c_trait (Cls.kind class_sub)
                   || Ast_defs.is_c_interface (Cls.kind class_sub)
                 then
+                  let reqs_class =
+                    List.map
+                      (Cls.all_ancestor_req_class_requirements class_sub)
+                      ~f:snd
+                  in
                   let rec try_upper_bounds_on_this up_objs env =
                     match up_objs with
                     | [] ->
@@ -2383,6 +2392,12 @@ and simplify_subtype_i
                        * env that were introduced by Phase.localize.
                        * TODO: avoid this requirement *)
                       invalid_env env
+                    | ub_obj_typ :: up_objs
+                      when List.mem reqs_class ub_obj_typ ~equal:equal_decl_ty
+                      ->
+                      (* `require class` constraints do not induce subtyping,
+                       * so skipping them *)
+                      try_upper_bounds_on_this up_objs env
                     | ub_obj_typ :: up_objs ->
                       (* A trait is never the runtime type, but it can be used
                        * as a constraint if it has requirements or where
@@ -2692,7 +2707,8 @@ and simplify_subtype_has_type_member
       in
       simplify_subtype ~subtype_env ~this_ty dtmemty memty env
       &&& simplify_subtype ~subtype_env ~this_ty memty dtmemty
-    | (_, (Tvar _ | Tunion _ | Tintersection _ | Terr)) -> default_subtype env
+    | (_, (Tvar _ | Tgeneric _ | Tunion _ | Tintersection _ | Terr)) ->
+      default_subtype env
     | _ -> invalid ~fail env)
 
 and simplify_subtype_has_member
@@ -2830,6 +2846,8 @@ and simplify_subtype_has_member
                           is_nullable = true;
                           decl_pos = Reason.to_pos r_option;
                           ty_name = lazy (Typing_print.error env ty_sub);
+                          (* Subtyping already gives these reasons *)
+                          ty_reasons = lazy [];
                         }))
         | _ ->
           invalid
@@ -2877,6 +2895,8 @@ and simplify_subtype_has_member
                       ctxt = `read;
                       decl_pos = Reason.to_pos r_inter;
                       ty_name = lazy (Typing_print.error env ty_sub);
+                      (* Subtyping already gives these reasons *)
+                      ty_reasons = lazy [];
                     }))
     | (r_inter, Tintersection tyl) when using_new_method_call_inference ->
       let (env, tyl) = List.map_env ~f:Env.expand_type env tyl in

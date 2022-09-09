@@ -56,8 +56,6 @@ StringData* buildStringData(int     n);
 StringData* buildStringData(int64_t n);
 StringData* buildStringData(double  n);
 
-std::string convDblToStrWithPhpFormat(double n);
-
 //////////////////////////////////////////////////////////////////////
 
 /**
@@ -242,9 +240,6 @@ public:
   bool isNull() const { return !m_str; }
   bool isNumeric() const {
     return m_str ? m_str->isNumeric() : false;
-  }
-  bool isInteger() const {
-    return m_str ? m_str->isInteger() : false;
   }
   bool isZero() const {
     return m_str ? m_str->isZero() : false;

@@ -24,40 +24,19 @@
 
 using namespace folly;
 
-class MinAndMax {
- public:
-  static constexpr size_t kNumQuantiles = 2;
-  static constexpr std::array<double, kNumQuantiles> kQuantiles{0.0, 1.0};
-};
-
-class Median {
- public:
-  static constexpr size_t kNumQuantiles = 3;
-  static constexpr std::array<double, kNumQuantiles> kQuantiles{0.0, 0.5, 1.0};
-};
-
-class P99 {
- public:
-  static constexpr size_t kNumQuantiles = 3;
-  static constexpr std::array<double, kNumQuantiles> kQuantiles{0.0, 0.99, 1.0};
-};
-
-class MedianAndHigh {
- public:
-  static constexpr size_t kNumQuantiles = 6;
-  static constexpr std::array<double, kNumQuantiles> kQuantiles{
-      0.0, 0.5, 0.9, 0.99, 0.999, 1.0};
-};
-
 template <typename T>
 class QuantileHistogramTypedTest : public ::testing::Test {};
 
 using ValueTypes = ::testing::Types<
-    QuantileHistogram,
-    QuantileHistogramBase<MinAndMax>,
-    QuantileHistogramBase<Median>,
-    QuantileHistogramBase<P99>,
-    QuantileHistogramBase<MedianAndHigh>>;
+    QuantileHistogram<>,
+    QuantileHistogram<PredefinedQuantiles::MinAndMax>,
+    QuantileHistogram<PredefinedQuantiles::Median>,
+    QuantileHistogram<PredefinedQuantiles::P01>,
+    QuantileHistogram<PredefinedQuantiles::P99>,
+    QuantileHistogram<PredefinedQuantiles::MedianAndHigh>,
+    QuantileHistogram<PredefinedQuantiles::Quartiles>,
+    QuantileHistogram<PredefinedQuantiles::Deciles>,
+    QuantileHistogram<PredefinedQuantiles::Ventiles>>;
 
 TYPED_TEST_SUITE(QuantileHistogramTypedTest, ValueTypes);
 
@@ -228,4 +207,32 @@ TYPED_TEST(QuantileHistogramTypedTest, bimodalStress) {
 
     EXPECT_EQ(qhist.count(), kNumAdds);
   }
+}
+
+TEST(CPUShardedQuantileHistogramTest, stress) {
+  static constexpr size_t kNumThreads = 20;
+  static constexpr size_t kNumAdds = 2500;
+  std::vector<std::thread> threads(kNumThreads);
+  CPUShardedQuantileHistogram qhist;
+
+  for (auto& th : threads) {
+    th = std::thread([&] {
+      std::default_random_engine rng;
+      std::uniform_real_distribution<double> uniform(0.0, 1.0);
+      for (size_t i = 0; i < kNumAdds; i++) {
+        qhist.addValue(uniform(rng));
+
+        // Random flush operation.
+        if (uniform(rng) < 0.01) {
+          EXPECT_LE(qhist.max(), 1.0);
+        }
+      }
+    });
+  }
+
+  for (auto& th : threads) {
+    th.join();
+  }
+
+  EXPECT_EQ(qhist.count(), kNumThreads * kNumAdds);
 }

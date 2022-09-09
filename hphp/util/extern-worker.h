@@ -88,6 +88,25 @@
 
 //////////////////////////////////////////////////////////////////////
 
+namespace HPHP::extern_worker {
+
+// Thrown by any of extern-worker functions to indicate an error
+struct Error : public std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
+// Thrown by Client::exec if execution failed due to the worker
+// returning a non-zero exit code (to distinguish from other infra
+// errors) Note: some infra errors can manifest themself as the worker
+// failing, so this is best effort.
+struct WorkerError : public Error {
+  using Error::Error;
+};
+
+}
+
+//////////////////////////////////////////////////////////////////////
+
 // Implementation details to avoid cluttering interface
 #define incl_HPHP_EXTERN_WORKER_DETAIL_H_
 #include "hphp/util/extern-worker-detail.h"
@@ -109,19 +128,6 @@ extern const char* const s_option;
 
 // Entry point for workers
 extern int main(int argc, char** argv);
-
-//////////////////////////////////////////////////////////////////////
-
-// Thrown by any of extern-worker functions to indicate an error
-struct Error : public std::runtime_error {
-  using std::runtime_error::runtime_error;
-};
-
-// Thrown by some implementations if the backend is busy. Depending on
-// configuration, we might retry the action automatically.
-struct Throttle : public Error {
-  using Error::Error;
-};
 
 //////////////////////////////////////////////////////////////////////
 
@@ -166,10 +172,9 @@ struct Job : public detail::JobBase {
   using ExecT   = typename detail::ExecRet<C>::type;
 
 private:
-  void init(const std::filesystem::path&) const override;
-  void fini(const std::filesystem::path&) const override;
-  void run(const std::filesystem::path&,
-           const std::filesystem::path&) const override;
+  void init(detail::ISource&) const override;
+  void fini(detail::ISink&) const override;
+  void run(detail::ISource&, detail::ISink&) const override;
 };
 
 //////////////////////////////////////////////////////////////////////
@@ -209,16 +214,16 @@ struct Multi {
 // Identifier for a Ref. Used by the implementation to track them. The
 // meaning of the identifier is private to the implementation.
 struct RefId {
-  RefId(std::string, size_t);
+  RefId(std::string, size_t, size_t extra = 0);
 
   std::string toString() const;
   bool operator==(const RefId&) const;
   bool operator!=(const RefId&) const;
   bool operator<(const RefId&) const;
 
-  // Despite their names, these fields can be used for anything.
   std::string m_id;
-  size_t m_size;
+  size_t m_size; // Size of data
+  size_t m_extra; // For internal usage
 };
 
 // Represents a piece of data "inside" the extern-worker
@@ -647,6 +652,7 @@ private:
   Options m_options;
   Stats::Ptr m_stats;
   bool m_forceFallback;
+  coro::Semaphore m_fallbackSem;
 
   template <typename T> coro::Task<Ref<T>> storeImpl(bool, T);
 

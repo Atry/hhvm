@@ -247,7 +247,6 @@ bool opcodeMayRaise(Opcode opc) {
   case AFWHPrepareChild:
   case AKExistsObj:
   case AllocObj:
-  case AllocObjReified:
   case ArrayMarkLegacyShallow:
   case ArrayMarkLegacyRecursive:
   case ArrayUnmarkLegacyShallow:
@@ -387,6 +386,7 @@ bool opcodeMayRaise(Opcode opc) {
   case RaiseForbiddenDynConstruct:
   case RaiseImplicitContextStateInvalid:
   case RaiseModuleBoundaryViolation:
+  case RaiseModulePropertyViolation:
   case RaiseNotice:
   case RaiseStrToClassNotice:
   case RaiseTooManyArg:

@@ -97,9 +97,12 @@ fn convert_body<'a>(unit: &mut ir::Unit<'a>, body: &Body<'a>) -> ir::Func<'a> {
     let tparams: ClassIdMap<_> = upper_bounds
         .iter()
         .map(|Pair(name, bounds)| {
-            let id = unit.strings.intern_str(*name);
+            let id = unit.strings.intern_bytes(name.as_ref());
             let name = ir::ClassId::new(id);
-            let bounds = bounds.iter().map(types::convert_type).collect();
+            let bounds = bounds
+                .iter()
+                .map(|ty| types::convert_type(ty, &mut unit.strings))
+                .collect();
             (name, ir::TParamBounds { bounds })
         })
         .collect();
@@ -107,7 +110,7 @@ fn convert_body<'a>(unit: &mut ir::Unit<'a>, body: &Body<'a>) -> ir::Func<'a> {
     let shadowed_tparams: Vec<ir::ClassId> = shadowed_tparams
         .iter()
         .map(|name| {
-            let id = unit.strings.intern_str(*name);
+            let id = unit.strings.intern_bytes(name.as_ref());
             ir::ClassId::new(id)
         })
         .collect();
@@ -119,11 +122,11 @@ fn convert_body<'a>(unit: &mut ir::Unit<'a>, body: &Body<'a>) -> ir::Func<'a> {
         instrs: Default::default(),
         is_memoize_wrapper,
         is_memoize_wrapper_lsb,
-        literals: Default::default(),
+        constants: Default::default(),
         locs: Default::default(),
         num_iters,
         params: Default::default(),
-        return_type: types::convert_maybe_type(return_type_info.as_ref()),
+        return_type: types::convert_maybe_type(return_type_info.as_ref(), &mut unit.strings),
         shadowed_tparams,
         tparams,
     };
@@ -142,7 +145,7 @@ fn convert_body<'a>(unit: &mut ir::Unit<'a>, body: &Body<'a>) -> ir::Func<'a> {
     }
 
     for decl in decl_vars.as_ref() {
-        let id = ctx.unit.strings.intern_str(*decl);
+        let id = ctx.unit.strings.intern_bytes(decl.as_ref());
         ctx.named_local_lookup.push(LocalId::Named(id));
     }
 
@@ -197,7 +200,7 @@ fn convert_param<'a, 'b>(ctx: &mut Context<'a, 'b>, param: &Param<'a>) -> ir::Pa
         Maybe::Nothing => None,
     };
 
-    let name = ctx.unit.strings.intern_str(param.name);
+    let name = ctx.unit.strings.intern_bytes(param.name.as_ref());
     ctx.named_local_lookup.push(LocalId::Named(name));
 
     let user_attributes = param
@@ -212,7 +215,7 @@ fn convert_param<'a, 'b>(ctx: &mut Context<'a, 'b>, param: &Param<'a>) -> ir::Pa
         is_variadic: param.is_variadic,
         is_inout: param.is_inout,
         is_readonly: param.is_readonly,
-        ty: types::convert_maybe_type(param.type_info.as_ref()),
+        ty: types::convert_maybe_type(param.type_info.as_ref(), &mut ctx.unit.strings),
         user_attributes,
     }
 }

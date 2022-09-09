@@ -702,9 +702,20 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     return IrrelevantEffects{};
 
   case CheckStackOverflow:
-  case CheckSurpriseFlagsEnter:
-  case CheckSurpriseAndStack:
     return may_load_store(AEmpty, AEmpty);
+
+  case CheckSurpriseFlagsEnter:
+  case CheckSurpriseAndStack: {
+    // Function call event hook inspects parameters.
+    auto const fp = inst.src(0);
+    auto const callee = inst.extra<FuncData>()->func;
+    return may_load_store(
+      callee->numParams() > 0
+        ? ALocal { fp, AliasIdSet::IdRange(0, callee->numParams()) }
+        : AEmpty,
+      AEmpty
+    );
+  }
 
   //////////////////////////////////////////////////////////////////////
   // Iterator instructions
@@ -1302,9 +1313,6 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
     // AllocObj re-enters to call constructors, but if it weren't for that we
     // could ignore its loads and stores since it's a new object.
     return may_load_store(AEmpty, AEmpty);
-  case AllocObjReified:
-    // Similar to AllocObj but also stores the reification
-    return may_load_store(AEmpty, AHeapAny);
 
   //////////////////////////////////////////////////////////////////////
   // Instructions that explicitly manipulate the stack.
@@ -1772,6 +1780,7 @@ MemEffects memory_effects_impl(const IRInstruction& inst) {
   case RaiseCoeffectsFunParamTypeViolation:
   case LdCoeffectFunParamNaive:
   case RaiseModuleBoundaryViolation:
+  case RaiseModulePropertyViolation:
   case RaiseImplicitContextStateInvalid:
     return may_load_store(AEmpty, AEmpty);
 

@@ -23,6 +23,7 @@
 #include <folly/Traits.h>
 #include <thrift/lib/cpp2/FieldRef.h>
 #include <thrift/lib/cpp2/op/Clear.h>
+#include <thrift/lib/cpp2/type/Id.h>
 #include <thrift/lib/cpp2/type/detail/Wrap.h>
 
 namespace apache {
@@ -58,6 +59,8 @@ template <typename T>
 if_opt_type<T, bool> hasValue(const T& opt) {
   return opt.has_value();
 }
+// TODO(afuller): Technically 'fill' field should always return true for
+// hasValue, is this really just op::isEmpty?
 template <typename T>
 bool hasValue(field_ref<T> val) {
   return !thrift::empty(*val);
@@ -66,15 +69,31 @@ template <typename T>
 bool hasValue(terse_field_ref<T> val) {
   return !thrift::empty(*val);
 }
+
+// If the given field is absent/unset/void.
+template <typename T>
+if_opt_type<T, bool> isAbsent(const T& opt) {
+  return !opt.has_value();
+}
+template <typename T>
+constexpr bool isAbsent(field_ref<T>) {
+  return false;
+}
+template <typename T>
+constexpr bool isAbsent(terse_field_ref<T>) {
+  return false;
+}
+
 // TODO: use op::clear and op::ensure to avoid duplication
 template <typename T>
-if_opt_type<T> clearValue(T& opt) {
+if_opt_type<folly::remove_cvref_t<T>> clearValue(T&& opt) {
   opt.reset();
 }
 template <typename T>
 if_not_opt_type<T> clearValue(T& unn) {
   thrift::clear(unn);
 }
+
 template <typename T>
 if_opt_type<T> ensureValue(T& opt) {
   if (!opt.has_value()) {
@@ -89,6 +108,7 @@ template <typename T>
 void ensureValue(terse_field_ref<T>) {
   // A terse field doesn't have a set or unset state, so ensure is a noop.
 }
+
 template <typename T, typename U>
 if_opt_type<T, bool> sameType(const T& opt1, const U& opt2) {
   return opt1.has_value() == opt2.has_value();
@@ -106,8 +126,8 @@ bool sameType(terse_field_ref<T> unn1, const U& unn2) {
 // - Patch: The Thrift struct representation for the patch.
 // - Derived: The leaf type deriving from this class.
 template <typename Patch, typename Derived>
-class BasePatch : public type::detail::Wrap<Patch> {
-  using Base = type::detail::Wrap<Patch>;
+class BasePatch : public type::detail::EqWrap<Derived, Patch> {
+  using Base = type::detail::EqWrap<Derived, Patch>;
 
  public:
   using Base::Base;
@@ -122,11 +142,11 @@ class BasePatch : public type::detail::Wrap<Patch> {
     derived().apply(*field);
   }
   template <typename U>
-  void assign(field_ref<U> val) {
+  type::if_not_id<U> assign(field_ref<U> val) {
     derived().assign(std::forward<U>(*val));
   }
   template <typename U>
-  void assign(terse_field_ref<U> val) {
+  type::if_not_id<U> assign(terse_field_ref<U> val) {
     derived().assign(std::forward<U>(*val));
   }
   template <typename U>
@@ -141,19 +161,18 @@ class BasePatch : public type::detail::Wrap<Patch> {
   }
 
  protected:
+  using Base::derived;
   using Base::resetAnd;
-  ~BasePatch() = default; // abstract base class
 
-  Derived& derived() { return static_cast<Derived&>(*this); }
-  const Derived& derived() const { return static_cast<const Derived&>(*this); }
+  ~BasePatch() = default; // abstract base class
 };
 
-// Base class for value patch types.
+// Base class for assign patch types.
 //
 // Patch must have the following fields:
-//   optional T assign;
+//   [optional] T assign;
 template <typename Patch, typename Derived>
-class BaseValuePatch : public BasePatch<Patch, Derived> {
+class BaseAssignPatch : public BasePatch<Patch, Derived> {
   using Base = BasePatch<Patch, Derived>;
 
  public:
@@ -199,15 +218,15 @@ class BaseValuePatch : public BasePatch<Patch, Derived> {
   using Base::data_;
   using Base::derived;
   using Base::resetAnd;
+  ~BaseAssignPatch() = default; // abstract base class
 
-  ~BaseValuePatch() = default; // abstract base class
-
+  FOLLY_NODISCARD bool hasAssign() const { return hasValue(data_.assign()); }
   FOLLY_NODISCARD value_type& assignOr(value_type& value) noexcept {
-    return hasValue(data_.assign()) ? *data_.assign() : value;
+    return hasAssign() ? *data_.assign() : value;
   }
 
   bool applyAssign(value_type& val) const {
-    if (hasValue(data_.assign())) {
+    if (hasAssign()) {
       val = *data_.assign();
       return true;
     }
@@ -220,7 +239,7 @@ class BaseValuePatch : public BasePatch<Patch, Derived> {
       data_ = std::forward<U>(next).toThrift();
       return true;
     }
-    if (hasValue(data_.assign())) {
+    if (hasAssign()) {
       next.apply(*data_.assign());
       return true;
     }
@@ -228,19 +247,20 @@ class BaseValuePatch : public BasePatch<Patch, Derived> {
   }
 };
 
-// Base class for clearable value patch types.
+// Base class for clearable patch types.
 //
 // Patch must have the following fields:
-//   optional T assign;
+//   (optional) T assign;
 //   bool clear;
 template <typename Patch, typename Derived>
-class BaseClearValuePatch : public BaseValuePatch<Patch, Derived> {
-  using Base = BaseValuePatch<Patch, Derived>;
+class BaseClearPatch : public BaseAssignPatch<Patch, Derived> {
+  using Base = BaseAssignPatch<Patch, Derived>;
   using T = typename Base::value_type;
 
  public:
   using Base::Base;
   using Base::operator=;
+  using Base::apply;
 
   FOLLY_NODISCARD static Derived createClear() {
     Derived patch;
@@ -248,15 +268,26 @@ class BaseClearValuePatch : public BaseValuePatch<Patch, Derived> {
     return patch;
   }
 
-  void clear() { resetAnd().clear() = true; }
+  // Clear resets optional fields.
+  template <typename U>
+  if_opt_type<folly::remove_cvref_t<U>> apply(U&& field) const {
+    if (data_.clear() == true && !hasAssign()) {
+      field.reset();
+    } else if (field.has_value()) {
+      derived().apply(*std::forward<U>(field));
+    }
+  }
 
  protected:
+  template <typename>
+  friend class StructPatch;
   using Base::applyAssign;
   using Base::data_;
+  using Base::derived;
+  using Base::hasAssign;
   using Base::mergeAssign;
   using Base::resetAnd;
-
-  ~BaseClearValuePatch() = default;
+  ~BaseClearPatch() = default;
 
   template <typename U>
   bool mergeAssignAndClear(U&& next) {
@@ -270,6 +301,52 @@ class BaseClearValuePatch : public BaseValuePatch<Patch, Derived> {
       return true;
     }
     return mergeAssign(std::forward<U>(next));
+  }
+
+  template <typename Tag>
+  bool applyAssignAndClear(T& val) const {
+    if (applyAssign(val)) {
+      return true;
+    }
+    if (data_.clear() == true) {
+      op::clear<Tag>(val);
+    }
+    return false;
+  }
+
+  void clear() { resetAnd().clear() = true; }
+  FOLLY_NODISCARD T& clearAnd() { return (clear(), data_); }
+};
+
+// Base class for 'container' patch types.
+//
+// Patch must have the following fields:
+//   (optional) T assign;
+//   bool clear;
+template <typename Patch, typename Derived>
+class BaseContainerPatch : public BaseClearPatch<Patch, Derived> {
+  using Base = BaseClearPatch<Patch, Derived>;
+  using T = typename Base::value_type;
+
+ public:
+  using Base::Base;
+  using Base::operator=;
+  using Base::clear;
+
+ protected:
+  using Base::applyAssign;
+  using Base::data_;
+  ~BaseContainerPatch() = default; // Abstract base class.
+
+  // Returns true if assign was applied, and no more patchs should be applied.
+  bool applyAssignOrClear(T& val) const {
+    if (applyAssign(val)) {
+      return true;
+    }
+    if (data_.clear() == true) {
+      val.clear();
+    }
+    return false;
   }
 };
 

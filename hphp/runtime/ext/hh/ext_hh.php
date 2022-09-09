@@ -331,18 +331,10 @@ function clear_all_coverage_data(): void {
 
 namespace ImplicitContext {
 
-/**
- * Returns blame associated with the current implicit context
- * Return value[0]: Blame from soft make ic inaccessible
- * Return value[1]: Blame from soft ic runWith
- */
-<<__Native>>
-function get_implicit_context_blame()[zoned]: (vec<string>, vec<string>);
-
 async function soft_run_with_async<Tout>(
-  (function (): Awaitable<Tout>) $f,
+  (function ()[_]: Awaitable<Tout>) $f,
   string $key,
-)[zoned]: Awaitable<Tout> {
+)[zoned, ctx $f]: Awaitable<Tout> {
   $prev = _Private\set_special_implicit_context(
     \HH\MEMOIZE_IC_TYPE_SOFT_SET,
     $key
@@ -358,7 +350,7 @@ async function soft_run_with_async<Tout>(
 }
 
 function soft_run_with<Tout>(
-  (function (): Tout) $f,
+  (function ()[_]: Tout) $f,
   string $key,
 )[zoned, ctx $f]: Tout {
   $prev = _Private\set_special_implicit_context(
@@ -422,8 +414,8 @@ abstract class ImplicitContext {
 
   protected static async function runWithAsync<Tout>(
     this::T $context,
-    (function (): Awaitable<Tout>) $f,
-  )[zoned]: Awaitable<Tout> {
+    (function ()[_]: Awaitable<Tout>) $f,
+  )[zoned, ctx $f]: Awaitable<Tout> {
     $prev = ImplicitContext\_Private\set_implicit_context(
       static::class,
       $context,
@@ -440,7 +432,7 @@ abstract class ImplicitContext {
 
   protected static function runWith<Tout>(
     this::T $context,
-    (function (): Tout) $f,
+    (function ()[_]: Tout) $f,
   )[zoned, ctx $f]: Tout {
     $prev = ImplicitContext\_Private\set_implicit_context(
       static::class,

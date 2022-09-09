@@ -21,7 +21,10 @@
 
 #include <fatal/type/same_reference_as.h>
 #include <folly/CPortability.h>
+#include <folly/Utility.h>
 #include <thrift/lib/cpp2/FieldMask.h>
+#include <thrift/lib/cpp2/protocol/GetStandardProtocol.h>
+#include <thrift/lib/cpp2/type/BaseType.h>
 #include <thrift/lib/cpp2/type/ThriftType.h>
 #include <thrift/lib/cpp2/type/Traits.h>
 #include <thrift/lib/cpp2/type/Type.h>
@@ -469,30 +472,41 @@ void setMaskedDataFull(
   auto cursor = prot.getCursor();
   apache::thrift::skip(prot, arg_type);
   cursor.clone(encodedValue.data().emplace(), prot.getCursor() - cursor);
-
   maskedData.full_ref() =
       type::ValueId{apache::thrift::util::i32ToZigzag(values.size() - 1)};
 }
 
-// parseValue with mask
+// Returns the map mask for the given key.
+int64_t getMaskKey(MaskRef ref, const Value& newKey);
+
+// parseValue with readMask and writeMask
 template <typename Protocol>
 MaskedDecodeResultValue parseValue(
     Protocol& prot,
     TType arg_type,
-    MaskRef mask,
+    MaskRef readMask,
+    MaskRef writeMask,
     MaskedProtocolData& protocolData,
     bool string_to_binary = true) {
   MaskedDecodeResultValue result;
-  if (mask.isNoneMask()) { // do not deserialize
-    setMaskedDataFull(prot, arg_type, result.excluded, protocolData);
-    return result;
-  }
-  if (mask.isAllMask()) { // serialize all
+  if (readMask.isAllMask()) { // serialize all
     result.included = parseValue(prot, arg_type, string_to_binary);
     return result;
   }
+  if (readMask.isNoneMask()) { // do not deserialize
+    if (writeMask.isNoneMask()) { // store the serialized data
+      setMaskedDataFull(prot, arg_type, result.excluded, protocolData);
+      return result;
+    }
+    if (writeMask.isAllMask()) { // no need to store
+      apache::thrift::skip(prot, arg_type);
+      return result;
+    }
+    // Need to recursively store the result not in writeMask.
+  }
   switch (arg_type) {
     case protocol::T_STRUCT: {
+      auto& object = result.included.objectValue_ref().ensure();
       std::string name;
       int16_t fid;
       TType ftype;
@@ -502,13 +516,13 @@ MaskedDecodeResultValue parseValue(
         if (ftype == protocol::T_STOP) {
           break;
         }
-        MaskRef next = mask.get(FieldId{fid});
-        MaskedDecodeResultValue nestedResult =
-            parseValue(prot, ftype, next, protocolData, string_to_binary);
+        MaskRef nextRead = readMask.get(FieldId{fid});
+        MaskRef nextWrite = writeMask.get(FieldId{fid});
+        MaskedDecodeResultValue nestedResult = parseValue(
+            prot, ftype, nextRead, nextWrite, protocolData, string_to_binary);
         // Set nested MaskedDecodeResult if not empty.
         if (!apache::thrift::empty(nestedResult.included)) {
-          result.included.objectValue_ref().ensure()[FieldId{fid}] =
-              nestedResult.included;
+          object[FieldId{fid}] = nestedResult.included;
         }
         if (!apache::thrift::empty(nestedResult.excluded)) {
           result.excluded.fields_ref().ensure()[FieldId{fid}] =
@@ -519,7 +533,34 @@ MaskedDecodeResultValue parseValue(
       prot.readStructEnd();
       return result;
     }
-    // TODO: handle map
+    case protocol::T_MAP: {
+      auto& map = result.included.mapValue_ref().ensure();
+      TType keyType;
+      TType valType;
+      uint32_t size;
+      prot.readMapBegin(keyType, valType, size);
+      for (uint32_t i = 0; i < size; i++) {
+        auto keyValue = parseValue(prot, keyType, string_to_binary);
+        MaskRef nextRead = readMask.get(MapId{getMaskKey(readMask, keyValue)});
+        MaskRef nextWrite =
+            writeMask.get(MapId{getMaskKey(writeMask, keyValue)});
+        MaskedDecodeResultValue nestedResult = parseValue(
+            prot, valType, nextRead, nextWrite, protocolData, string_to_binary);
+        // Set nested MaskedDecodeResult if not empty.
+        if (!apache::thrift::empty(nestedResult.included)) {
+          map[keyValue] = nestedResult.included;
+        }
+        if (!apache::thrift::empty(nestedResult.excluded)) {
+          auto& keys = protocolData.keys().ensure();
+          keys.push_back(keyValue);
+          type::ValueId id =
+              type::ValueId{apache::thrift::util::i32ToZigzag(keys.size() - 1)};
+          result.excluded.values_ref().ensure()[id] = nestedResult.excluded;
+        }
+      }
+      prot.readMapEnd();
+      return result;
+    }
     default: {
       result.included = parseValue(prot, arg_type, string_to_binary);
       return result;
@@ -529,17 +570,22 @@ MaskedDecodeResultValue parseValue(
 
 template <typename Protocol>
 MaskedDecodeResult parseObject(
-    const folly::IOBuf& buf, Mask mask, bool string_to_binary = true) {
+    const folly::IOBuf& buf,
+    Mask readMask,
+    Mask writeMask,
+    bool string_to_binary = true) {
   Protocol prot;
   prot.setInput(&buf);
   MaskedDecodeResult result;
   MaskedProtocolData& protocolData = result.excluded;
-  // TODO: change this to use get_standard_protocol
-  protocolData.protocol() = std::is_same_v<Protocol, BinaryProtocolReader>
-      ? type::StandardProtocol::Binary
-      : type::StandardProtocol::Compact;
+  protocolData.protocol() = detail::get_standard_protocol<Protocol>;
   MaskedDecodeResultValue parseValueResult = detail::parseValue(
-      prot, T_STRUCT, MaskRef{mask, false}, protocolData, string_to_binary);
+      prot,
+      T_STRUCT,
+      MaskRef{readMask, false},
+      MaskRef{writeMask, false},
+      protocolData,
+      string_to_binary);
   protocolData.data() = std::move(parseValueResult.excluded);
   // Calling ensure as it is possible that the value is not set.
   result.included =
@@ -653,6 +699,155 @@ void serializeValue(Protocol& prot, const Value& value) {
     }
     default: {
       TProtocolException::throwInvalidFieldData();
+    }
+  }
+}
+
+// Writes the field from raw data in MaskedData.
+template <class Protocol>
+void writeRawField(
+    Protocol& prot,
+    FieldId fieldId,
+    MaskedProtocolData& protocolData,
+    MaskedData& maskedData) {
+  auto& nestedMaskedData = maskedData.fields_ref().value()[fieldId];
+  // When value doesn't exist in the object, maskedData should have full field.
+  if (!nestedMaskedData.full_ref()) {
+    throw std::runtime_error("incompatible value and maskedData");
+  }
+  type::ValueId valueId = nestedMaskedData.full_ref().value();
+  const EncodedValue& value = getByValueId(*protocolData.values(), valueId);
+  prot.writeFieldBegin(
+      "", toTType(*value.wireType()), folly::to_underlying(fieldId));
+  prot.writeRaw(*value.data());
+  prot.writeFieldEnd();
+}
+
+// Writes the map value from raw data in MaskedData.
+template <class Protocol>
+void writeRawMapValue(
+    Protocol& prot,
+    TType valueType,
+    MaskedProtocolData& protocolData,
+    MaskedData& maskedData) {
+  // When value doesn't exist in the object, maskedData should have full field.
+  if (!maskedData.full_ref()) {
+    throw std::runtime_error("incompatible value and maskedData");
+  }
+  type::ValueId valueId = maskedData.full_ref().value();
+  const EncodedValue& value = getByValueId(*protocolData.values(), valueId);
+  if (toTType(*value.wireType()) != valueType) {
+    TProtocolException::throwInvalidFieldData();
+  }
+  prot.writeRaw(*value.data());
+}
+
+// We can assume that if value type is a struct, fields in maskedData is
+// active, and if value type is a map, values in maskedData is active.
+// It throws a runtime error if value and maskedData are incompatible.
+template <class Protocol>
+void serializeValue(
+    Protocol& prot,
+    const Value& value,
+    MaskedProtocolData& protocolData,
+    MaskedData& maskedData) {
+  switch (value.getType()) {
+    case Value::Type::objectValue: {
+      if (!maskedData.fields_ref()) {
+        throw std::runtime_error("incompatible value and maskedData");
+      }
+      prot.writeStructBegin("");
+      // It is more efficient to serialize with sorted field ids.
+      std::set<FieldId> fieldIds{};
+      for (const auto& [fieldId, _] : value.as_object()) {
+        fieldIds.insert(FieldId{fieldId});
+      }
+      for (const auto& [fieldId, _] : *maskedData.fields_ref()) {
+        fieldIds.insert(fieldId);
+      }
+
+      for (auto fieldId : fieldIds) {
+        if (!value.as_object().contains(fieldId)) {
+          // no need to serialize the value
+          writeRawField(prot, fieldId, protocolData, maskedData);
+          continue;
+        }
+        // get type from value
+        const auto& fieldVal = value.as_object().at(fieldId);
+        auto fieldType = getTType(fieldVal);
+        prot.writeFieldBegin("", fieldType, folly::to_underlying(fieldId));
+        // just serialize the value
+        if (folly::get_ptr(*maskedData.fields_ref(), fieldId) == nullptr) {
+          serializeValue(prot, fieldVal);
+        } else { // recursively serialize value with maskedData
+          auto& nextMaskedData = maskedData.fields_ref().value()[fieldId];
+          serializeValue(prot, fieldVal, protocolData, nextMaskedData);
+        }
+        prot.writeFieldEnd();
+      }
+      prot.writeFieldStop();
+      prot.writeStructEnd();
+      return;
+    }
+    case Value::Type::mapValue: {
+      if (!maskedData.values_ref()) {
+        throw std::runtime_error("incompatible value and maskedData");
+      }
+      TType keyType = protocol::T_STRING;
+      TType valueType = protocol::T_I64;
+
+      // compute size, keyType, and valueType
+      uint32_t size = value.mapValue_ref()->size();
+      if (size > 0) {
+        keyType = getTType(value.mapValue_ref()->begin()->first);
+        valueType = getTType(value.mapValue_ref()->begin()->second);
+      }
+      for (auto& [keyValueId, nestedMaskedData] : *maskedData.values_ref()) {
+        const Value& key = getByValueId(*protocolData.keys(), keyValueId);
+        if (size == 0) { // need to set keyType and valueType
+          keyType = getTType(key);
+          type::ValueId valueId = nestedMaskedData.full_ref().value();
+          valueType = toTType(
+              *getByValueId(*protocolData.values(), valueId).wireType());
+        }
+        if (folly::get_ptr(*value.mapValue_ref(), key) == nullptr) {
+          ++size;
+        }
+      }
+
+      // Remember which keys are in the maskedData. Cannot use unordered_map
+      // as Value doesn't have a hash function.
+      std::set<Value> keys{};
+      prot.writeMapBegin(keyType, valueType, size);
+      for (auto& [keyValueId, nestedMaskedData] : *maskedData.values_ref()) {
+        const Value& key = getByValueId(*protocolData.keys(), keyValueId);
+        keys.insert(key);
+        ensureSameType(key, keyType);
+        serializeValue(prot, key);
+        // no need to serialize the value
+        if (folly::get_ptr(*value.mapValue_ref(), key) == nullptr) {
+          writeRawMapValue(prot, valueType, protocolData, nestedMaskedData);
+          continue;
+        }
+        // recursively serialize value with maskedData
+        const Value& val = value.mapValue_ref()->at(key);
+        ensureSameType(val, valueType);
+        serializeValue(prot, val, protocolData, nestedMaskedData);
+      }
+      for (const auto& [key, val] : *value.mapValue_ref()) {
+        if (keys.find(key) != keys.end()) { // already serailized
+          continue;
+        }
+        ensureSameType(key, keyType);
+        ensureSameType(val, valueType);
+        serializeValue(prot, key);
+        serializeValue(prot, val);
+      }
+      prot.writeMapEnd();
+      return;
+    }
+    default: {
+      serializeValue(prot, value);
     }
   }
 }

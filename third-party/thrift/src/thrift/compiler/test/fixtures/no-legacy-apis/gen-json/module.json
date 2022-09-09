@@ -1,6 +1,11 @@
 {
   "__fbthrift": {"@generated": 0},
   "thrift_module" : "module",
+  "includes": {
+    "thrift" : {
+      "path" : "thrift/annotation/thrift.thrift"
+    }
+  },
   "enumerations" : {
     "MyEnum" : {
       "lineno" : 28,
@@ -127,6 +132,7 @@
           },
           "args" : [
             {
+              "name" : "u",
               "type_enum" : "STRUCT",
               "spec_args" : "MyUnion"
             }

@@ -15,23 +15,37 @@
 
 from __future__ import annotations
 
-from typing import Any, NamedTuple
+import typing
 
 from thrift.python.adapter import Adapter
-
-# pyre-fixme[2]: Parameter annotation cannot be `Any`.
-class Wrapped(NamedTuple):
-    # pyre-fixme[4]: Attribute annotation cannot be `Any`.
-    obj: Any
+from thrift.python.types import Struct
 
 
-class Wrapper(Adapter[Any, Wrapped]):
+T = typing.TypeVar("T")
+
+
+class Wrapped(typing.Generic[T]):
+    __slots__ = ["obj"]
+
+    def __init__(self, obj: T) -> None:
+        self.obj: T = obj
+
+
+class Wrapper(Adapter[T, Wrapped[T]]):
     @classmethod
-    # pyre-fixme[2]: Parameter annotation cannot be `Any`.
-    def from_thrift(cls, original: Any) -> Wrapped:
+    def from_thrift(
+        cls,
+        original: T,
+        *,
+        transitive_annotation: typing.Optional[Struct] = None,
+    ) -> Wrapped[T]:
         return Wrapped(obj=original)
 
     @classmethod
-    # pyre-fixme[3]: Return annotation cannot be `Any`.
-    def to_thrift(cls, adapted: Wrapped) -> Any:
+    def to_thrift(
+        cls,
+        adapted: Wrapped[T],
+        *,
+        transitive_annotation: typing.Optional[Struct] = None,
+    ) -> T:
         return adapted.obj

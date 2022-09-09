@@ -426,7 +426,6 @@ bool canDCE(const IRInstruction& inst) {
   case LdFuncCached:
   case LookupFuncCached:
   case AllocObj:
-  case AllocObjReified:
   case NewClsMeth:
   case FuncCred:
   case InitProps:
@@ -533,6 +532,7 @@ bool canDCE(const IRInstruction& inst) {
   case RaiseCoeffectsFunParamCoeffectRulesViolation:
   case RaiseStrToClassNotice:
   case RaiseModuleBoundaryViolation:
+  case RaiseModulePropertyViolation:
   case RaiseImplicitContextStateInvalid:
   case CheckClsMethFunc:
   case CheckClsReifiedGenericMismatch:

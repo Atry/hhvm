@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <boost/algorithm/string.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/filesystem.hpp>
 
@@ -61,6 +62,20 @@ const std::string get_annotation_property(
   return "";
 }
 
+const t_const* get_transitive_annotation_of_adapter_or_null(
+    const t_named& node) {
+  for (const auto* annotation : node.structured_annotations()) {
+    const t_type& annotation_type = *annotation->type();
+    if (is_transitive_annotation(annotation_type)) {
+      if (annotation_type.find_structured_annotation_or_null(
+              kPythonAdapterUri)) {
+        return annotation;
+      }
+    }
+  }
+  return nullptr;
+}
+
 const std::string extract_module_path(const std::string& fully_qualified_name) {
   auto tokens = split_namespace(fully_qualified_name);
   if (tokens.size() <= 1) {
@@ -68,6 +83,40 @@ const std::string extract_module_path(const std::string& fully_qualified_name) {
   }
   tokens.pop_back();
   return boost::algorithm::join(tokens, ".");
+}
+
+class python_mstch_const_value;
+
+mstch::node adapter_node(
+    const t_const* adapter_annotation,
+    const t_const* transitive_adapter_annotation,
+    mstch_context& context,
+    mstch_element_position pos) {
+  if (!adapter_annotation) {
+    return false;
+  }
+  auto type_hint = get_annotation_property(adapter_annotation, "typeHint");
+  bool is_generic = boost::algorithm::ends_with(type_hint, "[]");
+  if (is_generic) {
+    type_hint = type_hint.substr(0, type_hint.size() - 2);
+  }
+  bool is_transitive = (transitive_adapter_annotation != nullptr);
+  mstch::map node{
+      {"adapter:name", get_annotation_property(adapter_annotation, "name")},
+      {"adapter:type_hint", type_hint},
+      {"adapter:is_generic?", is_generic},
+      {"adapter:is_transitive?", is_transitive},
+  };
+  if (is_transitive) {
+    node["adapter:transitive_annotation"] =
+        std::make_shared<python_mstch_const_value>(
+            transitive_adapter_annotation->value(),
+            context,
+            pos,
+            transitive_adapter_annotation,
+            &*transitive_adapter_annotation->type());
+  }
+  return node;
 }
 
 class python_mstch_program : public mstch_program {
@@ -511,7 +560,9 @@ class python_mstch_type : public mstch_type {
       const t_program* prog)
       : mstch_type(type->get_true_type(), ctx, pos),
         prog_(prog),
-        adapter_annotation_(find_structured_adapter_annotation(*type)) {
+        adapter_annotation_(find_structured_adapter_annotation(*type)),
+        transitive_adapter_annotation_(
+            get_transitive_annotation_of_adapter_or_null(*type)) {
     register_methods(
         this,
         {
@@ -523,9 +574,7 @@ class python_mstch_type : public mstch_type {
             {"type:external_program?", &python_mstch_type::is_external_program},
             {"type:integer?", &python_mstch_type::is_integer},
             {"type:iobuf?", &python_mstch_type::is_iobuf},
-            {"type:has_adapter?", &python_mstch_type::has_adapter},
-            {"type:adapter_name", &python_mstch_type::adapter_name},
-            {"type:adapter_type_hint", &python_mstch_type::adapter_type_hint},
+            {"type:has_adapter?", &python_mstch_type::adapter},
             {"type:with_regular_response?",
              &python_mstch_type::with_regular_response},
         });
@@ -579,14 +628,9 @@ class python_mstch_type : public mstch_type {
         is_type_iobuf(type_->get_annotation("cpp.type"));
   }
 
-  mstch::node has_adapter() { return adapter_annotation_ != nullptr; }
-
-  mstch::node adapter_name() {
-    return get_annotation_property(adapter_annotation_, "name");
-  }
-
-  mstch::node adapter_type_hint() {
-    return get_annotation_property(adapter_annotation_, "typeHint");
+  mstch::node adapter() {
+    return adapter_node(
+        adapter_annotation_, transitive_adapter_annotation_, context_, pos_);
   }
 
   mstch::node with_regular_response() {
@@ -607,6 +651,7 @@ class python_mstch_type : public mstch_type {
 
   const t_program* prog_;
   const t_const* adapter_annotation_;
+  const t_const* transitive_adapter_annotation_;
 };
 
 class python_mstch_typedef : public mstch_typedef {
@@ -618,16 +663,12 @@ class python_mstch_typedef : public mstch_typedef {
     register_methods(
         this,
         {
-            {"typedef:has_adapter?", &python_mstch_typedef::has_adapter},
-            {"typedef:adapter_type_hint",
-             &python_mstch_typedef::adapter_type_hint},
+            {"typedef:has_adapter?", &python_mstch_typedef::adapter},
         });
   }
 
-  mstch::node has_adapter() { return adapter_annotation_ != nullptr; }
-
-  mstch::node adapter_type_hint() {
-    return get_annotation_property(adapter_annotation_, "typeHint");
+  mstch::node adapter() {
+    return adapter_node(adapter_annotation_, nullptr, context_, pos_);
   }
 
  private:
@@ -649,10 +690,7 @@ class python_mstch_struct : public mstch_struct {
              &python_mstch_struct::has_exception_message},
             {"struct:exception_message",
              &python_mstch_struct::exception_message},
-            {"struct:has_adapter?", &python_mstch_struct::has_adapter},
-            {"struct:adapter_name", &python_mstch_struct::adapter_name},
-            {"struct:adapter_type_hint",
-             &python_mstch_struct::adapter_type_hint},
+            {"struct:has_adapter?", &python_mstch_struct::adapter},
             {"struct:legacy_api?", &python_mstch_struct::legacy_api},
         });
   }
@@ -673,14 +711,8 @@ class python_mstch_struct : public mstch_struct {
   }
   mstch::node exception_message() { return struct_->get_annotation("message"); }
 
-  mstch::node has_adapter() { return adapter_annotation_ != nullptr; }
-
-  mstch::node adapter_name() {
-    return get_annotation_property(adapter_annotation_, "name");
-  }
-
-  mstch::node adapter_type_hint() {
-    return get_annotation_property(adapter_annotation_, "typeHint");
+  mstch::node adapter() {
+    return adapter_node(adapter_annotation_, nullptr, context_, pos_);
   }
 
   mstch::node legacy_api() {
@@ -700,7 +732,9 @@ class python_mstch_field : public mstch_field {
       const field_generator_context* field_context)
       : mstch_field(field, ctx, pos, field_context),
         py_name_(py3::get_py3_name(*field)),
-        adapter_annotation_(find_structured_adapter_annotation(*field)) {
+        adapter_annotation_(find_structured_adapter_annotation(*field)),
+        transitive_adapter_annotation_(
+            get_transitive_annotation_of_adapter_or_null(*field)) {
     register_methods(
         this,
         {
@@ -709,9 +743,7 @@ class python_mstch_field : public mstch_field {
              &python_mstch_field::tablebased_qualifier},
             {"field:user_default_value",
              &python_mstch_field::user_default_value},
-            {"field:has_adapter?", &python_mstch_field::has_adapter},
-            {"field:adapter_name", &python_mstch_field::adapter_name},
-            {"field:adapter_type_hint", &python_mstch_field::adapter_type_hint},
+            {"field:has_adapter?", &python_mstch_field::adapter},
         });
   }
 
@@ -748,17 +780,15 @@ class python_mstch_field : public mstch_field {
     return context_.const_value_factory->make_mstch_object(
         value, context_, pos_, nullptr, nullptr);
   }
-  mstch::node has_adapter() { return adapter_annotation_ != nullptr; }
-  mstch::node adapter_name() {
-    return get_annotation_property(adapter_annotation_, "name");
-  }
-  mstch::node adapter_type_hint() {
-    return get_annotation_property(adapter_annotation_, "typeHint");
+  mstch::node adapter() {
+    return adapter_node(
+        adapter_annotation_, transitive_adapter_annotation_, context_, pos_);
   }
 
  private:
   const std::string py_name_;
   const t_const* adapter_annotation_;
+  const t_const* transitive_adapter_annotation_;
 };
 
 class python_mstch_enum : public mstch_enum {
@@ -875,6 +905,61 @@ class t_mstch_python_generator : public t_mstch_generator {
   boost::filesystem::path package_to_path();
 
   boost::filesystem::path generate_root_path_;
+};
+
+class python_mstch_const : public mstch_const {
+ public:
+  python_mstch_const(
+      const t_const* c,
+      mstch_context& ctx,
+      mstch_element_position pos,
+      const t_const* current_const,
+      const t_type* expected_type,
+      const t_field* field)
+      : mstch_const(c, ctx, pos, current_const, expected_type, field),
+        adapter_annotation_(find_structured_adapter_annotation(*c)),
+        transitive_adapter_annotation_(
+            get_transitive_annotation_of_adapter_or_null(*c)) {
+    register_methods(
+        this,
+        {
+            {"constant:has_adapter?", &python_mstch_const::has_adapter},
+            {"constant:adapter_name", &python_mstch_const::adapter_name},
+            {"constant:adapter_type_hint",
+             &python_mstch_const::adapter_type_hint},
+            {"constant:is_adapter_transitive?",
+             &python_mstch_const::is_adapter_transitive},
+            {"constant:transitive_adapter_annotation",
+             &python_mstch_const::transitive_adapter_annotation},
+        });
+  }
+
+  mstch::node has_adapter() { return adapter_annotation_ != nullptr; }
+
+  mstch::node adapter_name() {
+    return get_annotation_property(adapter_annotation_, "name");
+  }
+
+  mstch::node adapter_type_hint() {
+    return get_annotation_property(adapter_annotation_, "typeHint");
+  }
+
+  mstch::node is_adapter_transitive() {
+    return transitive_adapter_annotation_ != nullptr;
+  }
+
+  mstch::node transitive_adapter_annotation() {
+    return std::make_shared<python_mstch_const_value>(
+        transitive_adapter_annotation_->value(),
+        context_,
+        pos_,
+        transitive_adapter_annotation_,
+        &*transitive_adapter_annotation_->type());
+  }
+
+ private:
+  const t_const* adapter_annotation_;
+  const t_const* transitive_adapter_annotation_;
 };
 
 class python_mstch_const_value : public mstch_const_value {
@@ -1023,8 +1108,6 @@ class python_mstch_const_value : public mstch_const_value {
   }
 };
 
-} // namespace
-
 void t_mstch_python_generator::set_mstch_factories() {
   mstch_context_.add<python_mstch_program>();
   mstch_context_.add<python_mstch_service>(program_);
@@ -1035,6 +1118,7 @@ void t_mstch_python_generator::set_mstch_factories() {
   mstch_context_.add<python_mstch_field>();
   mstch_context_.add<python_mstch_enum>();
   mstch_context_.add<python_mstch_enum_value>();
+  mstch_context_.add<python_mstch_const>();
   mstch_context_.add<python_mstch_const_value>();
 }
 
@@ -1085,6 +1169,8 @@ void t_mstch_python_generator::generate_services() {
   }
   generate_file("thrift_services.py", NotTypesFile, generate_root_path_);
 }
+
+} // namespace
 
 THRIFT_REGISTER_GENERATOR(
     mstch_python,

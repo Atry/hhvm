@@ -40,16 +40,12 @@ namespace py thrift.lib.thrift.patch
 @scope.Structured
 struct GeneratePatch {}
 
-@scope.Struct
-struct GenerateOptionalPatch {}
-
 /** A patch for a boolean value. */
 @cpp.Adapter{
   underlyingName = "BoolPatchStruct",
   extraNamespace = "",
   name = "::apache::thrift::op::detail::BoolPatchAdapter",
 }
-@GenerateOptionalPatch
 struct BoolPatch {
   /**
    * Assign to a given value.
@@ -57,6 +53,9 @@ struct BoolPatch {
    * If set, all other patch operations are ignored.
    */
   1: optional bool assign;
+
+  /** Clear any set value. */
+  2: bool clear;
 
   /** If the bool value should be inverted. */
   9: bool invert;
@@ -68,7 +67,6 @@ struct BoolPatch {
   extraNamespace = "",
   name = "::apache::thrift::op::detail::NumberPatchAdapter",
 }
-@GenerateOptionalPatch
 struct BytePatch {
   /**
    * Assign to a given value.
@@ -76,6 +74,9 @@ struct BytePatch {
    * If set, all other patch operations are ignored.
    */
   1: optional byte assign;
+
+  /** Clear any set value. */
+  2: bool clear;
 
   /** Add to a given value. */
   8: byte add;
@@ -87,7 +88,6 @@ struct BytePatch {
   extraNamespace = "",
   name = "::apache::thrift::op::detail::NumberPatchAdapter",
 }
-@GenerateOptionalPatch
 struct I16Patch {
   /**
    * Assign to a given value.
@@ -95,6 +95,9 @@ struct I16Patch {
    * If set, all other patch operations are ignored.
    */
   1: optional i16 assign;
+
+  /** Clear any set value. */
+  2: bool clear;
 
   /** Add to a given value. */
   8: i16 add;
@@ -106,7 +109,6 @@ struct I16Patch {
   extraNamespace = "",
   name = "::apache::thrift::op::detail::NumberPatchAdapter",
 }
-@GenerateOptionalPatch
 struct I32Patch {
   /**
    * Assign to a given value.
@@ -114,6 +116,9 @@ struct I32Patch {
    * If set, all other patch operations are ignored.
    */
   1: optional i32 assign;
+
+  /** Clear any set value. */
+  2: bool clear;
 
   /** Add to a given value. */
   8: i32 add;
@@ -125,7 +130,6 @@ struct I32Patch {
   extraNamespace = "",
   name = "::apache::thrift::op::detail::NumberPatchAdapter",
 }
-@GenerateOptionalPatch
 struct I64Patch {
   /**
    * Assign to a given value.
@@ -133,6 +137,9 @@ struct I64Patch {
    * If set, all other patch operations are ignored.
    */
   1: optional i64 assign;
+
+  /** Clear any set value. */
+  2: bool clear;
 
   /** Add to a given value. */
   8: i64 add;
@@ -144,7 +151,6 @@ struct I64Patch {
   extraNamespace = "",
   name = "::apache::thrift::op::detail::NumberPatchAdapter",
 }
-@GenerateOptionalPatch
 struct FloatPatch {
   /**
    * Assign to a given value.
@@ -152,6 +158,9 @@ struct FloatPatch {
    * If set, all other patch operations are ignored.
    */
   1: optional float assign;
+
+  /** Clear any set value. */
+  2: bool clear;
 
   /** Add to a given value. */
   8: float add;
@@ -163,7 +172,6 @@ struct FloatPatch {
   extraNamespace = "",
   name = "::apache::thrift::op::detail::NumberPatchAdapter",
 }
-@GenerateOptionalPatch
 struct DoublePatch {
   /**
    * Assign to a given value.
@@ -171,6 +179,9 @@ struct DoublePatch {
    * If set, all other patch operations are ignored.
    */
   1: optional double assign;
+
+  /** Clear any set value. */
+  2: bool clear;
 
   /** Add to a given value. */
   8: double add;
@@ -182,7 +193,6 @@ struct DoublePatch {
   extraNamespace = "",
   name = "::apache::thrift::op::detail::StringPatchAdapter",
 }
-@GenerateOptionalPatch
 struct StringPatch {
   /**
    * Assign to a given value.
@@ -202,7 +212,6 @@ struct StringPatch {
 }
 
 /** A patch for a binary value. */
-@GenerateOptionalPatch
 @cpp.Adapter{
   underlyingName = "BinaryPatchStruct",
   extraNamespace = "",

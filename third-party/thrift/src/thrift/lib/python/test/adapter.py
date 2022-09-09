@@ -20,13 +20,22 @@ import unittest
 from datetime import datetime
 from unittest.mock import MagicMock
 
-from thrift.python.test.adapter.thrift_types import AdaptedInt, Bar, Baz, Datetime, Foo
+from thrift.python.test.adapter.thrift_types import (
+    AdaptedInt,
+    Bar,
+    Baz,
+    Datetime,
+    Foo,
+    NINETEEN_EIGHTY_FOUR,
+)
 from thrift.python.test.adapters.datetime import DatetimeAdapter
 from thrift.python.test.adapters.noop import Wrapped
 
 # @manual=//thrift/lib/python/test:adapter_thrift-python-types
 from thrift.python.test.adapter.thrift_types import (
+    _fbthrift_unadapted_AsDatetime,
     _fbthrift_unadapted_Baz,
+    _fbthrift_unadapted_NINETEEN_EIGHTY_FOUR,
 )  # isort:skip
 
 
@@ -49,7 +58,30 @@ class AdapterTest(unittest.TestCase):
         bar = Bar(ts=now)
         self.assertEqual(bar.ts, now)
 
-    def test_adapter_called_with_field_id(self) -> None:
+    def test_struct_adapter_called_with_transitive_annotation(self) -> None:
+        mock_from_thrift = MagicMock(wraps=DatetimeAdapter.from_thrift)
+        DatetimeAdapter.from_thrift = mock_from_thrift
+        mock_to_thrift = MagicMock(wraps=DatetimeAdapter.to_thrift)
+        DatetimeAdapter.to_thrift = mock_to_thrift
+
+        now_ts = int(time.time())
+        now = datetime.fromtimestamp(now_ts)
+        foo = Foo(updated_at=now)
+        mock_to_thrift.assert_called_once_with(
+            now,
+            transitive_annotation=_fbthrift_unadapted_AsDatetime(
+                signature="DatetimeTypedef"
+            ),
+        )
+        foo.updated_at
+        mock_from_thrift.assert_called_once_with(
+            now_ts,
+            transitive_annotation=_fbthrift_unadapted_AsDatetime(
+                signature="DatetimeTypedef"
+            ),
+        )
+
+    def test_field_adapter_called_with_field_id_and_trasitive_annotation(self) -> None:
         mock_from_thrift_field = MagicMock(wraps=DatetimeAdapter.from_thrift_field)
         DatetimeAdapter.from_thrift_field = mock_from_thrift_field
         mock_to_thrift_field = MagicMock(wraps=DatetimeAdapter.to_thrift_field)
@@ -58,16 +90,44 @@ class AdapterTest(unittest.TestCase):
         now_ts = int(time.time())
         now = datetime.fromtimestamp(now_ts)
         foo = Foo(created_at=now)
-        mock_to_thrift_field.assert_called_once_with(now, 1, foo)
+        mock_to_thrift_field.assert_called_once_with(
+            now,
+            1,
+            foo,
+            transitive_annotation=_fbthrift_unadapted_AsDatetime(
+                signature="DatetimeField"
+            ),
+        )
         foo.created_at
-        mock_from_thrift_field.assert_called_once_with(now_ts, 1, foo)
+        mock_from_thrift_field.assert_called_once_with(
+            now_ts,
+            1,
+            foo,
+            transitive_annotation=_fbthrift_unadapted_AsDatetime(
+                signature="DatetimeField"
+            ),
+        )
 
         mock_from_thrift_field.reset_mock()
         mock_to_thrift_field.reset_mock()
         bar = Bar(ts=now)
-        mock_to_thrift_field.assert_called_once_with(now, 2, bar)
+        mock_to_thrift_field.assert_called_once_with(
+            now,
+            2,
+            bar,
+            transitive_annotation=_fbthrift_unadapted_AsDatetime(
+                signature="DatetimeField"
+            ),
+        )
         bar.ts
-        mock_from_thrift_field.assert_called_once_with(now_ts, 2, bar)
+        mock_from_thrift_field.assert_called_once_with(
+            now_ts,
+            2,
+            bar,
+            transitive_annotation=_fbthrift_unadapted_AsDatetime(
+                signature="DatetimeField"
+            ),
+        )
 
     def test_typedef_field(self) -> None:
         now = datetime.fromtimestamp(int(time.time()))
@@ -103,6 +163,10 @@ class AdapterTest(unittest.TestCase):
 
     def test_directly_annotated(self) -> None:
         foo = Foo()
-        self.assertEqual(Baz, Wrapped)
+        self.assertEqual(Baz, Wrapped[_fbthrift_unadapted_Baz])
         self.assertIsInstance(foo.baz, Wrapped)
         self.assertIsInstance(foo.baz.obj, _fbthrift_unadapted_Baz)
+
+    def test_adapted_variable(self) -> None:
+        self.assertEqual(NINETEEN_EIGHTY_FOUR, datetime(1984, 1, 1))
+        self.assertEqual(_fbthrift_unadapted_NINETEEN_EIGHTY_FOUR, 441792000)

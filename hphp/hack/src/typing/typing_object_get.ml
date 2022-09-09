@@ -52,6 +52,7 @@ type obj_get_args = {
   this_ty_conjunct: locl_ty;
   is_parent_call: bool;
   dep_kind: Reason.t * Typing_dependent_type.ExprDepTy.dep;
+  seen: SSet.t;
 }
 
 let log_obj_get env helper id_pos ty this_ty =
@@ -454,7 +455,13 @@ let rec obj_get_concrete_ty
   | (_, Tany _)
   | (_, Terr) ->
     default None
-  | (_, Tnonnull) ->
+  | (r, Tnonnull) ->
+    let ty_reasons =
+      match r with
+      | Reason.Ropaque_type_from_module _ ->
+        lazy (Reason.to_string "This type is mixed" r)
+      | _ -> lazy []
+    in
     let ty_err =
       Typing_error.(
         primary
@@ -475,6 +482,7 @@ let rec obj_get_concrete_ty
                is_nullable = false;
                decl_pos = get_pos concrete_ty;
                ty_name = lazy (Typing_print.error env concrete_ty);
+               ty_reasons;
              })
     in
     let ty_nothing = MakeType.nothing Reason.none in
@@ -1017,6 +1025,12 @@ and nullable_obj_get
     let (ty_expect, ty_err) =
       let r = get_reason ety1 in
       if rcv_is_nothing then
+        let ty_reasons =
+          match r with
+          | Reason.Ropaque_type_from_module _ ->
+            lazy (Reason.to_string "This type is mixed" r)
+          | _ -> lazy []
+        in
         let ty_err =
           Typing_error.(
             primary
@@ -1037,6 +1051,7 @@ and nullable_obj_get
                    is_nullable = true;
                    decl_pos = Reason.to_pos r;
                    ty_name = lazy (Typing_print.error env ety1);
+                   ty_reasons;
                  })
         in
         (MakeType.nothing Reason.none, ty_err)
@@ -1155,7 +1170,8 @@ and obj_get_inner args env receiver_ty ((id_pos, id_str) as id) on_error :
   | (_, Tdependent (_, ty))
   | (_, Tnewtype (_, _, ty)) ->
     merge_ty_err expand_ty_err_opt @@ obj_get_inner args env ty id on_error
-  | (r, Tgeneric (_name, _)) ->
+  | (r, Tgeneric (name, _)) when not (SSet.mem name args.seen) ->
+    let args = { args with seen = SSet.add name args.seen } in
     (match TUtils.get_concrete_supertypes ~abstract_enum:true env ety1 with
     | (env, []) ->
       let ctxt =
@@ -1397,6 +1413,7 @@ let obj_get_with_mismatches
       dep_kind;
       this_ty = receiver_ty;
       this_ty_conjunct = receiver_ty;
+      seen = SSet.empty;
     }
   in
   let (env, e2, ty, lval_err, rval_err_opt) =

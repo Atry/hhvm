@@ -54,6 +54,10 @@ class ServiceHandler<::test::fixtures::basic::FooService> : public apache::thrif
   virtual void simple_rpc();
   virtual folly::Future<folly::Unit> future_simple_rpc();
   virtual folly::SemiFuture<folly::Unit> semifuture_simple_rpc();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_simple_rpc();
+  virtual folly::coro::Task<void> co_simple_rpc(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_simple_rpc(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback);
  private:
   static ::test::fixtures::basic::FooServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -71,7 +75,7 @@ class FooServiceSvNull : public ::apache::thrift::ServiceHandler<FooService> {
   void simple_rpc() override;
 };
 
-class FooServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class FooServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -86,8 +90,8 @@ class FooServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcesso
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<FooServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<FooServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const FooServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const FooServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

@@ -54,6 +54,10 @@ class ServiceHandler<::py3::simple::RederivedService> : virtual public ::py3::si
   virtual ::std::int32_t get_seven();
   virtual folly::Future<::std::int32_t> future_get_seven();
   virtual folly::SemiFuture<::std::int32_t> semifuture_get_seven();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<::std::int32_t> co_get_seven();
+  virtual folly::coro::Task<::std::int32_t> co_get_seven(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_get_seven(std::unique_ptr<apache::thrift::HandlerCallback<::std::int32_t>> callback);
  private:
   static ::py3::simple::RederivedServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -86,8 +90,8 @@ class RederivedServiceAsyncProcessor : public ::py3::simple::DerivedServiceAsync
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<RederivedServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<RederivedServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const RederivedServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const RederivedServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

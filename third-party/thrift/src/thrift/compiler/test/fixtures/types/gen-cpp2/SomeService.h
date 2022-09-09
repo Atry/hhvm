@@ -50,10 +50,18 @@ class ServiceHandler<::apache::thrift::fixtures::types::SomeService> : public ap
   virtual void bounce_map(::apache::thrift::fixtures::types::SomeMap& /*_return*/, std::unique_ptr<::apache::thrift::fixtures::types::SomeMap> /*m*/);
   virtual folly::Future<std::unique_ptr<::apache::thrift::fixtures::types::SomeMap>> future_bounce_map(std::unique_ptr<::apache::thrift::fixtures::types::SomeMap> p_m);
   virtual folly::SemiFuture<std::unique_ptr<::apache::thrift::fixtures::types::SomeMap>> semifuture_bounce_map(std::unique_ptr<::apache::thrift::fixtures::types::SomeMap> p_m);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::apache::thrift::fixtures::types::SomeMap>> co_bounce_map(std::unique_ptr<::apache::thrift::fixtures::types::SomeMap> p_m);
+  virtual folly::coro::Task<std::unique_ptr<::apache::thrift::fixtures::types::SomeMap>> co_bounce_map(apache::thrift::RequestParams params, std::unique_ptr<::apache::thrift::fixtures::types::SomeMap> p_m);
+#endif
   virtual void async_tm_bounce_map(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::apache::thrift::fixtures::types::SomeMap>>> callback, std::unique_ptr<::apache::thrift::fixtures::types::SomeMap> p_m);
   virtual void binary_keyed_map(::std::map<::apache::thrift::fixtures::types::TBinary, ::std::int64_t>& /*_return*/, std::unique_ptr<::std::vector<::std::int64_t>> /*r*/);
   virtual folly::Future<std::unique_ptr<::std::map<::apache::thrift::fixtures::types::TBinary, ::std::int64_t>>> future_binary_keyed_map(std::unique_ptr<::std::vector<::std::int64_t>> p_r);
   virtual folly::SemiFuture<std::unique_ptr<::std::map<::apache::thrift::fixtures::types::TBinary, ::std::int64_t>>> semifuture_binary_keyed_map(std::unique_ptr<::std::vector<::std::int64_t>> p_r);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::std::map<::apache::thrift::fixtures::types::TBinary, ::std::int64_t>>> co_binary_keyed_map(std::unique_ptr<::std::vector<::std::int64_t>> p_r);
+  virtual folly::coro::Task<std::unique_ptr<::std::map<::apache::thrift::fixtures::types::TBinary, ::std::int64_t>>> co_binary_keyed_map(apache::thrift::RequestParams params, std::unique_ptr<::std::vector<::std::int64_t>> p_r);
+#endif
   virtual void async_tm_binary_keyed_map(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::std::map<::apache::thrift::fixtures::types::TBinary, ::std::int64_t>>>> callback, std::unique_ptr<::std::vector<::std::int64_t>> p_r);
  private:
   static ::apache::thrift::fixtures::types::SomeServiceServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -73,7 +81,7 @@ class SomeServiceSvNull : public ::apache::thrift::ServiceHandler<SomeService> {
   void binary_keyed_map(::std::map<::apache::thrift::fixtures::types::TBinary, ::std::int64_t>& /*_return*/, std::unique_ptr<::std::vector<::std::int64_t>> /*r*/) override;
 };
 
-class SomeServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class SomeServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -88,8 +96,8 @@ class SomeServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcess
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<SomeServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<SomeServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const SomeServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const SomeServiceAsyncProcessor::ProcessMap kOwnProcessMap_;

@@ -16,7 +16,7 @@ use once_cell::sync::OnceCell;
 mod opcodes;
 #[cfg(not(fbcode_build))]
 mod opcodes {
-    include!(concat!(env!("CMAKE_BINARY_DIR"), "/hphp/tools/opcodes.rs"));
+    include!(concat!(env!("OUT_DIR"), "/opcodes.rs"));
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -290,9 +290,6 @@ mod fixups {
                 replace_imm("target2", ImmType::BA, ImmType::DUMMY),
             ],
             "NewObjD" => vec![
-                replace_imm("str1", ImmType::SA, ImmType::OAL("ClassName")),
-            ],
-            "NewObjRD" => vec![
                 replace_imm("str1", ImmType::SA, ImmType::OAL("ClassName")),
             ],
             "QueryM" => vec![

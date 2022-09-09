@@ -181,29 +181,38 @@ CompilerResult hackc_compile(
   bool& internal_error,
   const RepoOptionsFlags& options,
   CompileAbortMode mode,
-  DeclProvider* provider
+  hackc::DeclProvider* provider
 ) {
   auto aliased_namespaces = options.getAliasedNamespacesConfig();
 
-  uint8_t flags = make_env_flags(
-    isSystemLib,                    // is_systemlib
-    false,                          // is_evaled
-    forDebuggerEval,                // for_debugger_eval
-    false,                          // disable_toplevel_elaboration
-    false                           // enable_ir
-  );
-
-  NativeEnv const native_env{
-    reinterpret_cast<uint64_t>(provider),
-    filename,
-    aliased_namespaces,
-    s_misc_config,
-    RuntimeOption::EvalEmitClassPointers,
-    RuntimeOption::CheckIntOverflow,
-    options.getCompilerFlags(),
-    options.getParserFlags(),
-    flags
+  hackc::NativeEnv native_env{
+    .decl_provider = reinterpret_cast<uint64_t>(provider),
+    .filepath = filename,
+    .aliased_namespaces = aliased_namespaces,
+    .include_roots = s_misc_config,
+    .emit_class_pointers = RuntimeOption::EvalEmitClassPointers,
+    .check_int_overflow = RuntimeOption::CheckIntOverflow,
+    .hhbc_flags = hackc::HhbcFlags {
+      .repo_authoritative = RO::RepoAuthoritative,
+      .jit_enable_rename_function = RO::EvalJitEnableRenameFunction,
+      .log_extern_compiler_perf = RO::EvalLogExternCompilerPerf,
+      .enable_intrinsics_extension = RO::EnableIntrinsicsExtension,
+      .emit_cls_meth_pointers = RO::EvalEmitClsMethPointers,
+      .emit_meth_caller_func_pointers = RO::EvalEmitMethCallerFuncPointers,
+      .fold_lazy_class_keys = RO::EvalFoldLazyClassKeys,
+    },
+    .parser_flags = hackc::ParserFlags {
+      .enable_class_level_where_clauses = RO::EnableClassLevelWhereClauses,
+    },
+    .flags = hackc::EnvFlags {
+      .is_systemlib = isSystemLib,
+      .for_debugger_eval = forDebuggerEval,
+      .disable_toplevel_elaboration = false,
+      .enable_ir = false,
+    }
   };
+  options.initHhbcFlags(native_env.hhbc_flags);
+  options.initParserFlags(native_env.parser_flags);
 
   // Invoke hackc, producing a rust Vec<u8> containing HHAS.
   rust::Vec<uint8_t> hhas_vec = [&] {
@@ -215,7 +224,7 @@ CompilerResult hackc_compile(
           .add("code_size", strlen(code));
       }
     };
-    return hackc_compile_from_text_cpp_ffi(native_env, code);
+    return hackc::compile_from_text_cpp_ffi(native_env, code);
   }();
   auto const hhas = std::string(hhas_vec.begin(), hhas_vec.end());
 
@@ -229,8 +238,8 @@ CompilerResult hackc_compile(
                                            mode);
 
   if (RO::EvalTranslateHackC) {
-    rust::Box<UnitWrapper> unit_wrapped =
-      hackc_compile_unit_from_text_cpp_ffi(native_env, code);
+    auto const unit_wrapped =
+      hackc::compile_unit_from_text_cpp_ffi(native_env, code);
 
     auto const bcSha1 = SHA1(hash_unit(*unit_wrapped));
     auto const assemblerOut = [&]() -> std::string {
@@ -368,14 +377,18 @@ ParseFactsResult extract_facts(
       }
     }
     try {
-      std::int32_t decl_flags = options.getDeclFlags();
-      rust::Box<DeclParserOptions> decl_opts =
-        hackc_create_direct_decl_parse_options(
-          decl_flags,
-          options.getAliasedNamespacesConfig());
-      DeclResult decls = hackc_direct_decl_parse(*decl_opts, filename, source_text);
-      FactsResult facts = hackc_decls_to_facts_cpp_ffi(decl_flags, decls, actual_sha1);
-      rust::String json = hackc_facts_to_json_cpp_ffi(
+      auto const decl_flags = options.getDeclFlags();
+      auto const decl_opts = hackc::create_direct_decl_parse_options(
+        decl_flags,
+        options.getAliasedNamespacesConfig()
+      );
+      auto const decls = hackc::direct_decl_parse(
+        *decl_opts, filename, source_text
+      );
+      auto const facts = hackc::decls_to_facts_cpp_ffi(
+        decl_flags, decls, actual_sha1
+      );
+      rust::String json = hackc::facts_to_json_cpp_ffi(
           facts, /* pretty= */ false
       );
       return FactsJSONString { std::string(json) };
@@ -461,7 +474,7 @@ std::unique_ptr<UnitEmitter> compile_unit(
   bool forDebuggerEval,
   const RepoOptionsFlags& options,
   CompileAbortMode mode,
-  DeclProvider* provider
+  hackc::DeclProvider* provider
 ) {
   bool ice = false;
   auto res = hackc_compile(code, filename, sha1, nativeFuncs, isSystemLib,

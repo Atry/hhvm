@@ -31,8 +31,8 @@ namespace detail {
 // Patch must have the following fields:
 //   optional T assign;
 template <typename Patch>
-class AssignPatch : public BaseValuePatch<Patch, AssignPatch<Patch>> {
-  using Base = BaseValuePatch<Patch, AssignPatch>;
+class AssignPatch : public BaseAssignPatch<Patch, AssignPatch<Patch>> {
+  using Base = BaseAssignPatch<Patch, AssignPatch>;
   using T = typename Base::value_type;
 
  public:
@@ -53,10 +53,11 @@ class AssignPatch : public BaseValuePatch<Patch, AssignPatch<Patch>> {
 
 // Patch must have the following fields:
 //   optional T assign;
+//   bool clear;
 //   bool invert;
 template <typename Patch>
-class BoolPatch : public BaseValuePatch<Patch, BoolPatch<Patch>> {
-  using Base = BaseValuePatch<Patch, BoolPatch>;
+class BoolPatch : public BaseClearPatch<Patch, BoolPatch<Patch>> {
+  using Base = BaseClearPatch<Patch, BoolPatch>;
   using T = typename Base::value_type;
 
  public:
@@ -72,34 +73,36 @@ class BoolPatch : public BaseValuePatch<Patch, BoolPatch<Patch>> {
   }
 
   void apply(T& val) const {
-    if (!applyAssign(val) && *data_.invert()) {
+    if (!Base::template applyAssignAndClear<type::bool_t>(val) &&
+        *data_.invert()) {
       val = !val;
     }
   }
 
   template <typename U>
   void merge(U&& next) {
-    if (!mergeAssign(std::forward<U>(next))) {
+    if (!mergeAssignAndClear(std::forward<U>(next))) {
       *data_.invert() ^= *next.toThrift().invert();
     }
   }
 
  private:
-  using Base::applyAssign;
   using Base::assignOr;
   using Base::data_;
-  using Base::mergeAssign;
+  using Base::mergeAssignAndClear;
 
   friend BoolPatch operator!(BoolPatch val) { return (val.invert(), val); }
 };
 
 // Patch must have the following fields:
 //   optional T assign;
+//   bool clear;
 //   T add;
 template <typename Patch>
-class NumberPatch : public BaseValuePatch<Patch, NumberPatch<Patch>> {
-  using Base = BaseValuePatch<Patch, NumberPatch>;
+class NumberPatch : public BaseClearPatch<Patch, NumberPatch<Patch>> {
+  using Base = BaseClearPatch<Patch, NumberPatch>;
   using T = typename Base::value_type;
+  using Tag = type::infer_tag<T>;
 
  public:
   using Base::apply;
@@ -130,14 +133,14 @@ class NumberPatch : public BaseValuePatch<Patch, NumberPatch<Patch>> {
   }
 
   void apply(T& val) const {
-    if (!applyAssign(val)) {
+    if (!Base::template applyAssignAndClear<Tag>(val)) {
       val += *data_.add();
     }
   }
 
   template <typename U>
   void merge(U&& next) {
-    if (!mergeAssign(std::forward<U>(next))) {
+    if (!mergeAssignAndClear(std::forward<U>(next))) {
       *data_.add() += *next.toThrift().add();
     }
   }
@@ -155,10 +158,9 @@ class NumberPatch : public BaseValuePatch<Patch, NumberPatch<Patch>> {
   }
 
  private:
-  using Base::applyAssign;
   using Base::assignOr;
   using Base::data_;
-  using Base::mergeAssign;
+  using Base::mergeAssignAndClear;
 
   template <typename U>
   friend NumberPatch operator+(NumberPatch lhs, U&& rhs) {
@@ -179,34 +181,72 @@ class NumberPatch : public BaseValuePatch<Patch, NumberPatch<Patch>> {
   }
 };
 
+// Base class for string/binary patch types.
+//
 // Patch must have the following fields:
 //   optional T assign;
 //   bool clear;
 //   T append;
 //   T prepend;
+template <typename Patch, typename Derived>
+class BaseStringPatch : public BaseContainerPatch<Patch, Derived> {
+  using Base = BaseContainerPatch<Patch, Derived>;
+
+ public:
+  using Base::Base;
+  using Base::operator=;
+
+  template <typename U>
+  static Derived createPrepend(U&& val) {
+    Derived patch;
+    patch.prepend(std::forward<U>(val));
+    return patch;
+  }
+
+  template <typename... Args>
+  static Derived createAppend(Args&&... args) {
+    Derived patch;
+    patch.append(std::forward<Args>(args)...);
+    return patch;
+  }
+
+  template <typename U>
+  Derived& operator+=(U&& val) {
+    derived().append(std::forward<U>(val));
+    return derived();
+  }
+
+ protected:
+  using Base::assignOr;
+  using Base::data_;
+  using Base::derived;
+
+ private:
+  template <typename U>
+  friend Derived operator+(Derived lhs, U&& rhs) {
+    return lhs += std::forward<U>(rhs);
+  }
+  template <typename U>
+  friend Derived operator+(U&& lhs, Derived rhs) {
+    rhs.prepend(std::forward<U>(lhs));
+    return rhs;
+  }
+};
+
+// Patch must have the following fields:
+//   optional string assign;
+//   bool clear;
+//   string append;
+//   string prepend;
 template <typename Patch>
-class StringPatch : public BaseClearValuePatch<Patch, StringPatch<Patch>> {
-  using Base = BaseClearValuePatch<Patch, StringPatch>;
+class StringPatch : public BaseStringPatch<Patch, StringPatch<Patch>> {
+  using Base = BaseStringPatch<Patch, StringPatch>;
   using T = typename Base::value_type;
 
  public:
   using Base::apply;
   using Base::Base;
   using Base::operator=;
-
-  template <typename... Args>
-  static StringPatch createAppend(Args&&... args) {
-    StringPatch patch;
-    patch.append(std::forward<Args>(args)...);
-    return patch;
-  }
-
-  template <typename U>
-  static StringPatch createPrepend(U&& val) {
-    StringPatch patch;
-    patch.prepend(std::forward<U>(val));
-    return patch;
-  }
 
   template <typename... Args>
   void append(Args&&... args) {
@@ -220,10 +260,7 @@ class StringPatch : public BaseClearValuePatch<Patch, StringPatch<Patch>> {
   }
 
   void apply(T& val) const {
-    if (!applyAssign(val)) {
-      if (data_.clear() == true) {
-        val.clear();
-      }
+    if (!applyAssignOrClear(val)) {
       val = *data_.prepend() + std::move(val) + *data_.append();
     }
   }
@@ -237,57 +274,27 @@ class StringPatch : public BaseClearValuePatch<Patch, StringPatch<Patch>> {
     }
   }
 
-  template <typename U>
-  StringPatch& operator+=(U&& val) {
-    assignOr(*data_.append()) += std::forward<U>(val);
-    return *this;
-  }
-
  private:
-  using Base::applyAssign;
+  using Base::applyAssignOrClear;
   using Base::assignOr;
   using Base::data_;
   using Base::mergeAssignAndClear;
-
-  template <typename U>
-  friend StringPatch operator+(StringPatch lhs, U&& rhs) {
-    return lhs += std::forward<U>(rhs);
-  }
-  template <typename U>
-  friend StringPatch operator+(U&& lhs, StringPatch rhs) {
-    rhs.prepend(std::forward<U>(lhs));
-    return rhs;
-  }
 };
 
 // Patch must have the following fields:
-//   optional T assign;
+//   optional standard.ByteBuffer assign;
 //   bool clear;
-//   T append;
-//   T prepend;
+//   standard.ByteBuffer append;
+//   standard.ByteBuffer prepend;
 template <typename Patch>
-class BinaryPatch : public BaseClearValuePatch<Patch, BinaryPatch<Patch>> {
-  using Base = BaseClearValuePatch<Patch, BinaryPatch>;
+class BinaryPatch : public BaseStringPatch<Patch, BinaryPatch<Patch>> {
+  using Base = BaseStringPatch<Patch, BinaryPatch>;
   using T = typename Base::value_type;
 
  public:
   using Base::apply;
   using Base::Base;
   using Base::operator=;
-
-  template <typename... Args>
-  static BinaryPatch createAppend(Args&&... args) {
-    BinaryPatch patch;
-    patch.append(std::forward<Args>(args)...);
-    return patch;
-  }
-
-  template <typename U>
-  static BinaryPatch createPrepend(U&& val) {
-    BinaryPatch patch;
-    patch.prepend(std::forward<U>(val));
-    return patch;
-  }
 
   template <typename... Args>
   void append(Args&&... args) {
@@ -308,14 +315,9 @@ class BinaryPatch : public BaseClearValuePatch<Patch, BinaryPatch<Patch>> {
   }
 
   void apply(T& val) const {
-    if (applyAssign(val)) {
+    if (applyAssignOrClear(val)) {
       return;
     }
-
-    if (data_.clear() == true) {
-      val.clear();
-    }
-
     folly::IOBufQueue queue{folly::IOBufQueue::cacheChainLength()};
     queue.append(std::move(*data_.prepend()));
     queue.append(val);
@@ -338,27 +340,11 @@ class BinaryPatch : public BaseClearValuePatch<Patch, BinaryPatch<Patch>> {
     }
   }
 
-  template <typename U>
-  BinaryPatch& operator+=(U&& val) {
-    append(std::forward<U>(val));
-    return *this;
-  }
-
  private:
-  using Base::applyAssign;
+  using Base::applyAssignOrClear;
   using Base::assignOr;
   using Base::data_;
   using Base::mergeAssignAndClear;
-
-  template <typename U>
-  friend BinaryPatch operator+(BinaryPatch lhs, U&& rhs) {
-    return lhs += std::forward<U>(rhs);
-  }
-  template <typename U>
-  friend BinaryPatch operator+(U&& lhs, BinaryPatch rhs) {
-    rhs.prepend(std::forward<U>(lhs));
-    return rhs;
-  }
 };
 
 } // namespace detail

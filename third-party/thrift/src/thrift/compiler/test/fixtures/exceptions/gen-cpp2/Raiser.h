@@ -50,18 +50,34 @@ class ServiceHandler<::cpp2::Raiser> : public apache::thrift::ServerInterface {
   virtual void doBland();
   virtual folly::Future<folly::Unit> future_doBland();
   virtual folly::SemiFuture<folly::Unit> semifuture_doBland();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_doBland();
+  virtual folly::coro::Task<void> co_doBland(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_doBland(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback);
   virtual void doRaise();
   virtual folly::Future<folly::Unit> future_doRaise();
   virtual folly::SemiFuture<folly::Unit> semifuture_doRaise();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_doRaise();
+  virtual folly::coro::Task<void> co_doRaise(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_doRaise(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback);
   virtual void get200(::std::string& /*_return*/);
   virtual folly::Future<std::unique_ptr<::std::string>> future_get200();
   virtual folly::SemiFuture<std::unique_ptr<::std::string>> semifuture_get200();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_get200();
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_get200(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_get200(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::std::string>>> callback);
   virtual void get500(::std::string& /*_return*/);
   virtual folly::Future<std::unique_ptr<::std::string>> future_get500();
   virtual folly::SemiFuture<std::unique_ptr<::std::string>> semifuture_get500();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_get500();
+  virtual folly::coro::Task<std::unique_ptr<::std::string>> co_get500(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_get500(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::std::string>>> callback);
  private:
   static ::cpp2::RaiserServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -85,7 +101,7 @@ class RaiserSvNull : public ::apache::thrift::ServiceHandler<Raiser> {
   void get500(::std::string& /*_return*/) override;
 };
 
-class RaiserAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class RaiserAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -100,8 +116,8 @@ class RaiserAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<RaiserAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<RaiserAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const RaiserAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const RaiserAsyncProcessor::ProcessMap kOwnProcessMap_;

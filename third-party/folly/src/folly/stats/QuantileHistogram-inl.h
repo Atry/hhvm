@@ -20,13 +20,16 @@ namespace folly {
 
 /*static*/
 template <class Q>
-QuantileHistogramBase<Q> QuantileHistogramBase<Q>::merge(
-    Range<const ::folly::QuantileHistogramBase<Q>*> qhists) {
+QuantileHistogram<Q> QuantileHistogram<Q>::merge(
+    Range<const ::folly::QuantileHistogram<Q>*> qhists) {
   if (qhists.empty()) {
-    return QuantileHistogramBase<Q>{};
+    return QuantileHistogram<Q>{};
   }
 
-  QuantileHistogramBase<Q> merged{qhists[0]};
+  QuantileHistogram<Q> merged{qhists[0]};
+  if (qhists.size() == 1) {
+    return merged;
+  }
   merged.count_ = 0;
 
   for (const auto qhist : qhists) {
@@ -35,7 +38,7 @@ QuantileHistogramBase<Q> QuantileHistogramBase<Q>::merge(
       merged.locations_[0] = qhist.min();
     }
     if (qhist.max() > merged.max()) {
-      merged.locations_[Q::kNumQuantiles - 1] = qhist.max();
+      merged.locations_[quantiles().size() - 1] = qhist.max();
     }
   }
 
@@ -43,7 +46,7 @@ QuantileHistogramBase<Q> QuantileHistogramBase<Q>::merge(
     return merged;
   }
 
-  for (size_t i = 0; i < Q::kNumQuantiles; i++) {
+  for (size_t i = 0; i < quantiles().size(); i++) {
     double weighted = 0.0;
     for (const auto qhist : qhists) {
       weighted += qhist.locations_[i] * qhist.count();
@@ -55,9 +58,9 @@ QuantileHistogramBase<Q> QuantileHistogramBase<Q>::merge(
 }
 
 template <class Q>
-QuantileHistogramBase<Q> QuantileHistogramBase<Q>::merge(
+QuantileHistogram<Q> QuantileHistogram<Q>::merge(
     Range<const double*> unsortedValues) const {
-  QuantileHistogramBase<Q> merged{*this};
+  QuantileHistogram<Q> merged{*this};
   for (const double val : unsortedValues) {
     merged.addValue(val);
   }
@@ -65,14 +68,14 @@ QuantileHistogramBase<Q> QuantileHistogramBase<Q>::merge(
 }
 
 template <class Q>
-void QuantileHistogramBase<Q>::addValue(double value) {
+void QuantileHistogram<Q>::addValue(double value) {
   if (count() == 0) {
     locations_.fill(value);
     count_ = 1;
     return;
   }
 
-  const std::array<double, Q::kNumQuantiles> oldLocations{locations_};
+  const auto oldLocations = locations_;
   size_t bucketIndex = addValueImpl(value, oldLocations);
 
   // These two for loops correct for situations where one location shifts past
@@ -97,7 +100,7 @@ void QuantileHistogramBase<Q>::addValue(double value) {
  * Estimates the value of the given quantile.
  */
 template <class Q>
-double QuantileHistogramBase<Q>::estimateQuantile(double q) const {
+double QuantileHistogram<Q>::estimateQuantile(double q) const {
   if (q <= quantiles().front()) {
     return min();
   }
@@ -126,10 +129,10 @@ double QuantileHistogramBase<Q>::estimateQuantile(double q) const {
 }
 
 template <class Q>
-std::string QuantileHistogramBase<Q>::debugString() const {
+std::string QuantileHistogram<Q>::debugString() const {
   std::string ret = folly::to<std::string>(
       "num quantiles: ",
-      Q::kNumQuantiles,
+      quantiles().size(),
       ", count: ",
       count(),
       ", min: ",
@@ -147,8 +150,8 @@ std::string QuantileHistogramBase<Q>::debugString() const {
 
 /*inline*/
 template <class Q>
-size_t QuantileHistogramBase<Q>::addValueImpl(
-    double value, const std::array<double, Q::kNumQuantiles>& oldLocations) {
+size_t QuantileHistogram<Q>::addValueImpl(
+    double value, const decltype(Q::kQuantiles)& oldLocations) {
   size_t bucketIndex = 0;
   for (size_t i = 1; i < locations_.size() - 1; i++) {
     // We can approximate any quantile by starting with a quantile tracker
@@ -200,7 +203,7 @@ size_t QuantileHistogramBase<Q>::addValueImpl(
 }
 
 template <class Q>
-void QuantileHistogramBase<Q>::dcheckSane() const {
+void QuantileHistogram<Q>::dcheckSane() const {
   DCHECK_LT(count(), 1ULL << 48) << debugString();
 
   for (size_t i = 0; i < quantiles().size() - 1; i++) {
@@ -210,6 +213,53 @@ void QuantileHistogramBase<Q>::dcheckSane() const {
   for (size_t i = 0; i < locations_.size() - 1; i++) {
     DCHECK_LE(locations_[i], locations_[i + 1]) << debugString();
   }
+}
+
+template <class Q>
+void CPUShardedQuantileHistogram<Q>::addValue(double value) {
+  histBuilder_.append(value);
+}
+
+template <class Q>
+double CPUShardedQuantileHistogram<Q>::estimateQuantile(double q) {
+  SharedMutex::WriteHolder r{&mtx_};
+  flush();
+  return mergedHist_.estimateQuantile(q);
+}
+
+template <class Q>
+uint64_t CPUShardedQuantileHistogram<Q>::count() {
+  SharedMutex::WriteHolder r{&mtx_};
+  flush();
+  return mergedHist_.count();
+}
+
+template <class Q>
+double CPUShardedQuantileHistogram<Q>::min() {
+  SharedMutex::WriteHolder r{&mtx_};
+  flush();
+  return mergedHist_.min();
+}
+
+template <class Q>
+double CPUShardedQuantileHistogram<Q>::max() {
+  SharedMutex::WriteHolder r{&mtx_};
+  flush();
+  return mergedHist_.max();
+}
+
+template <class Q>
+std::string CPUShardedQuantileHistogram<Q>::debugString() {
+  SharedMutex::WriteHolder r{&mtx_};
+  flush();
+  return mergedHist_.debugString();
+}
+
+template <class Q>
+void CPUShardedQuantileHistogram<Q>::flush() {
+  auto built = histBuilder_.build();
+  mergedHist_ = mergedHist_.merge(
+      std::array<QuantileHistogram<Q>, 2>{mergedHist_, built});
 }
 
 } // namespace folly

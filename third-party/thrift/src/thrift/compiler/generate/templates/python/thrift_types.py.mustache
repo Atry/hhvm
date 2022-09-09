@@ -54,7 +54,7 @@ class {{> structs/unadapted_name}}(metaclass={{!
             {{#field:type}}{{^type:base?}}lambda: {{/type:base?}}{{ >types/typeinfo }}{{/field:type}},  # typeinfo
             {{#field:user_default_value}}{{#field:type}}{{^type:base?}}lambda: {{/type:base?}}{{/field:type}}{{> types/constant_value }}{{/field:user_default_value}}{{!
             }}{{^field:user_default_value}}None{{/field:user_default_value}},  # default value
-            {{> fields/adapter_class }},  # adapter class
+            {{> fields/adapter_info }},  # adapter info
         ),
         {{/struct:fields_and_mixin_fields}}
     )
@@ -103,7 +103,7 @@ class {{> structs/unadapted_name}}(metaclass={{!
 {{#struct:has_adapter?}}
 
 
-{{struct:name}} = {{struct:adapter_type_hint}}
+{{struct:name}} = {{adapter:type_hint}}{{#adapter:is_generic?}}[{{> structs/unadapted_name}}]{{/adapter:is_generic?}}
 {{/struct:has_adapter?}}{{!
 }}{{/program:structs}}
 
@@ -156,14 +156,29 @@ _fbthrift_python_types.fill_specs(*_fbthrift_all_structs)
 
 {{#program:constants}}
 
-{{constant:name}} = {{#constant:value}}{{> types/constant_value}}{{/constant:value}}
+{{#constant:has_adapter?}}_fbthrift_unadapted_{{/constant:has_adapter?}}{{constant:name}} = {{#constant:value}}{{> types/constant_value}}{{/constant:value}}
+{{#constant:has_adapter?}}
+{{constant:name}} = {{constant:adapter_name}}.from_thrift(
+    _fbthrift_unadapted_{{constant:name}},
+    transitive_annotation={{#constant:is_adapter_transitive?}}{{!
+        }}{{#constant:transitive_adapter_annotation}}{{> types/constant_value }}{{/constant:transitive_adapter_annotation}}{{!
+    }}{{/constant:is_adapter_transitive?}}{{!
+    }}{{^constant:is_adapter_transitive?}}{{!
+        }}None
+    }}{{/constant:is_adapter_transitive?}},
+)
+{{/constant:has_adapter?}}
 {{/program:constants}}
 {{/program:constants?}}
 {{#program:typedefs?}}
 
 {{#program:typedefs}}
-{{typedef:name}} = {{#typedef:has_adapter?}}{{typedef:adapter_type_hint}}{{/typedef:has_adapter?}}{{!
-}}{{^typedef:has_adapter?}}{{#typedef:type}}{{> types/python_type}}{{/typedef:type}}{{/typedef:has_adapter?}}
+{{typedef:name}} = {{#typedef:has_adapter?}}{{!
+    }}{{adapter:type_hint}}{{#adapter:is_generic?}}[{{#typedef:type}}{{> types/python_type}}{{/typedef:type}}]{{/adapter:is_generic?}}{{!
+}}{{/typedef:has_adapter?}}{{!
+}}{{^typedef:has_adapter?}}{{!
+    }}{{#typedef:type}}{{> types/python_type}}{{/typedef:type}}{{!
+}}{{/typedef:has_adapter?}}
 {{/program:typedefs}}
 {{/program:typedefs?}}
 {{#program:services?}}

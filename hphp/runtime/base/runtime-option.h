@@ -77,6 +77,11 @@ enum class RepoMode {
   ReadWrite = 2,
 };
 
+namespace hackc {
+  struct HhbcFlags;
+  struct ParserFlags;
+}
+
 /*
  * The bare RepoOptions information that the parser cares about.
  */
@@ -114,10 +119,10 @@ struct RepoOptionsFlags {
 
   const SHA1& cacheKeySha1() const { return m_sha1; }
 
-  std::uint32_t getCompilerFlags() const;
   ParserEnv getParserEnvironment() const;
   std::uint32_t getDeclFlags() const;
-  std::uint32_t getParserFlags() const;
+  void initHhbcFlags(hackc::HhbcFlags&) const;
+  void initParserFlags(hackc::ParserFlags&) const;
   std::string getAliasedNamespacesConfig() const;
 
   std::string autoloadQuery() const { return Query; }
@@ -515,7 +520,6 @@ struct RuntimeOption {
    *   RuntimeOption::IncludeRoots["$LIB_ROOT"] = "lib";
    */
   static std::map<std::string, std::string> IncludeRoots;
-  static std::map<std::string, std::string> AutoloadRoots;
 
   static bool AutoloadEnabled;
   static bool AutoloadEnableExternFactExtractor;
@@ -1423,12 +1427,6 @@ struct RuntimeOption {
   F(int32_t, RequestTearingSkewMicros, 1500)                            \
   F(bool,    SampleRequestTearingForce, true)                           \
   F(bool, EnableAbstractContextConstants, true)                         \
-  /* For ReflectionTypeConstant::isAbstract when is abstract w/ default
-   * 0 - return true iff abstract w/o default
-   * 1 - return true iff abstract w/o default, raise warning if abstract w/
-   *     default
-   * 2 - return true iff abstract w/ or w/o default */                  \
-  F(uint32_t, TypeconstAbstractDefaultReflectionIsAbstract, 0)          \
   F(bool, AbstractContextConstantUninitAccess, false)                   \
   F(bool, TraitConstantInterfaceBehavior, false)                        \
   /* 0 nothing, 1 notice, 2 error */                                    \

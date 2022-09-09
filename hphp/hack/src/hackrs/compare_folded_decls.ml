@@ -121,6 +121,51 @@ let fold_and_compare_single_decl
       ctx
       decl_class_name
   in
+  (* Incidentally test here that Rust and OCaml produce the same marshaled
+     bytes. *)
+  let ocaml_marshaled = Marshal.to_string ocaml_decl_opt [] in
+  let rust_marshaled = Ocamlrep_marshal_ffi.to_string ocaml_decl_opt [] in
+  let _ =
+    if not (String.equal rust_marshaled ocaml_marshaled) then
+      failwith
+        (Printf.sprintf
+           "Marshaling of '%s' differs between Rust and OCaml. This indicates 'ocamlrep_marshal_output_value_to_string' is broken."
+           decl_class_name)
+    else
+      ()
+  in
+  (* Another incidental test here, this time that Rust unmarshaling works as
+     expected. *)
+  let rust_decl_opt = Ocamlrep_marshal_ffi.from_string rust_marshaled 0 in
+  let rust_read_back_matched =
+    match (ocaml_decl_opt, rust_decl_opt) with
+    | (Some (ocaml_decl, _), Some (rust_decl, _)) ->
+      String.equal
+        (Decl_defs.show_decl_class_type ocaml_decl)
+        (Decl_defs.show_decl_class_type rust_decl)
+    | (None, None) -> true
+    | _ -> false
+  in
+  let _ =
+    if not rust_read_back_matched then begin
+      Printf.printf "Rust decl unmarshaling failed:\n%!";
+      if Option.is_some ocaml_decl_opt then
+        Printf.printf
+          "ocaml:\n%s\n!"
+          (Decl_defs.show_decl_class_type
+             (fst (Option.value_exn ocaml_decl_opt)))
+      else
+        Printf.printf "ocaml:\nNone\n";
+      if Option.is_some rust_decl_opt then
+        Printf.printf
+          "rust:\n%s\n!"
+          (Decl_defs.show_decl_class_type
+             (fst (Option.value_exn rust_decl_opt)))
+      else
+        Printf.printf "ocaml:\nNone\n"
+    end
+  in
+  (* The real test: are the Rust decl and OCaml decl the same? *)
   match ocaml_decl_opt with
   | Some (ocaml_decl, _) ->
     let is_identical =

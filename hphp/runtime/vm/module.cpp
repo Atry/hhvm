@@ -86,6 +86,13 @@ bool will_symbol_raise_module_boundary_violation(const Sym* symbol,
 
 template bool will_symbol_raise_module_boundary_violation(const Func*, const Func*);
 template bool will_symbol_raise_module_boundary_violation(const Func*, const MemberLookupContext*);
+template bool will_symbol_raise_module_boundary_violation(const Class::Prop*, const MemberLookupContext*);
+template bool will_symbol_raise_module_boundary_violation(const Class::Prop*, const Func*);
 template bool will_symbol_raise_module_boundary_violation(const Class*, const Func*);
+
+bool Module::warningsEnabled(const Func* f) {
+  if (RO::EvalEnforceModules == 0) return false;
+  return RO::EvalEnforceModules == 1 || f->attrs() & AttrInternalSoft;
+}
 
 } // namespace HPHP

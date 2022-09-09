@@ -16,6 +16,7 @@
 
 #include "hphp/runtime/base/runtime-option.h"
 
+#include "hphp/hack/src/hackc/ffi_bridge/compiler_ffi.rs.h"
 #include "hphp/runtime/base/autoload-handler.h"
 #include "hphp/runtime/base/bespoke-array.h"
 #include "hphp/runtime/base/builtin-functions.h"
@@ -303,28 +304,6 @@ ParserEnv RepoOptionsFlags::getParserEnvironment() const {
     };
 }
 
-// Mapping must match HHBCFlags in compile.rs
-std::uint32_t RepoOptionsFlags::getCompilerFlags() const {
-  std::uint32_t hhbc_flags = 0;
-
-  #define HHBC_FLAGS()                                          \
-    SETFLAGS(LTRAssign, 0)                                      \
-    SETFLAGS(UVS, 1)                                            \
-    SETFLAGS(RuntimeOption::RepoAuthoritative, 4)               \
-    SETFLAGS(RuntimeOption::EvalJitEnableRenameFunction, 5)     \
-    SETFLAGS(RuntimeOption::EvalLogExternCompilerPerf, 6)       \
-    SETFLAGS(RuntimeOption::EnableIntrinsicsExtension, 7)       \
-    SETFLAGS(RuntimeOption::EvalEmitClsMethPointers, 10)        \
-    SETFLAGS(RuntimeOption::EvalEmitMethCallerFuncPointers, 11) \
-    SETFLAGS(RuntimeOption::EvalFoldLazyClassKeys, 15)
-
-  #define SETFLAGS(flag, n)                                     \
-    if (flag) {hhbc_flags |= 1 << n;}
-    HHBC_FLAGS()
-  #undef SETFLAGS
-  return hhbc_flags;
-}
-
 std::string RepoOptionsFlags::getAliasedNamespacesConfig() const {
   folly::dynamic m_config = folly::dynamic::object();
   m_config["hhvm.aliased_namespaces"] =
@@ -332,8 +311,8 @@ std::string RepoOptionsFlags::getAliasedNamespacesConfig() const {
   return folly::toJson(m_config);
 }
 
-std::uint32_t RepoOptionsFlags::getDeclFlags() const {
-  int32_t flags =
+uint32_t RepoOptionsFlags::getDeclFlags() const {
+  uint32_t flags =
     DisableXHPElementMangling << 0 |
     1 << 1 | // interpret_soft_types_as_like_types
     AllowNewAttributeSyntax   << 2 |
@@ -343,30 +322,24 @@ std::uint32_t RepoOptionsFlags::getDeclFlags() const {
   return flags;
 }
 
-// Mapping must match ParserFlags in compile.rs
-std::uint32_t RepoOptionsFlags::getParserFlags() const {
-  std::uint32_t parser_flags = 0;
+void RepoOptionsFlags::initHhbcFlags(hackc::HhbcFlags& flags) const {
+  flags.ltr_assign = LTRAssign;
+  flags.uvs = UVS;
+}
 
-  #define PARSER_FLAGS()                                       \
-    SETFLAGS(AbstractStaticProps, 0)                           \
-    SETFLAGS(AllowNewAttributeSyntax, 1)                       \
-    SETFLAGS(AllowUnstableFeatures, 2)                         \
-    SETFLAGS(ConstDefaultFuncArgs, 3)                          \
-    SETFLAGS(ConstStaticProps, 4)                              \
-    SETFLAGS(DisableLvalAsAnExpression, 8)                     \
-    SETFLAGS(DisallowInstMeth, 10)                             \
-    SETFLAGS(DisableXHPElementMangling, 11)                    \
-    SETFLAGS(DisallowFunAndClsMethPseudoFuncs, 12)             \
-    SETFLAGS(DisallowFuncPtrsInConstants, 13)                  \
-    SETFLAGS(EnableEnumClasses,16)                             \
-    SETFLAGS(EnableXHPClassModifier,17)                        \
-    SETFLAGS(RuntimeOption::EnableClassLevelWhereClauses, 20)  \
-
-  #define SETFLAGS(flag, n)                                    \
-    if (flag) {parser_flags |= 1 << n;}
-    PARSER_FLAGS()
-  #undef SETFLAGS
-  return parser_flags;
+void RepoOptionsFlags::initParserFlags(hackc::ParserFlags& flags) const {
+  flags.abstract_static_props = AbstractStaticProps;
+  flags.allow_new_attribute_syntax = AllowNewAttributeSyntax;
+  flags.allow_unstable_features = AllowUnstableFeatures;
+  flags.const_default_func_args = ConstDefaultFuncArgs;
+  flags.const_static_props = ConstStaticProps;
+  flags.disable_lval_as_an_expression = DisableLvalAsAnExpression;
+  flags.disallow_inst_meth = DisallowInstMeth;
+  flags.disable_xhp_element_mangling = DisableXHPElementMangling;
+  flags.disallow_fun_and_cls_meth_pseudo_funcs = DisallowFunAndClsMethPseudoFuncs;
+  flags.disallow_func_ptrs_in_constants = DisallowFuncPtrsInConstants;
+  flags.enable_enum_classes = EnableEnumClasses;
+  flags.enable_xhp_class_modifier = EnableXHPClassModifier;
 }
 
 const RepoOptions& RepoOptions::forFile(const char* path) {
@@ -850,7 +823,6 @@ std::set<std::string> RuntimeOption::XboxPasswords;
 std::string RuntimeOption::SourceRoot = Process::GetCurrentDirectory() + '/';
 std::vector<std::string> RuntimeOption::IncludeSearchPaths;
 std::map<std::string, std::string> RuntimeOption::IncludeRoots;
-std::map<std::string, std::string> RuntimeOption::AutoloadRoots;
 bool RuntimeOption::AutoloadEnabled;
 bool RuntimeOption::AutoloadEnableExternFactExtractor;
 std::string RuntimeOption::AutoloadDBPath;

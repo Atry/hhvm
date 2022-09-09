@@ -315,10 +315,20 @@ pub mod slab;
 pub use arena::Arena;
 pub use block::Block;
 pub use block::BlockBuilder;
+pub use block::Color;
+pub use block::Header;
+pub use block::ABSTRACT_TAG;
 pub use block::CLOSURE_TAG;
+pub use block::CONT_TAG;
 pub use block::CUSTOM_TAG;
+pub use block::DOUBLE_ARRAY_TAG;
 pub use block::DOUBLE_TAG;
+pub use block::FORCING_TAG;
+pub use block::FORWARD_TAG;
+pub use block::INFIX_TAG;
+pub use block::LAZY_TAG;
 pub use block::NO_SCAN_TAG;
+pub use block::OBJECT_TAG;
 pub use block::STRING_TAG;
 pub use bumpalo::Bump;
 pub use cache::MemoizationCache;
@@ -336,6 +346,18 @@ pub use impls::vec_from_ocaml_set;
 pub use impls::vec_from_ocaml_set_in;
 pub use value::OpaqueValue;
 pub use value::Value;
+
+// TODO: find the right forever home for these constants
+
+// 'mlvalues.h'
+pub const MAX_WOSIZE: usize = ((1_isize << 54) - 1) as usize;
+pub const DOUBLE_WOSIZE: usize = std::mem::size_of::<f64>() / std::mem::size_of::<usize>();
+
+// 'gc.h'
+pub const CAML_WHITE: usize = 0 << 8;
+pub const CAML_GRAY: usize = 1 << 8;
+pub const CAML_BLUE: usize = 2 << 8;
+pub const CAML_BLACK: usize = 3 << 8;
 
 /// A data structure that can be converted to an OCaml value.
 ///

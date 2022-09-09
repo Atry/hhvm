@@ -155,6 +155,10 @@ class SerialInteractionIf : public apache::thrift::SerialInteractionTile, public
   virtual void foo();
   virtual folly::Future<folly::Unit> future_foo();
   virtual folly::SemiFuture<folly::Unit> semifuture_foo();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_foo();
+  virtual folly::coro::Task<void> co_foo(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_foo(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback);
   virtual apache::thrift::TileAndResponse<apache::thrift::ServiceHandler<::cpp2::MyService>::MyInteractionIf, void> interact(::std::int32_t /*arg*/);
   virtual folly::Future<apache::thrift::TileAndResponse<apache::thrift::ServiceHandler<::cpp2::MyService>::MyInteractionIf, void>> future_interact(::std::int32_t p_arg);
@@ -202,7 +206,7 @@ class MyServiceSvNull : public ::apache::thrift::ServiceHandler<MyService> {
   void foo() override;
 };
 
-class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -217,10 +221,10 @@ class MyServiceAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<MyServiceAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
-  using InteractionConstructor = GeneratedAsyncProcessor::InteractionConstructor<MyServiceAsyncProcessor>;
-  using InteractionConstructorMap = GeneratedAsyncProcessor::InteractionConstructorMap<InteractionConstructor>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<MyServiceAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
+  using InteractionConstructor = GeneratedAsyncProcessorBase::InteractionConstructor<MyServiceAsyncProcessor>;
+  using InteractionConstructorMap = GeneratedAsyncProcessorBase::InteractionConstructorMap<InteractionConstructor>;
   static const MyServiceAsyncProcessor::ProcessMap& getOwnProcessMap();
   static const MyServiceAsyncProcessor::InteractionConstructorMap& getInteractionConstructorMap();
   std::unique_ptr<apache::thrift::Tile> createInteractionImpl(const std::string& name) override;

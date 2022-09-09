@@ -18,9 +18,11 @@
 
 #include <utility>
 
+#include <folly/dynamic.h>
 #include <thrift/lib/cpp/protocol/TProtocolException.h>
 #include <thrift/lib/cpp/protocol/TType.h>
 #include <thrift/lib/cpp2/protocol/detail/Object.h>
+#include <thrift/lib/thrift/gen-cpp2/protocol_types.h>
 
 namespace apache::thrift::protocol {
 
@@ -58,7 +60,20 @@ Object parseObject(const folly::IOBuf& buf, bool string_to_binary = true) {
 template <typename Protocol>
 MaskedDecodeResult parseObject(
     const folly::IOBuf& buf, Mask mask, bool string_to_binary = true) {
-  return detail::parseObject<Protocol>(buf, mask, string_to_binary);
+  return detail::parseObject<Protocol>(buf, mask, noneMask(), string_to_binary);
+}
+
+// Schemaless deserialization of thrift serialized data with readMask and
+// writeMask. Only parses values that are masked by readMask. Fields that are
+// not in neither writeMask nor readMask are stored in MaskedData.
+template <typename Protocol>
+MaskedDecodeResult parseObject(
+    const folly::IOBuf& buf,
+    Mask readMask,
+    Mask writeMask,
+    bool string_to_binary = true) {
+  return detail::parseObject<Protocol>(
+      buf, readMask, writeMask, string_to_binary);
 }
 
 // Schemaless serialization of protocol::Object
@@ -78,8 +93,32 @@ std::unique_ptr<folly::IOBuf> serializeObject(const Object& obj) {
   return queue.move();
 }
 
+// Serialization of protocol::Object with MaskedProtocolData.
+template <class Protocol>
+std::unique_ptr<folly::IOBuf> serializeObject(
+    const Object& obj, MaskedProtocolData& protocolData) {
+  assert(*protocolData.protocol() == detail::get_standard_protocol<Protocol>);
+  Protocol prot;
+  folly::IOBufQueue queue(folly::IOBufQueue::cacheChainLength());
+  prot.setOutput(&queue);
+  Value val;
+  val.objectValue_ref() = obj;
+  if (protocolData.data()->full_ref()) { // entire object is not parsed
+    const EncodedValue& value = detail::getByValueId(
+        *protocolData.values(), protocolData.data()->full_ref().value());
+    prot.writeRaw(*value.data());
+  } else if (!protocolData.data()->fields_ref()) { // entire object is parsed
+    detail::serializeValue(prot, val);
+  } else { // use both object and masked data to serialize
+    detail::serializeValue(prot, val, protocolData, *protocolData.data());
+  }
+  return queue.move();
+}
+
 // Returns whether the protocol::Value/ Object is its intrinsic default.
 bool isIntrinsicDefault(const Value& value);
 bool isIntrinsicDefault(const Object& obj);
+folly::dynamic toDynamic(const Value& value);
+folly::dynamic toDynamic(const Object& obj);
 
 } // namespace apache::thrift::protocol

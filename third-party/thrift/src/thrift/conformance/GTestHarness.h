@@ -41,7 +41,7 @@
 #include <thrift/conformance/cpp2/AnyRegistry.h>
 #include <thrift/conformance/cpp2/Object.h>
 #include <thrift/conformance/if/gen-cpp2/ConformanceServiceAsyncClient.h>
-#include <thrift/conformance/if/gen-cpp2/RPCConformanceServiceAsyncClient.h>
+#include <thrift/conformance/if/gen-cpp2/rpc_clients.h>
 #include <thrift/conformance/if/gen-cpp2/test_suite_types.h>
 #include <thrift/lib/cpp/util/EnumUtils.h>
 #include <thrift/lib/cpp2/async/HeaderClientChannel.h>
@@ -85,6 +85,12 @@ std::unique_ptr<Client> createClient(
                 "Unknown channel type: " + std::to_string(int(type)));
         }
       }));
+}
+
+// Creates a client for the localhost.
+template <typename Client>
+std::unique_ptr<Client> createClient(std::string) {
+  throw std::invalid_argument("Unimplemented Method createClient");
 }
 
 // Bundles a server process and client.
@@ -153,33 +159,59 @@ client_fn_map<Client> getServers(ChannelType type = ChannelType::Header) {
           return itr->second->getClient();
         });
   }
+  auto servers = parseCmds(getEnvOrThrow("THRIFT_CONFORMANCE_SERVERS"));
+  for (const auto& entry : servers) {
+    result.emplace(
+        entry.first,
+        [name = std::string(entry.first),
+         server = std::string(entry.second)]() -> Client& {
+          static folly::Synchronized<
+              std::map<std::string_view, std::unique_ptr<Client>>>
+              clients;
+          auto lockedClients = clients.wlock();
+
+          // Get or create Client in the static map.
+          auto itr = lockedClients->find(name);
+          if (itr == lockedClients->end()) {
+            itr = lockedClients->emplace_hint(
+                itr, name, createClient<Client>(server));
+          }
+          return *itr->second;
+        });
+  }
   return result;
 }
 
 testing::AssertionResult runRoundTripTest(
     Client<ConformanceService>& client, const RoundTripTestCase& roundTrip);
 
+testing::AssertionResult runPatchTest(
+    Client<ConformanceService>& client, const PatchOpTestCase& patchTestCase);
+
 testing::AssertionResult runRpcTest(
     Client<RPCConformanceService>& client, const RpcTestCase& rpc);
+
+testing::AssertionResult runBasicRpcTest(
+    Client<BasicRPCConformanceService>& client, const RpcTestCase& rpc);
 
 template <typename Client>
 class ConformanceTest : public testing::Test {
  public:
   ConformanceTest(
-      Client* client,
-      const TestSuite* suite,
-      const conformance::Test* test,
-      const TestCase* testCase,
+      Client& client,
+      const TestSuite& suite,
+      const conformance::Test& test,
+      const TestCase& testCase,
       bool conforming)
       : client_(client),
-        suite_(*suite),
-        test_(*test),
-        testCase_(*testCase),
+        suite_(suite),
+        test_(test),
+        testCase_(testCase),
         conforming_(conforming) {}
 
  protected:
   void TestBody() override {
-    testing::AssertionResult conforming = runTestCase(*client_, testCase_);
+    testing::AssertionResult conforming = runTestCase(client_, testCase_);
     if (conforming_) {
       EXPECT_TRUE(conforming) << "For more detail see:"
                               << std::endl
@@ -196,8 +228,7 @@ class ConformanceTest : public testing::Test {
   }
 
  private:
-  Client* const client_;
-
+  Client& client_;
   const TestSuite& suite_;
   const conformance::Test& test_;
   const TestCase& testCase_;
@@ -220,6 +251,18 @@ testing::AssertionResult runTestCase(Client& client, const TestCase& testCase) {
                         Client,
                         apache::thrift::Client<RPCConformanceService>>) {
         return runRpcTest(client, *testCase.rpc_ref());
+      } else if constexpr (std::is_same_v<
+                               Client,
+                               apache::thrift::Client<
+                                   BasicRPCConformanceService>>) {
+        return runBasicRpcTest(client, *testCase.rpc_ref());
+      }
+      return testing::AssertionFailure() << "Invalid test client.";
+    case TestCaseUnion::Type::objectPatch:
+      if constexpr (std::is_same_v<
+                        Client,
+                        apache::thrift::Client<ConformanceService>>) {
+        return runPatchTest(client, *testCase.objectPatch_ref());
       }
       return testing::AssertionFailure() << "Invalid test client.";
     default:
@@ -232,15 +275,15 @@ testing::AssertionResult runTestCase(Client& client, const TestCase& testCase) {
 template <typename Client>
 void registerTests(
     std::string_view category,
-    const TestSuite* suite,
+    const TestSuite& suite,
     const std::set<std::string>& nonconforming,
     std::function<Client&()> clientFn,
     const char* file,
     int line) {
-  for (const auto& test : *suite->tests()) {
+  for (const auto& test : *suite.tests()) {
     for (const auto& testCase : *test.testCases()) {
       std::string suiteName =
-          fmt::format("{}/{}/{}", category, *suite->name(), *testCase.name());
+          fmt::format("{}/{}/{}", category, *suite.name(), *testCase.name());
       std::string fullName = fmt::format("{}.{}", suiteName, *test.name());
       bool conforming = nonconforming.find(fullName) == nonconforming.end();
       registerTest(
@@ -250,9 +293,9 @@ void registerTests(
           conforming ? nullptr : "nonconforming",
           file,
           line,
-          [&test, &testCase, suite, clientFn, conforming]() {
+          [clientFn, &suite, &test, &testCase, conforming]() {
             return new ConformanceTest<Client>(
-                &clientFn(), suite, &test, &testCase, conforming);
+                clientFn(), suite, test, testCase, conforming);
           });
     }
   }
@@ -273,7 +316,7 @@ class ConformanceTestRegistration {
     for (const auto& entry : clientFns) {
       for (const auto& suite : suites_) {
         registerTests<Client>(
-            entry.first, &suite, nonconforming, entry.second, file, line);
+            entry.first, suite, nonconforming, entry.second, file, line);
       }
     }
   }

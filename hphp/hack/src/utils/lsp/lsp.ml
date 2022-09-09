@@ -1148,14 +1148,19 @@ end
 module ShowStatusFB = struct
   type params = showStatusParams
 
-  and result = ShowMessageRequest.messageActionItem option
+  and result = unit
 
   and showStatusParams = {
-    request: ShowMessageRequest.showMessageRequestParams;
+    request: showStatusRequestParams;
     progress: int option;
     total: int option;
     shortMessage: string option;
     telemetry: Hh_json.json option;
+  }
+
+  and showStatusRequestParams = {
+    type_: MessageType.t;
+    message: string;
   }
 end
 
@@ -1355,3 +1360,38 @@ end
 
 module UriSet = Set.Make (UriKey)
 module UriMap = WrappedMap.Make (UriKey)
+
+let lsp_result_to_log_string = function
+  | InitializeResult _ -> "InitializeResult"
+  | ShutdownResult -> "ShutdownResult"
+  | CodeLensResolveResult _ -> "CodeLensResolveResult"
+  | HoverResult _ -> "HoverResult"
+  | DefinitionResult _ -> "DefinitionResult"
+  | TypeDefinitionResult _ -> "TypeDefinitionResult"
+  | ImplementationResult _ -> "ImplementationResult"
+  | CodeActionResult _ -> "CodeActionResult"
+  | CompletionResult _ -> "CompletionResult"
+  | CompletionItemResolveResult _ -> "CompletionItemResolveResult"
+  | WorkspaceSymbolResult _ -> "WorkspaceSymbolResult"
+  | DocumentSymbolResult _ -> "DocumentSymbolResult"
+  | FindReferencesResult _ -> "FindReferencesResult"
+  | PrepareCallHierarchyResult _ -> "PrepareCallHierarchyResult"
+  | CallHierarchyIncomingCallsResult _ -> "CallHierarchyIncomingCallsResult"
+  | CallHierarchyOutgoingCallsResult _ -> "CallHierarchyOutgoingCallsResult"
+  | DocumentHighlightResult _ -> "DocumentHighlightResult"
+  | TypeCoverageResultFB _ -> "TypeCoverageResultFB"
+  | DocumentFormattingResult _ -> "DocumentFormattingResult"
+  | DocumentRangeFormattingResult _ -> "DocumentRangeFormattingResult"
+  | DocumentOnTypeFormattingResult _ -> "DocumentOnTypeFormattingResult"
+  | ShowMessageRequestResult _ -> "ShowMessageRequestResult"
+  | ShowStatusResultFB _ -> "ShowStatusResultFB"
+  | RageResultFB _ -> "RageResultFB"
+  | RenameResult _ -> "RenameResult"
+  | DocumentCodeLensResult _ -> "DocumentCodeLensResult"
+  | SignatureHelpResult _ -> "SignatureHelpResult"
+  | HackTestStartServerResultFB -> "HackTestStartServerResultFB"
+  | HackTestStopServerResultFB -> "HackTestStopServerResultFB"
+  | HackTestShutdownServerlessResultFB -> "HackTestShutdownServerlessResultFB"
+  | RegisterCapabilityRequestResult -> "RegisterCapabilityRequestResult"
+  | WillSaveWaitUntilResult _ -> "WillSaveWaitUntilResult"
+  | ErrorResult _ -> "ErrorResult"

@@ -89,6 +89,10 @@ class IIf : public apache::thrift::Tile, public apache::thrift::ServerInterface 
   virtual void foo(::cpp2::Foo& /*_return*/);
   virtual folly::Future<std::unique_ptr<::cpp2::Foo>> future_foo();
   virtual folly::SemiFuture<std::unique_ptr<::cpp2::Foo>> semifuture_foo();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<std::unique_ptr<::cpp2::Foo>> co_foo();
+  virtual folly::coro::Task<std::unique_ptr<::cpp2::Foo>> co_foo(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_foo(std::unique_ptr<apache::thrift::HandlerCallback<std::unique_ptr<::cpp2::Foo>>> callback);
  private:
   static ::cpp2::AServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -107,7 +111,7 @@ class ASvNull : public ::apache::thrift::ServiceHandler<A> {
   void foo(::cpp2::Foo& /*_return*/) override;
 };
 
-class AAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class AAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -122,10 +126,10 @@ class AAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<AAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
-  using InteractionConstructor = GeneratedAsyncProcessor::InteractionConstructor<AAsyncProcessor>;
-  using InteractionConstructorMap = GeneratedAsyncProcessor::InteractionConstructorMap<InteractionConstructor>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<AAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
+  using InteractionConstructor = GeneratedAsyncProcessorBase::InteractionConstructor<AAsyncProcessor>;
+  using InteractionConstructorMap = GeneratedAsyncProcessorBase::InteractionConstructorMap<InteractionConstructor>;
   static const AAsyncProcessor::ProcessMap& getOwnProcessMap();
   static const AAsyncProcessor::InteractionConstructorMap& getInteractionConstructorMap();
   std::unique_ptr<apache::thrift::Tile> createInteractionImpl(const std::string& name) override;
@@ -187,14 +191,26 @@ class ServiceHandler<::cpp2::B> : virtual public ::cpp2::ASvIf {
   virtual void bar(std::unique_ptr<::cpp2::Foo> /*foo*/);
   virtual folly::Future<folly::Unit> future_bar(std::unique_ptr<::cpp2::Foo> p_foo);
   virtual folly::SemiFuture<folly::Unit> semifuture_bar(std::unique_ptr<::cpp2::Foo> p_foo);
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<void> co_bar(std::unique_ptr<::cpp2::Foo> p_foo);
+  virtual folly::coro::Task<void> co_bar(apache::thrift::RequestParams params, std::unique_ptr<::cpp2::Foo> p_foo);
+#endif
   virtual void async_tm_bar(std::unique_ptr<apache::thrift::HandlerCallback<void>> callback, std::unique_ptr<::cpp2::Foo> p_foo);
   virtual ::apache::thrift::ServerStream<::std::int32_t> stream_stuff();
   virtual folly::Future<::apache::thrift::ServerStream<::std::int32_t>> future_stream_stuff();
   virtual folly::SemiFuture<::apache::thrift::ServerStream<::std::int32_t>> semifuture_stream_stuff();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<::apache::thrift::ServerStream<::std::int32_t>> co_stream_stuff();
+  virtual folly::coro::Task<::apache::thrift::ServerStream<::std::int32_t>> co_stream_stuff(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_stream_stuff(std::unique_ptr<apache::thrift::HandlerCallback<::apache::thrift::ServerStream<::std::int32_t>>> callback);
   virtual ::apache::thrift::SinkConsumer<::std::int32_t, ::std::int32_t> sink_stuff();
   virtual folly::Future<::apache::thrift::SinkConsumer<::std::int32_t, ::std::int32_t>> future_sink_stuff();
   virtual folly::SemiFuture<::apache::thrift::SinkConsumer<::std::int32_t, ::std::int32_t>> semifuture_sink_stuff();
+#if FOLLY_HAS_COROUTINES
+  virtual folly::coro::Task<::apache::thrift::SinkConsumer<::std::int32_t, ::std::int32_t>> co_sink_stuff();
+  virtual folly::coro::Task<::apache::thrift::SinkConsumer<::std::int32_t, ::std::int32_t>> co_sink_stuff(apache::thrift::RequestParams params);
+#endif
   virtual void async_tm_sink_stuff(std::unique_ptr<apache::thrift::HandlerCallback<::apache::thrift::SinkConsumer<::std::int32_t, ::std::int32_t>>> callback);
  private:
   static ::cpp2::BServiceInfoHolder __fbthrift_serviceInfoHolder;
@@ -230,8 +246,8 @@ class BAsyncProcessor : public ::cpp2::AAsyncProcessor {
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<BAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<BAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
   static const BAsyncProcessor::ProcessMap& getOwnProcessMap();
  private:
   static const BAsyncProcessor::ProcessMap kOwnProcessMap_;
@@ -336,7 +352,7 @@ class CSvNull : public ::apache::thrift::ServiceHandler<C> {
  public:
 };
 
-class CAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
+class CAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessorBase {
  public:
   const char* getServiceName() override;
   void getServiceMetadata(apache::thrift::metadata::ThriftServiceMetadataResponse& response) override;
@@ -351,10 +367,10 @@ class CAsyncProcessor : public ::apache::thrift::GeneratedAsyncProcessor {
   void processSerializedCompressedRequestWithMetadata(apache::thrift::ResponseChannelRequest::UniquePtr req, apache::thrift::SerializedCompressedRequest&& serializedRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata, apache::thrift::protocol::PROTOCOL_TYPES protType, apache::thrift::Cpp2RequestContext* context, folly::EventBase* eb, apache::thrift::concurrency::ThreadManager* tm) override;
   void executeRequest(apache::thrift::ServerRequest&& serverRequest, const apache::thrift::AsyncProcessorFactory::MethodMetadata& methodMetadata) override;
  public:
-  using ProcessFuncs = GeneratedAsyncProcessor::ProcessFuncs<CAsyncProcessor>;
-  using ProcessMap = GeneratedAsyncProcessor::ProcessMap<ProcessFuncs>;
-  using InteractionConstructor = GeneratedAsyncProcessor::InteractionConstructor<CAsyncProcessor>;
-  using InteractionConstructorMap = GeneratedAsyncProcessor::InteractionConstructorMap<InteractionConstructor>;
+  using ProcessFuncs = GeneratedAsyncProcessorBase::ProcessFuncs<CAsyncProcessor>;
+  using ProcessMap = GeneratedAsyncProcessorBase::ProcessMap<ProcessFuncs>;
+  using InteractionConstructor = GeneratedAsyncProcessorBase::InteractionConstructor<CAsyncProcessor>;
+  using InteractionConstructorMap = GeneratedAsyncProcessorBase::InteractionConstructorMap<InteractionConstructor>;
   static const CAsyncProcessor::ProcessMap& getOwnProcessMap();
   static const CAsyncProcessor::InteractionConstructorMap& getInteractionConstructorMap();
   std::unique_ptr<apache::thrift::Tile> createInteractionImpl(const std::string& name) override;

@@ -16,18 +16,22 @@ mod verify;
 use std::io::BufRead;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use ::compile::EnvFlags;
-use ::compile::HHBCFlags;
+use ::compile::HhbcFlags;
 use ::compile::NativeEnv;
 use ::compile::ParserFlags;
 use anyhow::Result;
 use byte_unit::Byte;
 use clap::Parser;
 use hhvm_options::HhvmOptions;
+use log::info;
 use oxidized::decl_parser_options::DeclParserOptions;
 use oxidized::relative_path;
 use oxidized::relative_path::RelativePath;
+
+use crate::profile::DurationEx;
 
 /// Hack Compiler
 #[derive(Parser, Debug, Default)]
@@ -48,13 +52,8 @@ struct Opts {
     #[clap(flatten)]
     files: FileOpts,
 
-    /// Disable toplevel definition elaboration
-    #[clap(long)]
-    disable_toplevel_elaboration: bool,
-
-    /// Mutate the program as if we're in the debugger repl
-    #[clap(long)]
-    for_debugger_eval: bool,
+    #[clap(flatten)]
+    pub(crate) env_flags: EnvFlags,
 
     #[clap(long, default_value("0"))]
     emit_class_pointers: i32,
@@ -81,10 +80,6 @@ struct Opts {
     #[clap(long)]
     pub(crate) use_serialized_decls: bool,
 
-    /// Controls systemlib specific logic
-    #[clap(long)]
-    is_systemlib: bool,
-
     /// [Experimental] Enable Type-Directed Bytecode Compilation
     #[clap(long)]
     type_directed: bool,
@@ -99,6 +94,10 @@ struct FileOpts {
     /// Read a list of files (one-per-line) from this file
     #[clap(long)]
     input_file_list: Option<PathBuf>,
+
+    /// change to directory DIR
+    #[clap(long, short = 'C')]
+    directory: Option<PathBuf>,
 }
 
 #[derive(Parser, Debug)]
@@ -151,15 +150,38 @@ struct FlagCommands {
 }
 
 impl FileOpts {
-    pub fn gather_input_files(&mut self) -> Result<Vec<PathBuf>> {
+    pub fn gather_input_files(&self) -> Result<Vec<PathBuf>> {
         use std::io::BufReader;
         let mut files: Vec<PathBuf> = Default::default();
-        if let Some(list_path) = self.input_file_list.take() {
+        if let Some(list_path) = self.input_file_list.as_ref() {
             for line in BufReader::new(std::fs::File::open(list_path)?).lines() {
-                files.push(Path::new(&line?).to_path_buf());
+                let line = line?;
+                let name = if let Some(directory) = self.directory.as_ref() {
+                    directory.join(Path::new(&line))
+                } else {
+                    PathBuf::from(line)
+                };
+                files.push(name);
             }
         }
-        files.append(&mut self.filenames);
+        for name in &self.filenames {
+            let name = if let Some(directory) = self.directory.as_ref() {
+                directory.join(name)
+            } else {
+                name.to_path_buf()
+            };
+            files.push(name);
+        }
+        Ok(files)
+    }
+
+    pub fn collect_input_files(&self, num_threads: usize) -> Result<Vec<PathBuf>> {
+        info!("Collecting files");
+        let gather_t = Instant::now();
+        let files = self.gather_input_files()?;
+        let files = crate::util::collect_files(&files, None, num_threads)?;
+        let gather_t = gather_t.elapsed();
+        info!("{} files found in {}", files.len(), gather_t.display());
         Ok(files)
     }
 
@@ -169,20 +191,6 @@ impl FileOpts {
 }
 
 impl Opts {
-    pub fn env_flags(&self) -> EnvFlags {
-        let mut flags = EnvFlags::empty();
-        if self.for_debugger_eval {
-            flags |= EnvFlags::FOR_DEBUGGER_EVAL;
-        }
-        if self.disable_toplevel_elaboration {
-            flags |= EnvFlags::DISABLE_TOPLEVEL_ELABORATION;
-        }
-        if self.is_systemlib {
-            flags |= EnvFlags::IS_SYSTEMLIB;
-        }
-        flags
-    }
-
     pub fn decl_opts(&self) -> DeclParserOptions {
         // TODO: share this logic with hackc_create_decl_parse_options()
         let config_opts = options::Options::from_configs(&[Self::AUTO_NAMESPACE_MAP]).unwrap();
@@ -202,18 +210,18 @@ impl Opts {
         }
     }
 
-    pub fn native_env(&self, path: PathBuf) -> Result<NativeEnv<'_>> {
+    pub fn native_env(&self, path: PathBuf) -> Result<NativeEnv> {
         let hhvm_options = &self.hhvm_options;
         let hhvm_config = hhvm_options.to_config()?;
         let parser_flags = ParserFlags::from_hhvm_config(&hhvm_config)?;
-        let hhbc_flags = HHBCFlags::from_hhvm_config(&hhvm_config)?;
+        let hhbc_flags = HhbcFlags::from_hhvm_config(&hhvm_config)?;
         Ok(NativeEnv {
             filepath: RelativePath::make(relative_path::Prefix::Dummy, path),
-            aliased_namespaces: crate::Opts::AUTO_NAMESPACE_MAP,
-            include_roots: crate::Opts::INCLUDE_ROOTS,
+            aliased_namespaces: crate::Opts::AUTO_NAMESPACE_MAP.into(),
+            include_roots: crate::Opts::INCLUDE_ROOTS.into(),
             hhbc_flags,
             parser_flags,
-            flags: self.env_flags(),
+            flags: self.env_flags.clone(),
             emit_class_pointers: self.emit_class_pointers,
             check_int_overflow: self.check_int_overflow,
         })

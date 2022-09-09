@@ -391,7 +391,7 @@ module Primary = struct
       let claim =
         lazy
           ( pos,
-            "Was expecting a constant string, class constant, or int (for shape access)"
+            "Shape access requires a string literal, integer literal, or a class constant"
           )
       in
       (Error_code.InvalidShapeFieldName, claim, lazy [], [])
@@ -1619,6 +1619,7 @@ module Primary = struct
         name: string;
         parent_name: string;
       }
+    | Bad_class_refinement of { pos: Pos.t }
     | Explain_where_constraint of {
         pos: Pos.t;
         in_class: bool;
@@ -1808,6 +1809,7 @@ module Primary = struct
         kind: [ `method_ | `property ];
         name: string;
         is_nullable: bool;
+        ty_reasons: (Pos_or_decl.t * string) list Lazy.t;
       }
     | Unresolved_tyvar_projection of {
         pos: Pos.t;
@@ -2632,6 +2634,12 @@ module Primary = struct
       lazy [],
       [] )
 
+  let bad_class_refinement pos =
+    ( Error_code.InternalError,
+      lazy (pos, "Invalid class refinement"),
+      lazy [],
+      [] )
+
   let explain_where_constraint pos decl_pos in_class =
     ( Error_code.TypeConstraintViolation,
       lazy (pos, "A `where` type constraint is violated here"),
@@ -3211,7 +3219,7 @@ module Primary = struct
     and reason = lazy [(decl_pos, "Parent definition is here")] in
     (Error_code.TraitParentConstructInconsistent, claim, reason, [])
 
-  let top_member pos ctxt ty_name decl_pos kind name is_nullable =
+  let top_member pos ctxt ty_name decl_pos kind name is_nullable ty_reasons =
     let claim =
       Lazy.map ty_name ~f:(fun ty_name ->
           let kind_str =
@@ -3225,7 +3233,15 @@ module Primary = struct
               kind_str
               (Markdown_lite.md_codify name)
               ty_name ))
-    and reason = lazy [(decl_pos, "Definition is here")]
+    and reason =
+      lazy
+        begin
+          let reasons = Lazy.force ty_reasons in
+          if List.length reasons = 0 then
+            [(decl_pos, "Definition is here")]
+          else
+            reasons
+        end
     and code =
       Error_code.(
         match ctxt with
@@ -5495,6 +5511,7 @@ module Primary = struct
       bad_conditional_support_dynamic pos child parent ty_name self_ty_name
     | Bad_decl_override { pos; name; parent_name } ->
       bad_decl_override name pos parent_name
+    | Bad_class_refinement { pos } -> bad_class_refinement pos
     | Explain_where_constraint { pos; decl_pos; in_class } ->
       explain_where_constraint pos decl_pos in_class
     | Explain_constraint pos -> explain_constraint pos
@@ -5613,8 +5630,9 @@ module Primary = struct
       kind_mismatch pos decl_pos tparam_name expected_kind actual_kind
     | Trait_parent_construct_inconsistent { pos; decl_pos } ->
       trait_parent_construct_inconsistent pos decl_pos
-    | Top_member { pos; ctxt; ty_name; decl_pos; kind; name; is_nullable } ->
-      top_member pos ctxt ty_name decl_pos kind name is_nullable
+    | Top_member
+        { pos; ctxt; ty_name; decl_pos; kind; name; is_nullable; ty_reasons } ->
+      top_member pos ctxt ty_name decl_pos kind name is_nullable ty_reasons
     | Unresolved_tyvar_projection { pos; proj_pos; tconst_name } ->
       unresolved_tyvar_projection pos proj_pos tconst_name
     | Cyclic_class_constant { pos; class_name; const_name } ->
@@ -7954,6 +7972,8 @@ and Reasons_callback : sig
   val bad_decl_override :
     name:string -> parent_pos:Pos.t -> parent_name:string -> t
 
+  val bad_class_refinement : Pos.t -> t
+
   val explain_where_constraint :
     Pos.t -> in_class:bool -> decl_pos:Pos_or_decl.t -> t
 
@@ -8246,6 +8266,13 @@ end = struct
     @@ retain_quickfixes
     @@ of_primary_error
     @@ Primary.Bad_decl_override { name; pos = parent_pos; parent_name }
+
+  let bad_class_refinement pos =
+    append_incoming_reasons
+    @@ retain_code
+    @@ retain_quickfixes
+    @@ of_primary_error
+    @@ Primary.Bad_class_refinement { pos }
 
   let explain_where_constraint pos ~in_class ~decl_pos =
     append_incoming_reasons

@@ -286,7 +286,7 @@ let parse_options () =
   let disable_xhp_children_declarations = ref false in
   let enable_xhp_class_modifier = ref false in
   let verbosity = ref 0 in
-  let disable_hh_ignore_error = ref false in
+  let disable_hh_ignore_error = ref 0 in
   let is_systemlib = ref false in
   let enable_higher_kinded_types = ref false in
   let allowed_fixme_codes_strict = ref None in
@@ -680,8 +680,9 @@ let parse_options () =
         Arg.Int (fun v -> verbosity := v),
         " Verbosity as an integer." );
       ( "--disable-hh-ignore-error",
-        Arg.Set disable_hh_ignore_error,
-        " Treat HH_IGNORE_ERROR comments as normal comments" );
+        Arg.Int (( := ) disable_hh_ignore_error),
+        " Forbid HH_IGNORE_ERROR comments as an alternative to HH_FIXME, or treat them as normal comments."
+      );
       ( "--is-systemlib",
         Arg.Set is_systemlib,
         " Enable systemlib annotations and other internal-only features" );
@@ -2099,7 +2100,9 @@ let handle_mode
         in
         FileOutline.print ~short_pos:true results)
   | Dump_nast ->
-    let nasts = create_nasts ctx files_info in
+    let (errors, nasts) = Errors.do_ (fun () -> create_nasts ctx files_info) in
+    print_errors_if_present (Errors.get_sorted_error_list errors);
+
     print_nasts
       ~should_print_position
       nasts

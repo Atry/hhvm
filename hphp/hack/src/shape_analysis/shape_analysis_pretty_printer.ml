@@ -23,32 +23,42 @@ let show_entity = function
 
 let show_ty env = Typing_print.full env
 
+let show_variety = function
+  | Has -> "!"
+  | Needs -> "?"
+
 let show_constraint env =
   let show_ty = show_ty env in
   function
   | Marks (kind, pos) ->
     Format.asprintf "%s at %a" (show_marker_kind kind) Pos.pp pos
-  | Has_static_key (source, entity, key, ty) ->
-    let field_map =
-      T.TShapeMap.singleton key T.{ sft_ty = ty; sft_optional = false }
+  | Static_key (variety, certainty, entity, key, ty) ->
+    let sft_optional =
+      match certainty with
+      | Maybe -> true
+      | Definite -> false
     in
+    let field_map = T.TShapeMap.singleton key T.{ sft_ty = ty; sft_optional } in
     let shape = mk_shape field_map in
     Format.asprintf
-      "SK %s %s : %s"
-      (show_source source)
+      "%s SK %s : %s"
+      (show_variety variety)
       (show_entity entity)
       (show_ty shape)
-  | Has_optional_key (entity, key) ->
-    Format.asprintf
-      "OK %s : %s"
-      (show_entity entity)
-      (Typing_utils.get_printable_shape_field_name key)
   | Has_dynamic_key entity -> "DK " ^ show_entity entity ^ " : dyn"
   | Subsets (sub, sup) -> show_entity sub ^ " ⊆ " ^ show_entity sup
 
 let show_inter_constraint _ = function
-  | HT.Arg ((f_id, arg_idx, _), ent) ->
+  | HT.Arg (((_, f_id), arg_idx), ent) ->
     Format.asprintf "Arg(%s, %i, %s)" f_id arg_idx (show_entity ent)
+  | HT.Constant const ->
+    Format.asprintf "Constant %s" (HT.show_const_entity const)
+  | HT.ConstantInitial inst ->
+    Format.asprintf "Constant initialization at %s" (show_entity inst)
+  | HT.Identifier ident ->
+    Format.asprintf "Identifier %s" (HT.show_identifier_entity ident)
+  | HT.Param param ->
+    Format.asprintf "Parameter %s" (HT.show_param_entity param)
 
 let show_decorated_constraint_general
     ~verbosity
