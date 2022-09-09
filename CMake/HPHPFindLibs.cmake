@@ -179,8 +179,8 @@ if (GOOGLE_CPU_PROFILER_ENABLED)
   add_definitions(-DGOOGLE_CPU_PROFILER=1)
 endif()
 
-# gflags
-find_package(Gflags MODULE REQUIRED)
+# Gflags
+find_package(Gflags)
 
 # HHProf
 if (JEMALLOC_ENABLED AND ENABLE_HHPROF)
