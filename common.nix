@@ -26,7 +26,6 @@
 , icu
 , imagemagick6
 , jemalloc
-, lastModifiedDate
 , lib
 , libcap
 , libdwarf
@@ -57,7 +56,6 @@
 , re2
 , re2c
 , rustChannelOf
-, stdenv
 , sqlite
 , tbb
 , tzdata
@@ -69,6 +67,7 @@
 , zlib
 , zstd
 }:
+lastModifiedDate:
 let
   versionParts =
     builtins.match
@@ -100,7 +99,7 @@ let
     channel = "nightly";
   };
 in
-stdenv.mkDerivation rec {
+rec {
   pname = "hhvm";
   version = builtins.foldl' lib.trivial.id makeVersion versionParts;
   src = ./.;
