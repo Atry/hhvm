@@ -27,11 +27,13 @@ from folly.futures cimport bridgeSemiFutureWith, bridgeFutureWith
 from folly.iobuf cimport IOBuf
 from libcpp.memory cimport make_unique, static_pointer_cast
 from libcpp.utility cimport move as cmove
-from thrift.python.client.omni_client cimport cOmniClientResponseWithHeaders, RpcKind, cOmniInteractionClient, createOmniInteractionClient
+from thrift.python.client.omni_client cimport cOmniClientResponseWithHeaders, RpcKind, cOmniInteractionClient, createOmniInteractionClient, cData, FunctionQualifier, InteractionMethodPosition
 from thrift.python.exceptions cimport create_py_exception
 from thrift.python.exceptions import ApplicationError, ApplicationErrorType
 from thrift.python.serializer import serialize_iobuf, deserialize
 from thrift.python.stream cimport ClientBufferedStream
+
+blank_uri = "".encode('ascii')
 
 @cython.auto_pickle(False)
 cdef class AsyncClient:
@@ -80,7 +82,9 @@ cdef class AsyncClient:
         string methodName,
         interactionClass,
     ):
-        # TODO subclass check
+        if not issubclass(interactionClass, AsyncClient):
+            raise TypeError(f"{interactionClass} is not a thrift python async client class")
+
         interactionClient = interactionClass()
         bridgeFutureWith[unique_ptr[cOmniInteractionClient]](
             (<AsyncClient> interactionClient)._executor,
@@ -90,12 +94,34 @@ cdef class AsyncClient:
         )
         return interactionClient
 
-    def _send_request(
+    async def _send_request(
         AsyncClient self,
         string service_name,
         string function_name,
         args,
         response_cls,
+        FunctionQualifier qualifier = FunctionQualifier.Unspecified,
+        InteractionMethodPosition interaction_position = InteractionMethodPosition.None,
+        string interaction_name = "".encode('ascii'),
+        AsyncClient created_interaction = None,
+        string uriOrName = "".encode('ascii'),
+    ):
+        # Required because the python async model means that we can't have an async function that returns a future
+        if interaction_position == InteractionMethodPosition.Factory and created_interaction is not None:
+            await asyncio.shield(created_interaction._connect_future)
+        return await self._send_request_inner(service_name, function_name, args, response_cls, qualifier, interaction_position, interaction_name, created_interaction)
+
+    def _send_request_inner(
+        AsyncClient self,
+        string service_name,
+        string function_name,
+        args,
+        response_cls,
+        FunctionQualifier qualifier = FunctionQualifier.Unspecified,
+        InteractionMethodPosition interaction_position = InteractionMethodPosition.None,
+        string interaction_name = "".encode('ascii'),
+        AsyncClient created_interaction = None,
+        string uriOrName = "".encode('ascii'),
     ):
         protocol = deref(self._omni_client).getChannelProtocolId()
         cdef IOBuf args_iobuf = serialize_iobuf(args, protocol=protocol)
@@ -103,11 +129,21 @@ cdef class AsyncClient:
         loop = asyncio.get_event_loop()
         future = loop.create_future()
 
+        # TODO(ffrancet) clean up this logic when client side RPCOptions get implemented,
+        # just call created_interaction.setInteraction on the RPCOptions object
+        if interaction_position == InteractionMethodPosition.Factory and created_interaction is not None:
+            #await asyncio.shield(created_interaction._connect_future)
+            # Without access to the RPCOptions object (yet) the memory management model makes the
+            # flow here really awkward since cilent A is making the call, but client B has the interaction
+            # data, meaning both need to be accessed at the same time, so just directly passing the pointer
+            deref(self._omni_client).set_interaction_factory(created_interaction._omni_client.get())
+
         if response_cls is None:
             deref(self._omni_client).oneway_send(
                 service_name,
                 function_name,
                 args_iobuf.c_clone(),
+                cmove(cData(function_name, FunctionQualifier.OneWay, uriOrName, interaction_position, interaction_name)),
                 self._persistent_headers,
             )
             future.set_result(None)
@@ -122,6 +158,7 @@ cdef class AsyncClient:
                     service_name,
                     function_name,
                     args_iobuf.c_clone(),
+                    cmove(cData(function_name, qualifier, uriOrName, interaction_position, interaction_name)),
                     self._persistent_headers,
                     rpc_kind,
                 ),

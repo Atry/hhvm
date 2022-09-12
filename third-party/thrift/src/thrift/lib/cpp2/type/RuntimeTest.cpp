@@ -16,15 +16,19 @@
 
 #include <thrift/lib/cpp2/type/Runtime.h>
 
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include <folly/io/IOBuf.h>
 #include <folly/portability/GMock.h>
 #include <folly/portability/GTest.h>
+#include <thrift/lib/cpp2/type/Id.h>
 #include <thrift/lib/cpp2/type/Tag.h>
+#include <thrift/lib/thrift/gen-cpp2/standard_types.h>
 
 namespace apache::thrift::type {
 namespace {
@@ -168,6 +172,41 @@ TEST(RuntimeRefTest, Map) {
   EXPECT_TRUE(value.empty());
 }
 
+TEST(RuntimeRefTest, Map_Add) {
+  std::map<std::string, int> value;
+  auto ref = Ref::to<map<string_t, i32_t>>(value);
+
+  // ensure = add if not present.
+  EXPECT_EQ(ref.ensure("zero"), 0);
+  EXPECT_EQ(ref.ensure("one", 1), 1);
+  EXPECT_EQ(ref.ensure("one", 2), 1);
+  EXPECT_EQ(value["zero"], 0);
+  EXPECT_EQ(value["one"], 1);
+}
+
+TEST(RuntimeRefTest, Struct) {
+  type::UriStruct actual;
+  using Tag = type::struct_t<type::UriStruct>;
+  auto ref = Ref::to<Tag>(actual);
+  EXPECT_FALSE(ref.empty());
+  EXPECT_EQ(ref.size(), 5);
+
+  EXPECT_TRUE(ref.put(FieldId{1}, "foo"));
+  EXPECT_EQ(*actual.scheme(), "foo");
+  ref.clear(FieldId{1});
+  EXPECT_EQ(*actual.scheme(), "");
+
+  EXPECT_TRUE(ref.put("scheme", "bar"));
+  EXPECT_EQ(*actual.scheme(), "bar");
+  ref.clear("scheme");
+  EXPECT_EQ(*actual.scheme(), "");
+
+  EXPECT_THROW(ref.clear(FieldId{}), std::out_of_range);
+  EXPECT_THROW(ref.clear("bad"), std::out_of_range);
+  EXPECT_THROW(ref.put(FieldId{}, ""), std::out_of_range);
+  EXPECT_THROW(ref.put("bad", ""), std::out_of_range);
+}
+
 TEST(RuntimeRefTest, Identical) {
   float value = 1.0f;
   auto ref = Ref::to<float_t>(value);
@@ -265,6 +304,43 @@ TEST(RuntimeValueTest, CppType_Map) {
   EXPECT_NE(map, otherMap);
 
   EXPECT_THROW(map < otherMap, std::logic_error);
+}
+
+TEST(RuntimeValueTest, Float_InterOp) {
+  EXPECT_EQ(Ref::to<double_t>(2.0), Ref::to<float_t>(2.0f));
+  EXPECT_LT(Ref::to<float_t>(1.0), Ref::to<double_t>(2.0f));
+  EXPECT_GT(
+      Ref::to<double_t>(std::numeric_limits<double>::infinity()),
+      Ref::to<float_t>(-std::numeric_limits<float>::infinity()));
+}
+
+TEST(RuntimeValueTest, StringBinary_InterOp) {
+  using STag = type::string_t;
+  using BTag = type::cpp_type<folly::IOBuf, type::binary_t>;
+
+  auto stringHi = Value::of<STag>("hi");
+  auto stringBye = Value::of<STag>("bye");
+
+  auto binaryHiBuf = folly::IOBuf::wrapBufferAsValue("hi", 2);
+  auto binaryHi = Ref::to<BTag>(binaryHiBuf);
+  auto binaryByeBuf = folly::IOBuf::wrapBufferAsValue("bye", 3);
+  auto binaryBye = ConstRef::to<BTag>(binaryByeBuf);
+
+  // Compare.
+  EXPECT_EQ(stringHi, binaryHi);
+  EXPECT_EQ(binaryBye, stringBye);
+  EXPECT_NE(binaryHi, stringBye);
+  EXPECT_GT(stringHi, binaryBye);
+
+  // TODO(afuller): Support 'assign' op.
+  // binaryHi = stringBye;
+  // EXPECT_LT(binaryHi, stringHi);
+  // stringHi.assign(binaryBye);
+  // EXPECT_EQ(stringHi.type(), stringBye.type());
+  // EXPECT_EQ(binaryHi, stringHi);
+  // stringHi = binaryBye;
+  // EXPECT_NE(stringHi.type(), stringBye.type());
+  // EXPECT_EQ(binaryHi, stringHi);
 }
 
 } // namespace

@@ -80,6 +80,7 @@ enum class RepoMode {
 namespace hackc {
   struct HhbcFlags;
   struct ParserFlags;
+  struct DeclParserConfig;
 }
 
 /*
@@ -120,7 +121,7 @@ struct RepoOptionsFlags {
   const SHA1& cacheKeySha1() const { return m_sha1; }
 
   ParserEnv getParserEnvironment() const;
-  std::uint32_t getDeclFlags() const;
+  void initDeclConfig(hackc::DeclParserConfig&) const;
   void initHhbcFlags(hackc::HhbcFlags&) const;
   void initParserFlags(hackc::ParserFlags&) const;
   std::string getAliasedNamespacesConfig() const;
@@ -831,6 +832,7 @@ struct RuntimeOption {
    * 2 - Do not do implicit coercion
    */                                                                   \
   F(uint32_t, WarnOnImplicitCoercionOfEnumValue, 0)                     \
+  F(bool, EnableLogBridge,             true)                            \
   F(bool, MoreAccurateMemStats,        true)                            \
   F(bool, AllowScopeBinding,           false)                           \
   F(bool, TranslateHackC,              false)                           \

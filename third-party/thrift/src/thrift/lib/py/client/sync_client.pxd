@@ -16,7 +16,7 @@ from libcpp.map cimport map as cmap
 from libcpp.memory cimport unique_ptr
 from libcpp.string cimport string
 from libcpp.unordered_map cimport unordered_map
-from thrift.python.client.omni_client cimport cOmniClient
+from thrift.python.client.omni_client cimport cOmniClient, cData, FunctionQualifier, InteractionMethodPosition
 
 cdef class SyncClient:
     cdef unique_ptr[cOmniClient] _omni_client

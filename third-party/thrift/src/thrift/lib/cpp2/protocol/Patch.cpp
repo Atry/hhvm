@@ -51,8 +51,7 @@ using value_field_id =
     type::field_id_tag<static_cast<FieldId>(type::base_type_v<Tag>)>;
 
 template <typename Tag>
-using value_native_type =
-    type::native_type<op::get_field_tag<Value, value_field_id<Tag>>>;
+using value_native_type = op::get_native_type<value_field_id<Tag>, Value>;
 
 PatchOp toOp(FieldId id) {
   auto op = static_cast<PatchOp>(id);
@@ -92,7 +91,7 @@ decltype(auto) argAs(const Value& value) {
         util::enumNameSafe<Value::Type>(expected),
         util::enumNameSafe<Value::Type>(value.getType())));
   }
-  return *op::get<Value, Id>(value);
+  return *op::get<Id, Value>(value);
 }
 
 template <typename Tag>
@@ -238,7 +237,7 @@ void ApplyPatch::operator()(
       Value::Type::listValue,
       {PatchOp::Assign,
        PatchOp::Clear,
-       PatchOp::Patch,
+       PatchOp::PatchPrior,
        PatchOp::Add,
        PatchOp::Put,
        PatchOp::Remove});
@@ -252,51 +251,67 @@ void ApplyPatch::operator()(
     }
   }
 
-  if (auto* elementPatches = findOp(patch, PatchOp::Patch)) {
-    for (const auto& [idx, elPatch] : *elementPatches->mapValue_ref()) {
-      if (idx.if_i32()) {
-        auto index = type::toPosition(
-            type::Ordinal(apache::thrift::util::zigzagToI32(idx.as_i32())));
-        if (index >= 0 && static_cast<size_t>(index) < value.size()) {
-          applyPatch(*elPatch.objectValue_ref(), value[index]);
-        } else {
-          throw std::runtime_error("patch index out of range");
-        }
-      } else {
+  if (auto* elementPatches = findOp(patch, PatchOp::PatchPrior)) {
+    const auto* indexPatches = elementPatches->if_map();
+    if (!indexPatches) {
+      throw std::runtime_error("list patch should contain a map");
+    }
+
+    for (const auto& [idx, elPatch] : *indexPatches) {
+      const auto* indexPtr = idx.if_i32();
+      if (!indexPtr) {
         throw std::runtime_error("expected index as i32");
+      }
+
+      auto index = type::toPosition(
+          type::Ordinal(apache::thrift::util::zigzagToI32(*indexPtr)));
+      if (index >= 0 && static_cast<size_t>(index) < value.size()) {
+        applyPatch(*elPatch.objectValue_ref(), value[index]);
+      } else {
+        throw std::runtime_error("patch index out of range");
       }
     }
   }
 
   if (auto* remove = findOp(patch, PatchOp::Remove)) {
-    auto& to_remove = *remove->setValue_ref();
+    const auto* to_remove = remove->if_set();
+    if (!to_remove) {
+      throw std::runtime_error("list remove patch should contain a set");
+    }
+
     value.erase(
         std::remove_if(
             value.begin(),
             value.end(),
             [&](const auto& element) {
-              return to_remove.find(element) != to_remove.end();
+              return to_remove->find(element) != to_remove->end();
             }),
         value.end());
   }
 
   if (auto* add = findOp(patch, PatchOp::Add)) {
-    if (add->setValue_ref().has_value()) {
-      auto& to_add = *add->setValue_ref();
-      for (const auto& element : to_add) {
+    if (const auto* to_add = add->if_set()) {
+      for (const auto& element : *to_add) {
         if (std::find(value.begin(), value.end(), element) == value.end()) {
           value.insert(value.begin(), element);
         }
       }
     } else {
-      auto& prependVector = *add->listValue_ref();
-      value.insert(value.begin(), prependVector.begin(), prependVector.end());
+      const auto* prependVector = add->if_list();
+      if (!prependVector) {
+        throw std::runtime_error(
+            "list add patch should contain a set or a list");
+      }
+      value.insert(value.begin(), prependVector->begin(), prependVector->end());
     }
   }
 
   if (auto* append = findOp(patch, PatchOp::Put)) {
-    auto& appendVector = *append->listValue_ref();
-    value.insert(value.end(), appendVector.begin(), appendVector.end());
+    const auto* appendVector = append->if_list();
+    if (!appendVector) {
+      throw std::runtime_error("list put patch should contain a list");
+    }
+    value.insert(value.end(), appendVector->begin(), appendVector->end());
   }
 }
 
@@ -319,8 +334,17 @@ void ApplyPatch::operator()(const Object& patch, std::set<Value>& value) const {
     }
   }
 
+  auto validate_if_set = [](const auto patchOp, auto name) {
+    const auto* opData = patchOp->if_set();
+    if (!opData) {
+      throw std::runtime_error(
+          fmt::format("set {} patch should caontain a set", name));
+    }
+    return opData;
+  };
+
   if (auto* remove = findOp(patch, PatchOp::Remove)) {
-    for (const auto& key : *remove->setValue_ref()) {
+    for (const auto& key : *validate_if_set(remove, "remove")) {
       value.erase(key);
     }
   }
@@ -330,11 +354,11 @@ void ApplyPatch::operator()(const Object& patch, std::set<Value>& value) const {
   };
 
   if (auto* add = findOp(patch, PatchOp::Add)) {
-    insert_set(*add->setValue_ref());
+    insert_set(*validate_if_set(add, "add"));
   }
 
   if (auto* put = findOp(patch, PatchOp::Put)) {
-    insert_set(*put->setValue_ref());
+    insert_set(*validate_if_set(put, "put"));
   }
 }
 
@@ -345,7 +369,7 @@ void ApplyPatch::operator()(
       Value::Type::mapValue,
       {PatchOp::Assign,
        PatchOp::Clear,
-       PatchOp::Patch,
+       PatchOp::PatchPrior,
        PatchOp::EnsureStruct,
        PatchOp::Put,
        PatchOp::Remove,
@@ -360,8 +384,18 @@ void ApplyPatch::operator()(
     }
   }
 
+  auto validated_map = [](auto patchOp, auto patchOpName) {
+    auto opData = patchOp->if_map();
+    if (!opData) {
+      throw std::runtime_error(
+          fmt::format("map {} patch should contain map", patchOpName));
+    }
+    return opData;
+  };
+
   auto patchElements = [&](auto patchFields) {
-    for (const auto& [keyv, valv] : *patchFields->mapValue_ref()) {
+    for (const auto& [keyv, valv] :
+         *validated_map(patchFields, "patch/patchPrior")) {
       // Only patch values for fields that exist for now
       if (auto* field = folly::get_ptr(value, keyv)) {
         applyPatch(*valv.objectValue_ref(), *field);
@@ -369,24 +403,28 @@ void ApplyPatch::operator()(
     }
   };
 
-  if (auto* patchFields = findOp(patch, PatchOp::Patch)) {
+  if (auto* patchFields = findOp(patch, PatchOp::PatchPrior)) {
     patchElements(patchFields);
   }
 
   // This is basicly inserting key/value pair into the map if key doesn't exist
   if (auto* ensure = findOp(patch, PatchOp::EnsureStruct)) {
-    value.insert(
-        ensure->mapValue_ref()->begin(), ensure->mapValue_ref()->end());
+    const auto* mapVal = validated_map(ensure, "ensureStruct");
+    value.insert(mapVal->begin(), mapVal->end());
   }
 
   if (auto* remove = findOp(patch, PatchOp::Remove)) {
-    for (const auto& key : *remove->setValue_ref()) {
+    const auto* to_remove = remove->if_set();
+    if (!to_remove) {
+      throw std::runtime_error("map remove patch should contain set");
+    }
+    for (const auto& key : *to_remove) {
       value.erase(key);
     }
   }
 
   if (auto* put = findOp(patch, PatchOp::Put)) {
-    for (const auto& [key, val] : *put->mapValue_ref()) {
+    for (const auto& [key, val] : *validated_map(put, "put")) {
       value.insert_or_assign(key, val);
     }
   }
@@ -402,7 +440,7 @@ void ApplyPatch::operator()(const Object& patch, Object& value) const {
       Value::Type::objectValue,
       {PatchOp::Assign,
        PatchOp::Clear,
-       PatchOp::Patch,
+       PatchOp::PatchPrior,
        PatchOp::EnsureStruct,
        PatchOp::EnsureUnion,
        PatchOp::PatchAfter});
@@ -418,8 +456,12 @@ void ApplyPatch::operator()(const Object& patch, Object& value) const {
 
   auto applyFieldPatch = [&](auto patchFields) {
     value.members().ensure();
-    for (const auto& [id, field_value] :
-         *patchFields->objectValue_ref()->members()) {
+    const auto* obj = patchFields->if_object();
+    if (!obj) {
+      throw std::runtime_error(
+          "struct patch PatchPrior/Patch should contain an object");
+    }
+    for (const auto& [id, field_value] : *obj->members()) {
       // Only patch values for fields that exist for now
       if (auto* field = folly::get_ptr(*value.members(), id)) {
         applyPatch(*field_value.objectValue_ref(), *field);
@@ -427,7 +469,7 @@ void ApplyPatch::operator()(const Object& patch, Object& value) const {
     }
   };
 
-  if (auto* patchFields = findOp(patch, PatchOp::Patch)) {
+  if (auto* patchFields = findOp(patch, PatchOp::PatchPrior)) {
     applyFieldPatch(patchFields);
   }
 
@@ -440,22 +482,23 @@ void ApplyPatch::operator()(const Object& patch, Object& value) const {
   }
 
   if (const auto* uensure = findOp(patch, PatchOp::EnsureUnion)) {
-    if (const auto* ensureUnion = uensure->if_object()) {
-      if (ensureUnion->size() != 1) {
-        throw std::runtime_error(
-            "union patch Ensure should contain an object with only one field set");
-      }
-
-      auto& id = ensureUnion->begin()->first;
-      auto itr = value.members()->find(id);
-      if (itr == value.end()) {
-        value = *ensureUnion;
-      } else if (value.size() != 1) {
-        // Clear other values, without copying the current value
-        value.members() = {{itr->first, std::move(itr->second)}};
-      }
-    } else {
+    const auto* ensureUnion = uensure->if_object();
+    if (!ensureUnion) {
       throw std::runtime_error("union patch Ensure should contain an object");
+    }
+
+    if (ensureUnion->size() != 1) {
+      throw std::runtime_error(
+          "union patch Ensure should contain an object with only one field set");
+    }
+
+    auto& id = ensureUnion->begin()->first;
+    auto itr = value.members()->find(id);
+    if (itr == value.end()) {
+      value = *ensureUnion;
+    } else if (value.size() != 1) {
+      // Clear other values, without copying the current value
+      value.members() = {{itr->first, std::move(itr->second)}};
     }
   }
 
@@ -463,89 +506,116 @@ void ApplyPatch::operator()(const Object& patch, Object& value) const {
     applyFieldPatch(patchFields);
   }
 }
-
-// Returns the map mask for the given key.
-Mask& getMapMaskByValue(Mask& mask, const Value& newKey) {
-  if (mask.includes_map_ref()) {
-    // Need to check if mask has the same key already.
-    for (auto& [key, next] : mask.includes_map_ref().value()) {
-      if (*(reinterpret_cast<Value*>(key)) == newKey) {
-        return next;
-      }
-    }
+// Inserts the next mask to getIncludesRef(mask)[id].
+// Skips if mask is allMask (already includes all fields), or next is noneMask.
+template <typename Id, typename F>
+void insertMask(Mask& mask, Id id, const Mask& next, const F& getIncludesRef) {
+  if (mask != allMask() && next != noneMask()) {
+    getIncludesRef(mask).ensure()[id] = next;
   }
-  return mask.includes_map_ref().ensure()[reinterpret_cast<int64_t>(&newKey)];
+}
+
+template <typename Id, typename F>
+void insertNextMask(
+    ExtractedMasks& masks,
+    const Value& nextPatch,
+    Id readId,
+    Id writeId,
+    bool recursive,
+    const F& getIncludesRef) {
+  if (recursive) {
+    auto nextMasks = extractMaskFromPatch(nextPatch.as_object());
+    insertMask(masks.read, readId, nextMasks.read, getIncludesRef);
+    insertMask(masks.write, writeId, nextMasks.write, getIncludesRef);
+  } else {
+    insertMask(masks.read, readId, allMask(), getIncludesRef);
+    insertMask(masks.write, writeId, allMask(), getIncludesRef);
+  }
 }
 
 // if recursive, it constructs the mask from the patch object for the field.
-void insertFieldsToMask(Mask& mask, const Value& patchFields, bool recursive) {
+void insertFieldsToMask(
+    ExtractedMasks& masks, const Value& patchFields, bool recursive) {
+  auto getIncludesMapRef = [&](Mask& mask) { return mask.includes_map_ref(); };
   if (auto* obj = patchFields.if_object()) {
     for (const auto& [id, value] : *obj) {
-      Mask& next = mask.includes_ref().ensure()[id];
-      next = recursive ? extractMaskFromPatch(value.as_object()) : allMask();
+      insertNextMask(masks, value, id, id, recursive, [&](Mask& mask) {
+        return mask.includes_ref();
+      });
     }
   } else if (auto* map = patchFields.if_map()) {
     for (const auto& [key, value] : *map) {
-      Mask& next = getMapMaskByValue(mask, key);
-      next = recursive ? extractMaskFromPatch(value.as_object()) : allMask();
+      auto readId = static_cast<int64_t>(findMapIdByValue(masks.read, key));
+      auto writeId = static_cast<int64_t>(findMapIdByValue(masks.write, key));
+      insertNextMask(
+          masks, value, readId, writeId, recursive, getIncludesMapRef);
     }
   } else { // set of map keys (Remove)
     for (const auto& key : patchFields.as_set()) {
-      getMapMaskByValue(mask, key) = allMask();
+      auto readId = static_cast<int64_t>(findMapIdByValue(masks.read, key));
+      auto writeId = static_cast<int64_t>(findMapIdByValue(masks.write, key));
+      insertMask(masks.read, readId, allMask(), getIncludesMapRef);
+      insertMask(masks.write, writeId, allMask(), getIncludesMapRef);
     }
   }
 }
 
 // TODO: Handle EnsureUnion
-Mask extractMaskFromPatch(const protocol::Object& patch) {
-  // If Assign, it is modified.
+ExtractedMasks extractMaskFromPatch(const protocol::Object& patch) {
+  ExtractedMasks masks = {noneMask(), noneMask()};
+  // If Assign, it is a write operation
   if (findOp(patch, PatchOp::Assign)) {
-    return allMask();
+    masks = {noneMask(), allMask()};
   }
-  // If Clear or Add, it is modified if not intristic default.
-  for (auto op : {PatchOp::Clear, PatchOp::Add}) {
-    if (auto* value = findOp(patch, op)) {
-      if (!isIntrinsicDefault(*value)) {
-        return allMask();
-      }
+  // If Clear, it is a write operation if not intristic default.
+  if (auto* clear = findOp(patch, PatchOp::Clear)) {
+    if (!isIntrinsicDefault(*clear)) {
+      masks = {noneMask(), allMask()};
+    }
+  }
+  // If Add, it is a read-write operation if not intristic default.
+  if (auto* add = findOp(patch, PatchOp::Add)) {
+    if (!isIntrinsicDefault(*add)) {
+      return {allMask(), allMask()};
     }
   }
 
-  Mask mask = noneMask();
-  // Put should return allMask if not a map patch. Otherwise add keys to mask.
+  // Put is a read-write operation if not a map patch. Otherwise add keys to
+  // mask.
   if (auto* value = findOp(patch, PatchOp::Put)) {
     if (value->mapValue_ref()) {
-      insertFieldsToMask(mask, *value, false);
+      insertFieldsToMask(masks, *value, false);
     } else if (!isIntrinsicDefault(*value)) {
-      return allMask();
+      return {allMask(), allMask()};
     }
   }
   // Remove always adds keys to map mask. All types (list, set, and map) use
   // a set for Remove, so they are indistinguishable.
   if (auto* value = findOp(patch, PatchOp::Remove)) {
-    insertFieldsToMask(mask, *value, false);
+    insertFieldsToMask(masks, *value, false);
   }
 
   // If EnsureStruct, add the fields/ keys to mask
   if (auto* ensureStruct = findOp(patch, PatchOp::EnsureStruct)) {
-    insertFieldsToMask(mask, *ensureStruct, false);
+    insertFieldsToMask(masks, *ensureStruct, false);
   }
 
-  // If Patch or PatchAfter, recursively constructs the mask for the fields.
-  // Note that list also supports Patch, but since it is indistinguishable from
-  // map (both uses a map), we just treat it as a map patch.
-  for (auto op : {PatchOp::Patch, PatchOp::PatchAfter}) {
+  // If PatchPrior or PatchAfter, recursively constructs the mask for the
+  // fields. Note that list also supports Patch, but since it is
+  // indistinguishable from map (both uses a map), we just treat it as a map
+  // patch.
+  for (auto op : {PatchOp::PatchPrior, PatchOp::PatchAfter}) {
     if (auto* patchFields = findOp(patch, op)) {
-      insertFieldsToMask(mask, *patchFields, true);
+      insertFieldsToMask(masks, *patchFields, true);
     }
   }
 
-  return mask;
+  return masks;
 }
 
 } // namespace detail
 
-Mask extractMaskFromPatch(const protocol::Object& patch) {
+ExtractedMasks extractMaskFromPatch(const protocol::Object& patch) {
   return detail::extractMaskFromPatch(patch);
 }
 
@@ -564,8 +634,9 @@ std::unique_ptr<folly::IOBuf> applyPatchToSerializedData(
       Protocol == type::StandardProtocol::Binary,
       BinaryProtocolWriter,
       CompactProtocolWriter>;
-  Mask mask = protocol::extractMaskFromPatch(patch);
-  MaskedDecodeResult result = parseObject<ProtocolReader>(buf, mask);
+  auto masks = protocol::extractMaskFromPatch(patch);
+  MaskedDecodeResult result =
+      parseObject<ProtocolReader>(buf, masks.read, masks.write);
   applyPatch(patch, result.included);
   return serializeObject<ProtocolWriter>(result.included, result.excluded);
 }

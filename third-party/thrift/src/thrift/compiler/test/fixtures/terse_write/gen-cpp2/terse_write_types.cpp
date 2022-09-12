@@ -1077,7 +1077,7 @@ TerseStructWithCustomDefault::TerseStructWithCustomDefault() :
       __fbthrift_field_double_field(static_cast<double>(6)),
       __fbthrift_field_string_field(apache::thrift::StringTraits<std::string>::fromStringLiteral("7")),
       __fbthrift_field_binary_field(apache::thrift::StringTraits<std::string>::fromStringLiteral("8")),
-      __fbthrift_field_enum_field( ::facebook::thrift::test::terse_write::MyEnum::ME1),
+      __fbthrift_field_enum_field(static_cast<::facebook::thrift::test::terse_write::MyEnum>( ::facebook::thrift::test::terse_write::MyEnum::ME1)),
       __fbthrift_field_list_field(static_cast<::std::vector<::std::int16_t>>(std::initializer_list<::std::int16_t>{1})),
       __fbthrift_field_set_field(static_cast<::std::set<::std::int16_t>>(std::initializer_list<::std::int16_t>{1})),
       __fbthrift_field_map_field(static_cast<::std::map<::std::int16_t, ::std::int16_t>>(std::initializer_list<std::pair<const ::std::int16_t, ::std::int16_t>>{{1, 1}})) {
@@ -1443,9 +1443,9 @@ void AdaptedFields::__fbthrift_clear_terse_fields() {
 }
 
 bool AdaptedFields::__fbthrift_is_empty() const {
-  return ::apache::thrift::op::isEmpty<::apache::thrift::op::get_field_tag<AdaptedFields, ::apache::thrift::field_id<1>>>(this->__fbthrift_field_field1) &&
- ::apache::thrift::op::isEmpty<::apache::thrift::op::get_field_tag<AdaptedFields, ::apache::thrift::field_id<2>>>(this->__fbthrift_field_field2) &&
- ::apache::thrift::op::isEmpty<::apache::thrift::op::get_field_tag<AdaptedFields, ::apache::thrift::field_id<3>>>(this->__fbthrift_field_field3);
+  return ::apache::thrift::op::isEmpty<::apache::thrift::op::get_field_tag<::apache::thrift::field_id<1>, AdaptedFields>>(this->__fbthrift_field_field1) &&
+ ::apache::thrift::op::isEmpty<::apache::thrift::op::get_field_tag<::apache::thrift::field_id<2>, AdaptedFields>>(this->__fbthrift_field_field2) &&
+ ::apache::thrift::op::isEmpty<::apache::thrift::op::get_field_tag<::apache::thrift::field_id<3>, AdaptedFields>>(this->__fbthrift_field_field3);
 }
 
 bool AdaptedFields::operator==(FOLLY_MAYBE_UNUSED const AdaptedFields& rhs) const {

@@ -44,8 +44,7 @@ class ConstRef final : public detail::BaseRef<ConstRef> {
  public:
   ConstRef() noexcept = default;
   // 'capture' any other runtime type.
-  /* implicit */ ConstRef(const detail::RuntimeBase& other) noexcept
-      : Base(other) {}
+  /* implicit */ ConstRef(const detail::Dyn& other) noexcept : Base(other) {}
   // 'capture' any native type we can safely infer the tag for.
   template <typename T, typename Tag = infer_tag<T>>
   /* implicit */ ConstRef(T&& val) noexcept
@@ -58,7 +57,7 @@ class ConstRef final : public detail::BaseRef<ConstRef> {
  private:
   friend Base;
   template <typename, typename, typename>
-  friend class detail::RuntimeAccessBase;
+  friend class detail::BaseDyn;
 
   template <typename Tag, typename T>
   ConstRef(Tag, T&& val) : Base(op::detail::getAnyType<Tag, T>(), &val) {}
@@ -72,14 +71,14 @@ class ConstRef final : public detail::BaseRef<ConstRef> {
 // runtime metadata associated with the type of the value.
 class Ref final : public detail::BaseRef<Ref, ConstRef> {
   using Base = detail::BaseRef<Ref, ConstRef>;
-  using RuntimeBase = detail::RuntimeBase;
+  using Dyn = detail::Dyn;
 
  public:
   Ref() noexcept = default;
 
   // Sets the referenced value to it's intrinsic default (e.g. ignoring custom
   // field defaults).
-  void clear() { Base::clear(); }
+  using Base::clear;
 
   // Append to a list, string, etc.
   using Base::append;
@@ -91,6 +90,12 @@ class Ref final : public detail::BaseRef<Ref, ConstRef> {
   //
   // Returns true if an existing value was replaced.
   using Base::put;
+
+  // Add a key-value pair, if not already present, using the given default if
+  // provided.
+  //
+  // Returns a reference to the associated value.
+  using Base::ensure;
 
   // Throws on mismatch or if const.
   template <typename Tag>
@@ -107,7 +112,7 @@ class Ref final : public detail::BaseRef<Ref, ConstRef> {
  private:
   friend class detail::Ptr;
   template <typename, typename, typename>
-  friend class detail::RuntimeAccessBase;
+  friend class detail::BaseDyn;
   friend Base;
   using Base::asRef;
 
@@ -162,9 +167,9 @@ inline Ref Ptr::operator*() const noexcept {
 // A runtime Thrift value that owns it's own memory.
 //
 // TODO(afuller): Store small values in-situ.
-class Value : public detail::RuntimeAccessBase<ConstRef, Ref, Value> {
-  using Base = detail::RuntimeAccessBase<ConstRef, Ref, Value>;
-  using RuntimeBase = detail::RuntimeBase;
+class Value : public detail::BaseDyn<ConstRef, Ref, Value> {
+  using Base = detail::BaseDyn<ConstRef, Ref, Value>;
+  using Dyn = detail::Dyn;
 
  public:
   template <typename Tag>
@@ -234,7 +239,7 @@ class Value : public detail::RuntimeAccessBase<ConstRef, Ref, Value> {
 
   // Sets the referenced value to it's intrinsic default (e.g. ignoring custom
   // field defaults).
-  void clear() { Base::clear(); }
+  using Base::clear;
 
   // Append to a list, string, etc.
   using Base::append;
@@ -246,6 +251,12 @@ class Value : public detail::RuntimeAccessBase<ConstRef, Ref, Value> {
   //
   // Returns true if an existing value was replaced.
   using Base::put;
+
+  // Add a key-value pair, if not already present, using the given default if
+  // provided.
+  //
+  // Returns a reference to the associated value.
+  using Base::ensure;
 
  private:
   using Base::Base;

@@ -793,7 +793,12 @@ void ThriftServer::setupThreadManager() {
   LOG(INFO) << "Resource pools:" << resourcePoolSet().describe();
 }
 
-void ThriftServer::runtimeResourcePoolsChecks() {
+// Return true if the runtime checks pass and using resource pools is an option.
+bool ThriftServer::runtimeResourcePoolsChecks() {
+  if (runtimeDisableResourcePoolsSet()) {
+    // No need to check if we've already set this.
+    return false;
+  }
   // If this is called too early we can't run our other checks.
   if (!getProcessorFactory()) {
     runtimeServerActions_.setupThreadManagerBeforeHandler = true;
@@ -846,6 +851,8 @@ void ThriftServer::runtimeResourcePoolsChecks() {
     runtimeServerActions_.activeRequestTrackingDisabled = true;
     runtimeDisableResourcePoolsDeprecated();
   }
+
+  return !runtimeDisableResourcePoolsSet();
 }
 
 void ThriftServer::ensureResourcePools() {
@@ -1008,8 +1015,11 @@ void ThriftServer::ensureResourcePools() {
             std::move(threadInitializer_),
             std::move(threadFinalizer_));
       }
+      // By default there will be 2 priorities so that we can prioritize
+      // internal requests over external ones
+      unsigned defaultNumPrioritiesExecutor = 2;
       auto executor = std::make_shared<folly::CPUThreadPoolExecutor>(
-          pool.numThreads, std::move(factory));
+          pool.numThreads, defaultNumPrioritiesExecutor, std::move(factory));
       apache::thrift::RoundRobinRequestPile::Options options;
       if (threadManagerType_ == ThreadManagerType::PRIORITY_QUEUE) {
         options.setNumPriorities(concurrency::N_PRIORITIES);

@@ -189,10 +189,10 @@ def gen_metadata_service_Raiser() -> _fbthrift_metadata.ThriftMetadata:
 
 def _fbthrift_gen_metadata_service_Raiser(metadata_struct: _fbthrift_metadata.ThriftMetadata) -> _fbthrift_metadata.ThriftMetadata:
     qualified_name = "module.Raiser"
-
+    
     if qualified_name in metadata_struct.services:
         return metadata_struct
-
+    
     functions = [
         _fbthrift_metadata.ThriftFunction(name="doBland", return_type=_fbthrift_metadata.ThriftType(t_primitive=_fbthrift_metadata.ThriftPrimitiveType.THRIFT_VOID_TYPE), arguments=[
         ], exceptions = [
@@ -223,39 +223,46 @@ def _fbthrift_gen_metadata_service_Raiser(metadata_struct: _fbthrift_metadata.Th
         ], is_oneway=False, structured_annotations=[
         ]),
     ]
-
+    
     service_dict = dict(metadata_struct.services)
     service_dict[qualified_name] = _fbthrift_metadata.ThriftService(name=qualified_name, functions=functions,  structured_annotations=[
     ])
     new_struct = metadata_struct(services=service_dict)
-
-
-
+    
+    
+    
      # return value
-
-
-
+    
+    
+    
     new_struct = _fbthrift_gen_metadata_exception_Banal(new_struct) # b
     new_struct = _fbthrift_gen_metadata_exception_Fiery(new_struct) # f
     new_struct = _fbthrift_gen_metadata_exception_Serious(new_struct) # s
-
+    
      # return value
-
-
-
-
+    
+    
+    
+    
      # return value
-
-
-
+    
+    
+    
     new_struct = _fbthrift_gen_metadata_exception_Fiery(new_struct) # f
     new_struct = _fbthrift_gen_metadata_exception_Banal(new_struct) # b
     new_struct = _fbthrift_gen_metadata_exception_Serious(new_struct) # s
-
+    
      # return value
-
-
+    
+    
     return new_struct
+
+def _fbthrift_metadata_service_response_Raiser() -> _fbthrift_metadata.ThriftServiceMetadataResponse:
+    metadata = gen_metadata_service_Raiser()
+    context = _fbthrift_metadata.ThriftServiceContext(service_info=metadata.services["module.Raiser"], module=_fbthrift_metadata.ThriftModuleContext(name="module"))
+    services = [_fbthrift_metadata.ThriftServiceContextRef(module=_fbthrift_metadata.ThriftModuleContext(name=name.split('.')[0]), service_name=name) for name in metadata.services]
+    return _fbthrift_metadata.ThriftServiceMetadataResponse(metadata=metadata,context=context,services=services)
+
 
 
 
