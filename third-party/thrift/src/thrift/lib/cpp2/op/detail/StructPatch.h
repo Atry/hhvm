@@ -55,14 +55,15 @@ class FieldPatch : public BasePatch<Patch, FieldPatch<Patch>> {
 
   template <typename T>
   void apply(T& val) const {
-    for_each_field_id<Patch>([&](auto id) { get(id)->apply(get(id, val)); });
+    for_each_field_id<Patch>(
+        [&](auto id) { get(id)->apply(op::get<>(id, val)); });
   }
 
   template <typename U>
   void merge(U&& next) {
     auto&& tval = std::forward<U>(next).toThrift();
     for_each_field_id<Patch>([&](auto id) {
-      get(id)->merge(*get(id, std::forward<decltype(tval)>(tval)));
+      get(id)->merge(*op::get<>(id, std::forward<decltype(tval)>(tval)));
     });
   }
 
@@ -94,7 +95,7 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
   using Base = BaseClearPatch<Patch, StructPatch>;
   using T = typename Base::value_type;
   template <typename Id>
-  using F = type::native_type<get_field_tag<T, Id>>;
+  using F = type::native_type<get_field_tag<Id, T>>;
 
  public:
   using Base::apply;
@@ -113,7 +114,7 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
   template <typename Id>
   void clear() {
     if (hasAssign()) {
-      clearValue(get(get_field_tag<T, Id>{}, *data_.assign()));
+      clearValue(op::get<Id>(*data_.assign()));
       return;
     }
     patchPrior<Id>().clear();
@@ -125,7 +126,7 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
   template <typename Id, typename U = F<Id>>
   void assign(U&& val) {
     if (hasValue(data_.assign())) {
-      get(get_field_id<T, Id>{}, *data_.assign()) = std::forward<U>(val);
+      op::get<Id>(*data_.assign()) = std::forward<U>(val);
     } else {
       ensure<Id>().assign(std::forward<U>(val));
     }
@@ -168,8 +169,8 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
     } else {
       data_.patchPrior()->apply(val); // patchPrior
       for_each_field_id<T>([&](auto id) { // ensure
-        auto&& field = get(id, val);
-        auto&& defaultVal = get(id, *data_.ensure());
+        auto&& field = op::get<>(id, val);
+        auto&& defaultVal = op::get<>(id, *data_.ensure());
         if (isAbsent(field) && !isAbsent(defaultVal)) {
           field = *defaultVal;
         }
@@ -190,7 +191,12 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
     // next.assign and next.clear known to be empty.
     for_each_field_id<T>([&](auto id) {
       using Id = decltype(id);
-      if (ensured<Id>()) {
+      if (next.toThrift().patchPrior()->get(id)->toThrift().clear() == true) {
+        // Complete replacement
+        patchPrior<Id>() =
+            *std::forward<U>(next).toThrift().patchPrior()->get(id);
+        resetValue(getEnsure<Id>(data_));
+      } else if (ensured<Id>()) {
         // All values will be set before next, so ignore next.ensure and
         // merge next.patchPrior and next.patch into this.patch.
         auto temp = *std::forward<U>(next).toThrift().patch()->get(id);
@@ -198,18 +204,20 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
             *std::forward<U>(next).toThrift().patchPrior()->get(id));
         patchAfter<Id>().merge(std::move(temp));
         return;
+      } else {
+        // Merge anything in patchAfter into patchPrior.
+        patchPrior<Id>().merge(std::move(patchAfter<Id>()));
+        // Merge in next.patchPrior into patchPrior.
+        patchPrior<Id>().merge(
+            *std::forward<U>(next).toThrift().patchPrior()->get(id));
       }
 
-      // Merge anything (oddly) in patchAfter into patchPrior.
-      patchPrior<Id>().merge(std::move(patchAfter<Id>()));
-      // Merge in next.patchPrior into patchPrior.
-      patchPrior<Id>().merge(
-          *std::forward<U>(next).toThrift().patchPrior()->get(id));
       // Consume next.ensure, if any.
       if (next.template ensured<decltype(id)>()) {
         getEnsure<Id>(data_) =
-            *get(id, *std::forward<U>(next).toThrift().ensure());
+            *op::get<Id>(*std::forward<U>(next).toThrift().ensure());
       }
+
       // Consume next.patchAfter.
       patchAfter<Id>() = *std::forward<U>(next).toThrift().patch()->get(id);
     });
@@ -220,17 +228,19 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
   using Base::data_;
   using Base::get;
   using Base::mergeAssignAndClear;
+  template <typename Id>
+  using as_id = get_field_id<Id, T>;
 
   template <typename Id>
   decltype(auto) patchPrior() {
     ensurePatchable();
     // Field Ids must always be used to access patchPrior.
-    return *data_.patchPrior()->get(get_field_id<T, Id>{});
+    return *data_.patchPrior()->get(as_id<Id>{});
   }
 
   template <typename Id, typename U>
   static decltype(auto) getEnsure(U&& data) {
-    return get(get_field_id<T, Id>{}, *data.ensure());
+    return op::get<Id>(*data.ensure());
   }
 
   template <typename Id>
@@ -251,7 +261,7 @@ class StructPatch : public BaseClearPatch<Patch, StructPatch<Patch>> {
   decltype(auto) patchAfter() {
     ensurePatchable();
     // Field Ids must always be used to access patch(After).
-    return *data_.patch()->get(get_field_id<T, Id>{});
+    return *data_.patch()->get(as_id<Id>{});
   }
 
   void ensurePatchable() {

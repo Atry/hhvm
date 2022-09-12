@@ -14,25 +14,26 @@
  * limitations under the License.
  */
 
-#pragma once
+namespace cpp2 interactions.test.thrift
 
-#include <folly/Traits.h>
-#include <thrift/lib/cpp2/op/detail/Ensure.h>
+struct Point {
+  1: i32 x;
+  2: i32 y;
+}
 
-namespace apache {
-namespace thrift {
-namespace op {
+interaction Addition {
+  void accumulatePrimitive(1: i32 a);
+  void accumulatePoint(1: Point a);
+  i32 getPrimitive();
+  Point getPoint();
+  oneway void noop();
+  list<string> func();
+}
 
-// TODO: move to Create.h
-// Ensures the given field. If the field doesn't exist, emplaces the field.
-// For example:
-//   // calls foo.field_ref().ensure()
-//   ensure<field_tag>(foo.field_ref(), foo)
-//   // constructs a smart pointer if doesn't exist.
-//   ensure<field_tag>(foo.smart_ptr_ref(), foo)
-template <typename Tag>
-FOLLY_INLINE_VARIABLE constexpr detail::Ensure<Tag> ensure{};
-
-} // namespace op
-} // namespace thrift
-} // namespace apache
+service Calculator {
+  performs Addition;
+  Addition newAddition();
+  Addition, i32 initializedAddition(1: i32 a);
+  Addition, string stringifiedAddition(1: i32 a);
+  i32 addPrimitive(1: i32 a, 2: i32 b);
+}

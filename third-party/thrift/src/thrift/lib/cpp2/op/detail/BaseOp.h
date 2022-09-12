@@ -27,18 +27,42 @@ namespace op {
 namespace detail {
 using FieldId = type::FieldId;
 using Ptr = type::detail::Ptr;
-using RuntimeBase = type::detail::RuntimeBase;
+using Dyn = type::detail::Dyn;
 using RuntimeType = type::detail::RuntimeType;
 using TypeInfo = type::detail::TypeInfo;
 
+template <typename Tag>
+const TypeInfo& getAnyTypeInfo();
+
+// Create a AnyOp-based Thrift runtime type.
+template <typename Tag, typename T = type::native_type<Tag>>
+RuntimeType getAnyType() {
+  static_assert(
+      std::is_same<folly::remove_cvref_t<T>, type::native_type<Tag>>::value,
+      "type missmatch");
+  return RuntimeType::create<T>(getAnyTypeInfo<Tag>());
+}
+
+// Compile-time and type-erased Thrift operator implementations.
+template <typename Tag, typename = void>
+struct AnyOp;
+
 // Ops all Thrift types support.
 template <typename Tag>
-struct BaseAnyOp : type::detail::BaseErasedOp {
+struct BaseOp : type::detail::BaseErasedOp {
   // Blind convert the pointer to the native type.
   using T = type::native_type<Tag>;
   static T& ref(void* ptr) { return *static_cast<T*>(ptr); }
   static const T& ref(const void* ptr) { return cref(ptr); }
   static const T& cref(const void* ptr) { return *static_cast<const T*>(ptr); }
+  template <typename RTag, typename T>
+  static Ptr ret(T&& val) {
+    return {getAnyType<RTag, T>(), &val};
+  }
+  template <typename RTag, typename T>
+  static Ptr ret(RTag, T&& val) {
+    return ret<RTag>(std::forward<T>(val));
+  }
 
   static void delete_(void* ptr) { delete static_cast<T*>(ptr); }
   static void* make(void* ptr, bool consume) {
@@ -52,15 +76,15 @@ struct BaseAnyOp : type::detail::BaseErasedOp {
   }
   static bool empty(const void* ptr) { return op::isEmpty<Tag>(ref(ptr)); }
   static void clear(void* ptr) { op::clear<Tag>(ref(ptr)); }
-  static bool identical(const void* lhs, const RuntimeBase& rhs) {
+  static bool identical(const void* lhs, const Dyn& rhs) {
     // Caller should have already checked the types match.
     assert(rhs.type() == Tag{});
     return op::identical<Tag>(ref(lhs), rhs.as<Tag>());
   }
 
-  static partial_ordering compare(const void* lhs, const RuntimeBase& rhs) {
+  static partial_ordering compare(const void* lhs, const Dyn& rhs) {
     if (const T* ptr = rhs.tryAs<Tag>()) {
-      return cmp<Tag>(ref(lhs), *ptr);
+      return partialCmp<Tag>(ref(lhs), *ptr);
     }
     // TODO(afuller): Throw bad_op() when all compatible type overloads are
     // implemented.
@@ -69,11 +93,11 @@ struct BaseAnyOp : type::detail::BaseErasedOp {
 
  private:
   template <typename UTag>
-  static if_comparable<UTag> cmp(const T& lhs, const T& rhs) {
+  static if_comparable<UTag> partialCmp(const T& lhs, const T& rhs) {
     return to_partial_ordering(op::compare<Tag>(lhs, rhs));
   }
   template <typename UTag>
-  static if_not_comparable<UTag> cmp(const T& lhs, const T& rhs) {
+  static if_not_comparable<UTag> partialCmp(const T& lhs, const T& rhs) {
     return op::equal<Tag>(lhs, rhs) ? partial_ordering::eq
                                     : partial_ordering::ne;
   }

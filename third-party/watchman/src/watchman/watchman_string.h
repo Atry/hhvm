@@ -9,22 +9,20 @@
 
 #include "watchman/watchman_system.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-#include <atomic>
-#include <cstring>
-#include <initializer_list>
-#include <memory>
-#ifdef _WIN32
-#include <string>
-#endif
 #include <fmt/format.h>
 #include <folly/Conv.h>
-#include <folly/Range.h>
+#include <folly/FBString.h>
 #include <folly/ScopeGuard.h>
+
+#include <stdint.h>
+#include <string.h>
+
+#include <atomic>
+#include <initializer_list>
+#include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
-#include <vector>
 
 class w_string_piece;
 
@@ -60,24 +58,19 @@ inline uint32_t w_string_hval(w_string_t* str) {
   return w_string_compute_hval(str);
 }
 
-w_string_piece w_string_canon_path(w_string_t* str);
-int w_string_compare(const w_string_t* a, const w_string_t* b);
+/**
+ * Trims all trailing slashes from a path.
+ */
+w_string_piece w_string_canon_path(w_string_piece str);
 
-bool w_string_equal(const w_string_t* a, const w_string_t* b);
-bool w_string_equal_cstring(const w_string_t* a, const char* b);
-
-bool w_string_path_is_absolute(const w_string_t* str);
-
-bool w_string_startswith(w_string_t* str, w_string_t* prefix);
-bool w_string_startswith_caseless(w_string_t* str, w_string_t* prefix);
-
-bool w_string_is_known_unicode(w_string_t* str);
-bool w_string_is_null_terminated(w_string_t* str);
+/**
+ * Returns true if the specified string is an absolute path.
+ * On Windows, this accounts for UNC paths (which are absolute) and
+ * drive-relative paths (which are not).
+ */
+bool w_string_path_is_absolute(w_string_piece path);
 
 uint32_t strlen_uint32(const char* str);
-
-bool w_is_path_absolute_cstr(const char* path);
-bool w_is_path_absolute_cstr_len(const char* path, uint32_t len);
 
 inline bool is_slash(char c) {
   return c == '/'
@@ -93,46 +86,29 @@ class w_string;
  * It is simply a pair of pointers that define the start and end
  * of the valid region. */
 class w_string_piece {
-  const char *s_, *e_;
+  const char* str_;
+  size_t len_;
 
  public:
-  w_string_piece();
-  /* implicit */ w_string_piece(std::nullptr_t);
+  w_string_piece() : str_{nullptr}, len_{0} {}
 
-  /* implicit */ w_string_piece(w_string_t* str)
-      : s_(str->buf), e_(str->buf + str->len) {}
+  /* implicit */ w_string_piece(const std::string& str)
+      : str_{str.data()}, len_{str.size()} {}
 
-  /** Construct from a string-like object */
-  template <
-      typename String,
-      typename std::enable_if<
-          std::is_class<String>::value &&
-              !std::is_same<String, w_string>::value,
-          int>::type = 0>
-  /* implicit */ w_string_piece(const String& str)
-      : s_(str.data()), e_(str.data() + str.size()) {}
+  /* implicit */ w_string_piece(const folly::fbstring& str)
+      : str_{str.data()}, len_{str.size()} {}
 
-  /** Construct from w_string.  This is almost the same as
-   * the string like object constructor above, but we need a nullptr check
-   */
-  template <
-      typename String,
-      typename std::enable_if<std::is_same<String, w_string>::value, int>::
-          type = 0>
-  /* implicit */ w_string_piece(const String& str) {
-    if (!str) {
-      s_ = nullptr;
-      e_ = nullptr;
-    } else {
-      s_ = str.data();
-      e_ = str.data() + str.size();
-    }
-  }
+  /* implicit */ w_string_piece(std::nullptr_t) = delete;
 
   /* implicit */ w_string_piece(const char* cstr)
-      : s_(cstr), e_(cstr + strlen(cstr)) {}
+      : str_(cstr), len_(strlen(cstr)) {}
 
-  w_string_piece(const char* cstr, size_t len) : s_(cstr), e_(cstr + len) {}
+  w_string_piece(const char* cstr, size_t len) : str_(cstr), len_(len) {}
+
+  w_string_piece(const char* begin, const char* end)
+      : str_{begin}, len_{static_cast<size_t>(end - begin)} {
+    assert(end >= begin);
+  }
 
   /* implicit */ w_string_piece(std::string_view sv)
       : w_string_piece{sv.data(), sv.size()} {}
@@ -141,28 +117,29 @@ class w_string_piece {
   w_string_piece& operator=(const w_string_piece& other) = default;
   w_string_piece(w_string_piece&& other) noexcept;
 
-  const char* data() const {
-    return s_;
+  const char* data() const noexcept {
+    return str_;
   }
 
-  bool empty() const {
-    return e_ == s_;
+  bool empty() const noexcept {
+    return len_ == 0;
   }
 
-  size_t size() const {
-    return e_ - s_;
+  size_t size() const noexcept {
+    return len_;
   }
 
-  const char& operator[](size_t i) const {
-    return s_[i];
+  const char& operator[](size_t i) const noexcept {
+    return str_[i];
   }
 
   /** move the start of the string by n characters, stripping off that prefix */
   void advance(size_t n) {
-    if (n > size()) {
+    if (n > len_) {
       throw std::range_error("index out of range");
     }
-    s_ += n;
+    str_ += n;
+    len_ -= n;
   }
 
   /** Return a copy of the string as a w_string */
@@ -191,9 +168,10 @@ class w_string_piece {
   /** Split the string by delimiter and emit to the provided vector */
   template <typename Vector>
   void split(Vector& result, char delim) const {
-    const char* begin = s_;
+    const char* begin = str_;
+    const char* const end = str_ + len_;
     const char* it = begin;
-    while (it != e_) {
+    while (it != end) {
       if (*it == delim) {
         result.emplace_back(begin, it - begin);
         begin = ++it;
@@ -202,8 +180,8 @@ class w_string_piece {
       ++it;
     }
 
-    if (begin != e_) {
-      result.emplace_back(begin, e_ - begin);
+    if (begin != end) {
+      result.emplace_back(begin, end - begin);
     }
   }
 
@@ -212,13 +190,20 @@ class w_string_piece {
   }
 
   std::string_view view() const {
-    std::size_t count = e_ - s_;
-    return std::string_view{s_, count};
+    return std::string_view{str_, len_};
   }
 
-  bool operator==(w_string_piece other) const;
-  bool operator!=(w_string_piece other) const;
-  bool operator<(w_string_piece other) const;
+  friend bool operator==(w_string_piece lhs, w_string_piece rhs) {
+    return lhs.view() == rhs.view();
+  }
+
+  friend bool operator!=(w_string_piece lhs, w_string_piece rhs) {
+    return lhs.view() != rhs.view();
+  }
+
+  friend bool operator<(w_string_piece lhs, w_string_piece rhs) {
+    return lhs.view() < rhs.view();
+  }
 
   bool contains(w_string_piece needle) const;
   bool startsWith(w_string_piece prefix) const;
@@ -289,7 +274,7 @@ class w_string {
    */
   void reset() noexcept;
 
-  operator w_string_t*() const {
+  w_string_t* ptr() const {
     return str_;
   }
 
@@ -304,7 +289,7 @@ class w_string {
    * Returns a std::string_view covering this w_string's data. Returns the empty
    * string_view if null.
    */
-  std::string_view view() const {
+  std::string_view view() const noexcept {
     if (str_ == nullptr) {
       return {};
     }
@@ -315,11 +300,15 @@ class w_string {
    * Returns a w_string_piece covering this w_string's data. Returns the empty
    * w_string_piece if null.
    */
-  w_string_piece piece() const {
+  w_string_piece piece() const noexcept {
     if (str_ == nullptr) {
       return w_string_piece();
     }
     return w_string_piece(data(), size());
+  }
+
+  operator w_string_piece() const noexcept {
+    return piece();
   }
 
   explicit operator bool() const {
@@ -460,7 +449,7 @@ namespace std {
 template <>
 struct hash<w_string> {
   std::size_t operator()(w_string const& str) const {
-    return w_string_hval(str);
+    return w_string_hval(str.ptr());
   }
 };
 template <>

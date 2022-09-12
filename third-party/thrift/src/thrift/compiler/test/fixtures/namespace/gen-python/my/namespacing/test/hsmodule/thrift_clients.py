@@ -17,6 +17,7 @@ from thrift.python.client import (
     SyncClient as _fbthrift_python_SyncClient,
     Client as _fbthrift_python_Client,
 )
+from thrift.python.client.omni_client import InteractionMethodPosition as _fbthrift_InteractionMethodPosition, FunctionQualifier as _fbthrift_FunctionQualifier  # type: ignore 
 import thrift.python.exceptions as _fbthrift_python_exceptions
 import thrift.python.types as _fbthrift_python_types
 import python_module_root.my.namespacing.test.hsmodule.thrift_types
@@ -44,12 +45,13 @@ class HsTestService(_fbthrift_python_Client["HsTestService.Async", "HsTestServic
             self,
             int1: int
         ) -> int:
-            _fbthrift_resp = await self._send_request(
+            _fbthrift_resp = await self._send_request(  # type: ignore 
                 "HsTestService",
                 "init",
                 python_module_root.my.namespacing.test.hsmodule.thrift_types._fbthrift_HsTestService_init_args(
                     int1=int1,),
                 python_module_root.my.namespacing.test.hsmodule.thrift_types._fbthrift_HsTestService_init_result,
+                qualifier = _fbthrift_FunctionQualifier.Unspecified,  # type: ignore 
             )
             # shortcut to success path for non-void returns
             if _fbthrift_resp.success is not None:
@@ -87,4 +89,3 @@ class HsTestService(_fbthrift_python_Client["HsTestService.Async", "HsTestServic
                 "Empty Response",
             )
     
-

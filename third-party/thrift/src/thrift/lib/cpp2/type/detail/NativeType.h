@@ -82,18 +82,18 @@ struct CppTag {
   using type = cpp_type<T, Tag>;
 };
 
-template <template <typename...> class T, typename ValTag>
+template <template <typename...> class T, typename VTag>
 using parameterized_type = folly::conditional_t<
-    is_concrete_v<ValTag>,
-    ConcreteType<standard_template_t<T, ValTag>, native_template_t<T, ValTag>>,
+    is_concrete_v<VTag>,
+    ConcreteType<standard_template_t<T, VTag>, native_template_t<T, VTag>>,
     AbstractType>;
 
-template <template <typename...> class T, typename KeyTag, typename ValTag>
+template <template <typename...> class T, typename KTag, typename VTag>
 using parameterized_kv_type = folly::conditional_t<
-    is_concrete_v<KeyTag> && is_concrete_v<ValTag>,
+    is_concrete_v<KTag> && is_concrete_v<VTag>,
     ConcreteType<
-        standard_template_t<T, KeyTag, ValTag>,
-        native_template_t<T, KeyTag, ValTag>>,
+        standard_template_t<T, KTag, VTag>,
+        native_template_t<T, KTag, VTag>>,
     AbstractType>;
 
 template <>
@@ -159,18 +159,17 @@ template <typename T>
 struct NativeTypes<exception_t<T>> : ConcreteType<T> {};
 
 // Traits for lists.
-template <typename ValTag>
-struct NativeTypes<type::list<ValTag>>
-    : parameterized_type<std::vector, ValTag> {};
+template <typename VTag>
+struct NativeTypes<type::list<VTag>> : parameterized_type<std::vector, VTag> {};
 
 // Traits for sets.
-template <typename KeyTag>
-struct NativeTypes<set<KeyTag>> : parameterized_type<std::set, KeyTag> {};
+template <typename KTag>
+struct NativeTypes<set<KTag>> : parameterized_type<std::set, KTag> {};
 
 // Traits for maps.
-template <typename KeyTag, typename ValTag>
-struct NativeTypes<map<KeyTag, ValTag>>
-    : parameterized_kv_type<std::map, KeyTag, ValTag> {};
+template <typename KTag, typename VTag>
+struct NativeTypes<map<KTag, VTag>>
+    : parameterized_kv_type<std::map, KTag, VTag> {};
 
 // Traits for adapted types.
 //
@@ -184,10 +183,11 @@ struct NativeTypes<adapted<Adapter, Tag>>
 
 // Traits for cpp_type types.
 //
-// cpp_type types are concrete and have special native_type.
+// cpp_type types have a special native_type.
 template <typename T, typename Tag>
-struct NativeTypes<cpp_type<T, Tag>>
-    : ConcreteType<typename NativeTypes<Tag>::standard_type, T> {};
+struct NativeTypes<cpp_type<T, Tag>> : NativeTypes<Tag> {
+  using native_type = T;
+};
 
 // Traits for field type tag.
 //

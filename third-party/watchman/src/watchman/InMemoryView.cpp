@@ -603,11 +603,11 @@ void InMemoryView::timeGenerator(const Query* query, QueryContext* ctx) const {
 }
 
 void InMemoryView::pathGenerator(const Query* query, QueryContext* ctx) const {
-  w_string_t* relative_root;
+  w_string_piece relative_root;
   struct watchman_file* f;
 
   if (query->relative_root) {
-    relative_root = query->relative_root;
+    relative_root = *query->relative_root;
   } else {
     relative_root = rootPath_;
   }
@@ -623,7 +623,7 @@ void InMemoryView::pathGenerator(const Query* query, QueryContext* ctx) const {
     auto full_name = w_string::pathCat({relative_root, path.name});
 
     // special case of root dir itself
-    if (w_string_equal(rootPath_, full_name)) {
+    if (rootPath_ == full_name) {
       // dirname on the root is outside the root, which is useless
       dir = view->resolveDir(full_name);
       goto is_dir;
@@ -879,7 +879,7 @@ void InMemoryView::globGenerator(const Query* query, QueryContext* ctx) const {
   w_string relative_root;
 
   if (query->relative_root) {
-    relative_root = query->relative_root;
+    relative_root = *query->relative_root;
   } else {
     relative_root = rootPath_;
   }

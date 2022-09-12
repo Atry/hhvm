@@ -19,7 +19,7 @@
 #include <folly/Traits.h>
 #include <thrift/lib/cpp2/op/Clear.h>
 #include <thrift/lib/cpp2/op/Copy.h>
-#include <thrift/lib/cpp2/op/Ensure.h>
+#include <thrift/lib/cpp2/op/Create.h>
 #include <thrift/lib/cpp2/op/Get.h>
 #include <thrift/lib/thrift/gen-cpp2/field_mask_constants.h>
 #include <thrift/lib/thrift/gen-cpp2/field_mask_types.h>
@@ -93,15 +93,15 @@ class MaskRef {
   void throwIfNotMapMask() const;
 };
 
-// Validates the fields in the Struct with the MaskRef.
+// Validates the mask with the given Struct. Ensures that mask doesn't contain
+// fields not in the Struct.
 template <typename Struct>
-bool validate_fields(MaskRef ref) {
+bool validate_mask(MaskRef ref) {
   // Get the field ids in the thrift struct type.
   std::unordered_set<FieldId> ids;
   ids.reserve(op::size_v<Struct>);
-  op::for_each_ordinal<Struct>([&](auto fieldOrdinalTag) {
-    ids.insert(op::get_field_id<Struct, decltype(fieldOrdinalTag)>());
-  });
+  op::for_each_ordinal<Struct>(
+      [&](auto ord) { ids.insert(op::get_field_id<decltype(ord), Struct>()); });
   const FieldIdToMask& map = ref.mask.includes_ref()
       ? ref.mask.includes_ref().value()
       : ref.mask.excludes_ref().value();
@@ -111,20 +111,29 @@ bool validate_fields(MaskRef ref) {
       return false;
     }
   }
+  return true;
+}
+
+// Validates the fields in the Struct with the MaskRef.
+template <typename Struct>
+bool validate_fields(MaskRef ref) {
+  if (!validate_mask<Struct>(ref)) {
+    return false;
+  }
   // Validates each field in the struct.
   bool isValid = true;
-  op::for_each_ordinal<Struct>([&](auto fieldOrdinalTag) {
+  op::for_each_ordinal<Struct>([&](auto ord) {
     if (!isValid) { // short circuit
       return;
     }
-    using OrdinalTag = decltype(fieldOrdinalTag);
-    MaskRef next = ref.get(op::get_field_id<Struct, OrdinalTag>());
+    using Ord = decltype(ord);
+    MaskRef next = ref.get(op::get_field_id<Ord, Struct>());
     if (next.isAllMask() || next.isNoneMask()) {
       return;
     }
     // Check if the field is a thrift struct type. It uses native_type
     // as we don't support adapted struct fields in field mask.
-    using FieldType = op::get_native_type<Struct, OrdinalTag>;
+    using FieldType = op::get_native_type<Ord, Struct>;
     if constexpr (is_thrift_struct_v<FieldType>) {
       // Need to validate the struct type.
       isValid &= detail::validate_fields<FieldType>(next);
@@ -148,67 +157,84 @@ bool is_compatible_with(const Mask& mask) {
 }
 
 // Throws an error if a thrift struct type is not compatible with the mask.
-// TODO(aoka): Check compatibility in ensure, clear, and copy methods.
 template <typename T>
 void errorIfNotCompatible(const Mask& mask) {
   if (!detail::is_compatible_with<T>(mask)) {
-    throw std::runtime_error("The mask and struct are incompatible.");
+    folly::throw_exception<std::runtime_error>(
+        "The mask and struct are incompatible.");
   }
 }
 
 // Ensures the masked fields in the given thrift struct.
 template <typename Struct>
 void ensure_fields(MaskRef ref, Struct& t) {
+  if (!validate_mask<Struct>(ref)) {
+    folly::throw_exception<std::runtime_error>(
+        "The mask and struct are incompatible.");
+  }
   if constexpr (!std::is_const_v<std::remove_reference_t<Struct>>) {
-    op::for_each_ordinal<Struct>([&](auto fieldOrdinalTag) {
-      using OrdinalTag = decltype(fieldOrdinalTag);
-      MaskRef next = ref.get(op::get_field_id<Struct, OrdinalTag>());
+    op::for_each_ordinal<Struct>([&](auto ord) {
+      using Ord = decltype(ord);
+      MaskRef next = ref.get(op::get_field_id<Ord, Struct>());
       if (next.isNoneMask()) {
         return;
       }
-      using FieldTag = op::get_field_tag<Struct, OrdinalTag>;
-      auto&& field_ref = op::get<Struct, OrdinalTag>(t);
+      using FieldTag = op::get_field_tag<Ord, Struct>;
+      auto&& field_ref = op::get<Ord>(t);
       op::ensure<FieldTag>(field_ref, t);
       // Need to ensure the struct object.
-      using FieldType = op::get_native_type<Struct, OrdinalTag>;
+      using FieldType = op::get_native_type<Ord, Struct>;
       if constexpr (is_thrift_struct_v<FieldType>) {
         auto& value = *op::getValueOrNull(field_ref);
         ensure_fields(next, value);
+        return;
+      }
+      if (!next.isAllMask()) {
+        folly::throw_exception<std::runtime_error>(
+            "The mask and struct are incompatible.");
       }
     });
   } else {
-    throw std::runtime_error("Cannot ensure a const object");
+    folly::throw_exception<std::runtime_error>("Cannot ensure a const object");
   }
 }
 
 // Clears the masked fields in the given thrift struct.
 template <typename Struct>
 void clear_fields(MaskRef ref, Struct& t) {
+  if (!validate_mask<Struct>(ref)) {
+    folly::throw_exception<std::runtime_error>(
+        "The mask and struct are incompatible.");
+  }
   if constexpr (!std::is_const_v<std::remove_reference_t<Struct>>) {
-    op::for_each_ordinal<Struct>([&](auto fieldOrdinalTag) {
-      using OrdinalTag = decltype(fieldOrdinalTag);
-      MaskRef next = ref.get(op::get_field_id<Struct, OrdinalTag>());
+    op::for_each_ordinal<Struct>([&](auto ord) {
+      using Ord = decltype(ord);
+      MaskRef next = ref.get(op::get_field_id<Ord, Struct>());
       if (next.isNoneMask()) {
         return;
       }
-      using FieldTag = op::get_field_tag<Struct, OrdinalTag>;
-      auto&& field_ref = op::get<Struct, OrdinalTag>(t);
+      using FieldTag = op::get_field_tag<Ord, Struct>;
+      auto&& field_ref = op::get<Ord>(t);
       if (next.isAllMask()) {
         op::clear_field<FieldTag>(field_ref, t);
         return;
       }
+      using FieldType = op::get_native_type<Ord, Struct>;
       auto* field_value = op::getValueOrNull(field_ref);
       if (!field_value) {
+        errorIfNotCompatible<FieldType>(next.mask);
         return;
       }
       // Need to clear the struct object.
-      using FieldType = op::get_native_type<Struct, OrdinalTag>;
       if constexpr (is_thrift_struct_v<FieldType>) {
         clear_fields(next, *field_value);
+        return;
       }
+      folly::throw_exception<std::runtime_error>(
+          "The mask and struct are incompatible.");
     });
   } else {
-    throw std::runtime_error("Cannot clear a const object");
+    folly::throw_exception<std::runtime_error>("Cannot clear a const object");
   }
 }
 
@@ -231,21 +257,27 @@ bool copy_fields(MaskRef ref, SrcStruct& src, DstStruct& dst) {
   static_assert(std::is_same_v<
                 folly::remove_cvref_t<SrcStruct>,
                 folly::remove_cvref_t<DstStruct>>);
+  if (!validate_mask<DstStruct>(ref)) {
+    folly::throw_exception<std::runtime_error>(
+        "The mask and struct are incompatible.");
+  }
   if constexpr (!std::is_const_v<std::remove_reference_t<DstStruct>>) {
     bool copied = false;
-    op::for_each_ordinal<DstStruct>([&](auto fieldOrdinalTag) {
-      using OrdinalTag = decltype(fieldOrdinalTag);
-      MaskRef next = ref.get(op::get_field_id<DstStruct, OrdinalTag>());
+    op::for_each_ordinal<DstStruct>([&](auto ord) {
+      using Ord = decltype(ord);
+      MaskRef next = ref.get(op::get_field_id<Ord, DstStruct>());
       // Id doesn't exist in field mask, skip.
       if (next.isNoneMask()) {
         return;
       }
-      using FieldTag = op::get_field_tag<DstStruct, OrdinalTag>;
-      auto&& src_ref = op::get<DstStruct, OrdinalTag>(src);
-      auto&& dst_ref = op::get<DstStruct, OrdinalTag>(dst);
+      using FieldTag = op::get_field_tag<Ord, DstStruct>;
+      using FieldType = op::get_native_type<Ord, DstStruct>;
+      auto&& src_ref = op::get<Ord>(src);
+      auto&& dst_ref = op::get<Ord>(dst);
       bool srcHasValue = bool(op::getValueOrNull(src_ref));
       bool dstHasValue = bool(op::getValueOrNull(dst_ref));
       if (!srcHasValue && !dstHasValue) { // skip
+        errorIfNotCompatible<FieldType>(next.mask);
         return;
       }
       // Id that we want to copy.
@@ -258,7 +290,6 @@ bool copy_fields(MaskRef ref, SrcStruct& src, DstStruct& dst) {
         }
         return;
       }
-      using FieldType = op::get_native_type<DstStruct, OrdinalTag>;
       if constexpr (is_thrift_struct_v<FieldType>) {
         // Field doesn't exist in src, so just clear dst with the mask.
         if (!srcHasValue) {
@@ -280,11 +311,14 @@ bool copy_fields(MaskRef ref, SrcStruct& src, DstStruct& dst) {
           moveObject(dst_ref, std::move(newObject));
           copied = true;
         }
+        return;
       }
+      folly::throw_exception<std::runtime_error>(
+          "The mask and struct are incompatible.");
     });
     return copied;
   } else {
-    throw std::runtime_error("Cannot copy to a const field");
+    folly::throw_exception<std::runtime_error>("Cannot copy to a const field");
   }
 }
 
@@ -300,9 +334,9 @@ template <typename Struct, typename Id, typename... Ids>
 Mask path(const Mask& other) {
   static_assert(is_thrift_struct_v<Struct>);
   Mask mask;
-  using fieldId = op::get_field_id<Struct, Id>;
+  using fieldId = op::get_field_id<Id, Struct>;
   static_assert(fieldId::value != FieldId{});
-  using FieldType = op::get_native_type<Struct, Id>;
+  using FieldType = op::get_native_type<Id, Struct>;
   mask.includes_ref().emplace()[static_cast<int16_t>(fieldId::value)] =
       path<FieldType, Ids...>(other);
   return mask;
@@ -322,22 +356,24 @@ Mask path(
   // static_assert doesn't work as it compiles this code for every field.
   if constexpr (is_thrift_struct_v<Struct>) {
     Mask mask;
-    op::for_each_field_id<Struct>([&](auto fieldId) {
+    op::for_each_field_id<Struct>([&](auto id) {
+      using Id = decltype(id);
       if (mask.includes_ref()) { // already set
         return;
       }
-      if (op::get_name_v<Struct, decltype(fieldId)> == fieldNames[index]) {
-        using FieldType = op::get_native_type<Struct, decltype(fieldId)>;
-        mask.includes_ref().emplace()[static_cast<int16_t>(fieldId())] =
+      if (op::get_name_v<Id, Struct> == fieldNames[index]) {
+        using FieldType = op::get_native_type<Id, Struct>;
+        mask.includes_ref().emplace()[folly::to_underlying(id())] =
             path<FieldType>(fieldNames, index + 1, other);
       }
     });
     if (!mask.includes_ref()) { // field not found
-      throw std::runtime_error("field doesn't exist");
+      folly::throw_exception<std::runtime_error>("field doesn't exist");
     }
     return mask;
   }
-  throw std::runtime_error("Path contains a non thrift struct field.");
+  folly::throw_exception<std::runtime_error>(
+      "Path contains a non thrift struct field.");
 }
 
 // Throws a runtime error if the mask contains a map mask.
@@ -346,11 +382,11 @@ void throwIfContainsMapMask(const Mask& mask);
 template <typename Struct>
 void compare_impl(
     const Struct& original, const Struct& modified, FieldIdToMask& mask) {
-  op::for_each_field_id<Struct>([&](auto fieldIdTag) {
-    using FieldIdTag = decltype(fieldIdTag);
-    int16_t fieldId = static_cast<int16_t>(fieldIdTag());
-    auto&& original_field = op::get<Struct, FieldIdTag>(original);
-    auto&& modified_field = op::get<Struct, FieldIdTag>(modified);
+  op::for_each_field_id<Struct>([&](auto id) {
+    using Id = decltype(id);
+    int16_t fieldId = folly::to_underlying(id());
+    auto&& original_field = op::get<Id>(original);
+    auto&& modified_field = op::get<Id>(modified);
     auto* original_ptr = op::getValueOrNull(original_field);
     auto* modified_ptr = op::getValueOrNull(modified_field);
 
@@ -365,7 +401,7 @@ void compare_impl(
       return;
     }
     // check if nested fields need to be added to mask
-    using FieldType = op::get_native_type<Struct, FieldIdTag>;
+    using FieldType = op::get_native_type<Id, Struct>;
     if constexpr (is_thrift_struct_v<FieldType>) {
       compare_impl(
           *original_ptr, *modified_ptr, mask[fieldId].includes_ref().emplace());
@@ -375,4 +411,9 @@ void compare_impl(
     mask[fieldId] = field_mask_constants::allMask();
   });
 }
+
+// Returns the MapId in map mask of the given Value key.
+// If it doesn't exist, it returns the new MapId (pointer to the key).
+// Assumes the map mask uses pointers to keys.
+MapId findMapIdByValue(const Mask& mask, const Value& key);
 } // namespace apache::thrift::protocol::detail

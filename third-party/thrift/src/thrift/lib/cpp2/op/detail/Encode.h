@@ -76,8 +76,8 @@ template <typename Tag>
 struct TypeTagToTType<type::set<Tag>> {
   static constexpr TType value = TType::T_SET;
 };
-template <typename KeyTag, typename ValueTag>
-struct TypeTagToTType<type::map<KeyTag, ValueTag>> {
+template <typename KTag, typename ValueTag>
+struct TypeTagToTType<type::map<KTag, ValueTag>> {
   static constexpr TType value = TType::T_MAP;
 };
 template <typename Tag>
@@ -254,9 +254,8 @@ inline uint32_t checked_container_size(size_t size) {
 
 template <bool ZeroCopy, typename Tag>
 struct SerializedSize<ZeroCopy, type::list<Tag>> {
-  template <typename Protocol>
-  uint32_t operator()(
-      Protocol& prot, const type::native_type<type::list<Tag>>& list) const {
+  template <typename Protocol, typename ListType>
+  uint32_t operator()(Protocol& prot, const ListType& list) const {
     uint32_t xfer = 0;
     xfer += prot.serializedSizeListBegin(
         typeTagToTType<Tag>, checked_container_size(list.size()));
@@ -270,9 +269,8 @@ struct SerializedSize<ZeroCopy, type::list<Tag>> {
 
 template <bool ZeroCopy, typename Tag>
 struct SerializedSize<ZeroCopy, type::set<Tag>> {
-  template <typename Protocol>
-  uint32_t operator()(
-      Protocol& prot, const type::native_type<type::set<Tag>>& set) const {
+  template <typename Protocol, typename SetType>
+  uint32_t operator()(Protocol& prot, const SetType& set) const {
     uint32_t xfer = 0;
     xfer += prot.serializedSizeSetBegin(
         typeTagToTType<Tag>, checked_container_size(set.size()));
@@ -286,10 +284,8 @@ struct SerializedSize<ZeroCopy, type::set<Tag>> {
 
 template <bool ZeroCopy, typename Key, typename Value>
 struct SerializedSize<ZeroCopy, type::map<Key, Value>> {
-  template <typename Protocol>
-  uint32_t operator()(
-      Protocol& prot,
-      const type::native_type<type::map<Key, Value>>& map) const {
+  template <typename Protocol, typename MapType>
+  uint32_t operator()(Protocol& prot, const MapType& map) const {
     uint32_t xfer = 0;
     xfer += prot.serializedSizeMapBegin(
         typeTagToTType<Key>,
@@ -304,15 +300,9 @@ struct SerializedSize<ZeroCopy, type::map<Key, Value>> {
   }
 };
 
-// TODO: Handle cpp_type with containers that cannot use static_cast.
 template <bool ZeroCopy, typename T, typename Tag>
-struct SerializedSize<ZeroCopy, type::cpp_type<T, Tag>> {
-  template <typename Protocol>
-  uint32_t operator()(Protocol& prot, const T& t) const {
-    return SerializedSize<ZeroCopy, Tag>{}(
-        prot, static_cast<type::native_type<Tag>>(t));
-  }
-};
+struct SerializedSize<ZeroCopy, type::cpp_type<T, Tag>>
+    : SerializedSize<ZeroCopy, Tag> {};
 
 // TODO: Use serializedSize in adapter to optimize.
 template <bool ZeroCopy, typename Adapter, typename Tag>
@@ -433,9 +423,8 @@ struct Encode<type::enum_t<T>> {
 // TODO: add optimization used in protocol_methods.h
 template <typename Tag>
 struct Encode<type::list<Tag>> {
-  template <typename Protocol>
-  uint32_t operator()(
-      Protocol& prot, const type::native_type<type::list<Tag>>& list) const {
+  template <typename Protocol, typename T>
+  uint32_t operator()(Protocol& prot, const T& list) const {
     uint32_t xfer = 0;
     xfer += prot.writeListBegin(
         typeTagToTType<Tag>, checked_container_size(list.size()));
@@ -449,9 +438,8 @@ struct Encode<type::list<Tag>> {
 
 template <typename Tag>
 struct Encode<type::set<Tag>> {
-  template <typename Protocol>
-  uint32_t operator()(
-      Protocol& prot, const type::native_type<type::set<Tag>>& set) const {
+  template <typename Protocol, typename T>
+  uint32_t operator()(Protocol& prot, const T& set) const {
     uint32_t xfer = 0;
     xfer += prot.writeSetBegin(
         typeTagToTType<Tag>, checked_container_size(set.size()));
@@ -465,10 +453,8 @@ struct Encode<type::set<Tag>> {
 
 template <typename Key, typename Value>
 struct Encode<type::map<Key, Value>> {
-  template <typename Protocol>
-  uint32_t operator()(
-      Protocol& prot,
-      const type::native_type<type::map<Key, Value>>& map) const {
+  template <typename Protocol, typename T>
+  uint32_t operator()(Protocol& prot, const T& map) const {
     uint32_t xfer = 0;
     xfer += prot.writeMapBegin(
         typeTagToTType<Key>,
@@ -483,14 +469,8 @@ struct Encode<type::map<Key, Value>> {
   }
 };
 
-// TODO: Handle cpp_type with containers that cannot use static_cast.
 template <typename T, typename Tag>
-struct Encode<type::cpp_type<T, Tag>> {
-  template <typename Protocol>
-  uint32_t operator()(Protocol& prot, const T& t) const {
-    return Encode<Tag>{}(prot, static_cast<type::native_type<Tag>>(t));
-  }
-};
+struct Encode<type::cpp_type<T, Tag>> : Encode<Tag> {};
 
 template <typename Adapter, typename Tag>
 struct Encode<type::adapted<Adapter, Tag>> {
@@ -619,8 +599,7 @@ struct Decode<type::enum_t<T>> {
 // TODO: add optimization used in protocol_methods.h
 template <typename Tag>
 struct Decode<type::list<Tag>> {
-  using ListType = type::native_type<type::list<Tag>>;
-  template <typename Protocol>
+  template <typename Protocol, typename ListType>
   void operator()(Protocol& prot, ListType& list) const {
     TType t;
     uint32_t s;
@@ -642,8 +621,7 @@ struct Decode<type::list<Tag>> {
 
 template <typename Tag>
 struct Decode<type::set<Tag>> {
-  using SetType = type::native_type<type::set<Tag>>;
-  template <typename Protocol>
+  template <typename Protocol, typename SetType>
   void operator()(Protocol& prot, SetType& set) const {
     TType t;
     uint32_t s;
@@ -666,8 +644,7 @@ struct Decode<type::set<Tag>> {
 
 template <typename Key, typename Value>
 struct Decode<type::map<Key, Value>> {
-  using MapType = type::native_type<type::map<Key, Value>>;
-  template <typename Protocol>
+  template <typename Protocol, typename MapType>
   void operator()(Protocol& prot, MapType& map) const {
     TType keyType, valueType;
     uint32_t s;
@@ -691,7 +668,6 @@ struct Decode<type::map<Key, Value>> {
   }
 };
 
-// TODO: Handle cpp_type with containers that cannot use static_cast.
 template <typename T, typename Tag>
 struct Decode<type::cpp_type<T, Tag>> {
   template <typename Protocol>
@@ -701,6 +677,16 @@ struct Decode<type::cpp_type<T, Tag>> {
     t = static_cast<T>(u);
   }
 };
+
+template <typename T, typename Tag>
+struct Decode<type::cpp_type<T, type::list<Tag>>> : Decode<type::list<Tag>> {};
+
+template <typename T, typename Tag>
+struct Decode<type::cpp_type<T, type::set<Tag>>> : Decode<type::set<Tag>> {};
+
+template <typename T, typename Key, typename Value>
+struct Decode<type::cpp_type<T, type::map<Key, Value>>>
+    : Decode<type::map<Key, Value>> {};
 
 // TODO: Use inplace adapter deserialization as optimization.
 template <typename Adapter, typename Tag>

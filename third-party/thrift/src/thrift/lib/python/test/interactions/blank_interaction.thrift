@@ -14,22 +14,11 @@
  * limitations under the License.
  */
 
-#include <thrift/lib/cpp2/protocol/detail/Object.h>
+namespace cpp2 interactions.test.thrift
 
-namespace apache::thrift::protocol::detail {
-
-int64_t getMaskKey(MaskRef ref, const Value& newKey) {
-  if (ref.isMapMask()) {
-    MapIdToMask map = ref.mask.includes_map_ref()
-        ? ref.mask.includes_map_ref().value()
-        : ref.mask.excludes_map_ref().value();
-    for (auto& [key, next] : map) {
-      if (*(reinterpret_cast<Value*>(key)) == newKey) {
-        return key;
-      }
-    }
-  }
-  return 0;
+interaction Blank {
 }
 
-} // namespace apache::thrift::protocol::detail
+service BlankService {
+  performs Blank;
+} (cpp.name = "BlankServiceRenamed")

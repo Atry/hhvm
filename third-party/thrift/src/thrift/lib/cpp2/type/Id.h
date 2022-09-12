@@ -19,7 +19,7 @@
 // Thrift supports a number of different types of identifiers, including
 //  - FieldId - The numeric identifier for a field.
 //  - Ident - The assigned 'name' for a definition.
-//  - Oridnal - The 1-based order at which a definition was defined in the
+//  - Ordinal - The 1-based order at which a definition was defined in the
 //  IDL/AST.
 #pragma once
 
@@ -80,6 +80,10 @@ FOLLY_INLINE_VARIABLE constexpr bool is_type_tag_v = false;
 template <class Id>
 FOLLY_INLINE_VARIABLE constexpr bool
     is_type_tag_v<Id, decltype(is_type_tag_impl(FOLLY_DECLVAL(Id &&)))> = true;
+
+// TODO(afuller): Static assert bounds check.
+template <size_t pos>
+using pos_to_ordinal = ordinal<pos + 1>;
 } // namespace detail
 
 // If the given type can be used to identify a definition.
