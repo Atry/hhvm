@@ -25,14 +25,7 @@
               "libdwarf-20210528"
             ];
           };
-        in
-        rec {
-          packages.hhvm = pkgs.callPackage ./hhvm_default.nix { } self.lastModifiedDate;
-          packages.hhvm_impure = pkgs.callPackage ./hhvm_impure.nix { } self.lastModifiedDate;
-          packages.hhvm_clang = pkgs.callPackage ./hhvm_clang.nix { } self.lastModifiedDate;
-          packages.default = packages.hhvm;
-
-          checks.quick = pkgs.runCommand
+          quickTest = hhvm: pkgs.runCommand
             "hhvm-quick-test"
             {
               buildInputs = pkgs.lib.optionals pkgs.hostPlatform.isMacOS [
@@ -43,9 +36,20 @@
             ''
               set -ex
               cd ${./.}
-              HHVM_BIN="${packages.hhvm}/bin/hhvm" "${packages.hhvm}/bin/hhvm" hphp/test/run.php quick
+              HHVM_BIN="${hhvm}/bin/hhvm" "${hhvm}/bin/hhvm" hphp/test/run.php quick
               mkdir $out
             '';
+
+        in
+        rec {
+          packages.hhvm = pkgs.callPackage ./hhvm_default.nix { } self.lastModifiedDate;
+          packages.hhvm_impure = pkgs.callPackage ./hhvm_impure.nix { } self.lastModifiedDate;
+          packages.hhvm_clang = pkgs.callPackage ./hhvm_clang.nix { } self.lastModifiedDate;
+          packages.default = packages.hhvm;
+
+          checks.hhvm = quickTest packages.hhvm;
+          checks.hhvm_impure = quickTest packages.hhvm_impure;
+          checks.hhvm_clang = quickTest packages.hhvm_clang;
 
           devShells.default =
             pkgs.mkShell
