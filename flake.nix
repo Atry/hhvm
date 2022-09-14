@@ -25,6 +25,22 @@
               "libdwarf-20210528"
             ];
           };
+          devShellForPackage = hhvm:
+            pkgs.callPackage "${nixpkgs.outPath}/pkgs/build-support/mkshell/default.nix"
+              { stdenv = hhvm.stdenv; }
+              {
+                inputsFrom = [
+                  hhvm
+                ];
+                packages = [
+                  pkgs.rnix-lsp
+                  pkgs.fpm
+                  pkgs.rpm
+                ];
+                inherit (hhvm)
+                  NIX_CFLAGS_COMPILE
+                  CMAKE_INIT_CACHE;
+              };
         in
         rec {
           packages.hhvm = pkgs.callPackage ./hhvm_default.nix { } self.lastModifiedDate;
@@ -32,21 +48,8 @@
           packages.hhvm_clang = pkgs.callPackage ./hhvm_clang.nix { } self.lastModifiedDate;
           packages.default = packages.hhvm;
 
-          devShells.default =
-            pkgs.mkShell
-              {
-                inputsFrom = [
-                  packages.hhvm
-                ];
-                packages = [
-                  pkgs.rnix-lsp
-                  pkgs.fpm
-                  pkgs.rpm
-                ];
-                inherit (packages.hhvm)
-                  NIX_CFLAGS_COMPILE
-                  CMAKE_INIT_CACHE;
-              };
+          devShells.clang = devShellForPackage packages.hhvm_clang;
+          devShells.default = devShellForPackage packages.hhvm;
 
           ${if pkgs.hostPlatform.isLinux then "bundlers" else null} =
             let
