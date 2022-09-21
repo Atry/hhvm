@@ -85,7 +85,7 @@ jobs:
     - name: Assume the AWS role
       continue-on-error: true
       id: configure-aws-credentials
-      if: github.event_name != 'pull_request'
+      if: github.event_name == 'push' && github.ref_type == 'tag'
       uses: aws-actions/configure-aws-credentials@v1
       with:
         role-to-assume: arn:aws:iam::223121549624:role/hhvm-github-actions
