@@ -1,0 +1,1 @@
+/workspaces/hhvm/third-party/mcrouter/mcrouter-thrift-codegen.cmake

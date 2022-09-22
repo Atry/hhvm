@@ -641,6 +641,7 @@ void ConnectOperation::specializedRunImpl() {
         (*conn_options_.getSniServerName()).c_str());
   }
 
+#ifdef MYSQL_OPT_TOS
   if (conn_options_.getDscp().has_value()) {
     // DS field (QOS/TOS level) is 8 bits with DSCP packed into the most
     // significant 6 bits.
@@ -652,6 +653,7 @@ void ConnectOperation::specializedRunImpl() {
           *conn_options_.getDscp());
     }
   }
+#endif
 
   if (conn_options_.getCertValidationCallback()) {
     MysqlCertValidatorCallback callback = mysqlCertValidator;

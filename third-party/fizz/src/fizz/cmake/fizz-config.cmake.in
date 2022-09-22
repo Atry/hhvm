@@ -26,7 +26,6 @@ endif()
 set(FIZZ_LIBRARIES fizz::fizz)
 
 include(CMakeFindDependencyMacro)
-find_dependency(Sodium)
 find_dependency(folly CONFIG)
 find_dependency(ZLIB)
 

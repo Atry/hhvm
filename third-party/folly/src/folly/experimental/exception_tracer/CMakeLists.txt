@@ -63,7 +63,6 @@ if (FOLLY_HAVE_ELF AND FOLLY_HAVE_DWARF)
       folly_exception_tracer_base
       folly_exception_tracer
       folly_exception_counter
-    EXPORT folly
     RUNTIME DESTINATION ${BIN_INSTALL_DIR}
     LIBRARY DESTINATION ${LIB_INSTALL_DIR}
     ARCHIVE DESTINATION ${LIB_INSTALL_DIR}

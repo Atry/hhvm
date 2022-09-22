@@ -60,7 +60,7 @@ endif()
 
 include(CheckAtomic)
 
-find_package(Sodium REQUIRED)
+find_package(LibSodium REQUIRED)
 
 SET(FIZZ_SHINY_DEPENDENCIES "")
 SET(FIZZ_LINK_LIBRARIES "")
@@ -239,7 +239,7 @@ target_include_directories(
     $<INSTALL_INTERFACE:${INCLUDE_INSTALL_DIR}>
     ${FOLLY_INCLUDE_DIR}
     ${OPENSSL_INCLUDE_DIR}
-    ${sodium_INCLUDE_DIR}
+    ${LIBSODIUM_INCLUDE_DIR}
     ${ZSTD_INCLUDE_DIR}
   PRIVATE
     ${GLOG_INCLUDE_DIRS}
@@ -252,7 +252,7 @@ target_link_libraries(fizz
   PUBLIC
     ${FOLLY_LIBRARIES}
     ${OPENSSL_LIBRARIES}
-    sodium
+    ${LIBSODIUM_LIBRARIES}
     Threads::Threads
     ZLIB::ZLIB
     ${ZSTD_LIBRARY}
@@ -319,42 +319,42 @@ SET(FIZZ_TEST_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 if(BUILD_TESTS)
   find_package(GMock 1.8.0 MODULE REQUIRED)
   find_package(GTest 1.8.0 MODULE REQUIRED)
+
+  add_library(fizz_test_support
+    crypto/aead/test/TestUtil.cpp
+    crypto/test/TestUtil.cpp
+    protocol/ech/test/TestUtil.cpp
+    ${FIZZ_TEST_HEADERS}
+  )
+
+  target_link_libraries(fizz_test_support
+    PUBLIC
+      fizz
+      ${LIBGMOCK_LIBRARIES}
+      ${GLOG_LIBRARY}
+  )
+
+  target_compile_definitions(fizz_test_support
+    PUBLIC
+      ${LIBGMOCK_DEFINES}
+  )
+
+  target_include_directories(fizz_test_support
+    SYSTEM
+    PUBLIC
+      ${LIBGMOCK_INCLUDE_DIR}
+      ${LIBGTEST_INCLUDE_DIRS}
+  )
+
+  # export fizz headers and targets for unit tests utils
+  # since other projects such as mvfst and proxygen use them
+  install(
+    TARGETS fizz_test_support
+    EXPORT fizz-exports
+    ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
+    LIBRARY DESTINATION ${LIB_INSTALL_DIR}
+  )
 endif()
-
-add_library(fizz_test_support
-  crypto/aead/test/TestUtil.cpp
-  crypto/test/TestUtil.cpp
-  protocol/ech/test/TestUtil.cpp
-  ${FIZZ_TEST_HEADERS}
-)
-
-target_link_libraries(fizz_test_support
-  PUBLIC
-    fizz
-    ${LIBGMOCK_LIBRARIES}
-    ${GLOG_LIBRARY}
-)
-
-target_compile_definitions(fizz_test_support
-  PUBLIC
-    ${LIBGMOCK_DEFINES}
-)
-
-target_include_directories(fizz_test_support
-  SYSTEM
-  PUBLIC
-    ${LIBGMOCK_INCLUDE_DIR}
-    ${LIBGTEST_INCLUDE_DIRS}
-)
-
-# export fizz headers and targets for unit tests utils
-# since other projects such as mvfst and proxygen use them
-install(
-  TARGETS fizz_test_support
-  EXPORT fizz-exports
-  ARCHIVE DESTINATION ${LIB_INSTALL_DIR}
-  LIBRARY DESTINATION ${LIB_INSTALL_DIR}
-)
 
 foreach(dir ${FIZZ_TEST_HEADER_DIRS})
   get_filename_component(PARENT_DIR "/${dir}" DIRECTORY)

@@ -46,9 +46,11 @@ void Connection::initMysqlOnly() {
   if (!mysql_client_->supportsLocalFiles()) {
     mysql_connection_->mysql()->options.client_flag &= ~CLIENT_LOCAL_FILES;
   }
+#ifdef MYSQL_OPT_SSL_MODE
   // Turn off SSL by default for tests that rely on this.
   enum mysql_ssl_mode ssl_mode = SSL_MODE_DISABLED;
   mysql_options(mysql_connection_->mysql(), MYSQL_OPT_SSL_MODE, &ssl_mode);
+#endif
 }
 
 void Connection::initialize(bool initMysql) {
