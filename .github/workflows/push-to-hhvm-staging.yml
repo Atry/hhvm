@@ -20,5 +20,8 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::223121549624:role/hhvm-github-actions
           aws-region: us-west-2
-      - run: ssh-add <(aws kms decrypt --ciphertext-blob "fileb://$PWD/staging-repo-key.kms-ciphertext" --query Plaintext --output text)
-      - run: git push git@github.com:hhvm/hhvm-staging.git ${{github.ref_name}}
+      - run: |
+          set -ex
+          eval "$(ssh-agent)"
+          aws kms decrypt --ciphertext-blob "fileb://$PWD/staging-repo-key.kms-ciphertext" --query Plaintext --output text | ssh-add -
+          git push git@github.com:hhvm/hhvm-staging.git ${{github.ref_name}}      
