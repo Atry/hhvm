@@ -1,0 +1,24 @@
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  push-to-hhvm-staging:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Assume the AWS role
+        continue-on-error: true
+        id: configure-aws-credentials
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::223121549624:role/hhvm-github-actions
+          aws-region: us-west-2
+      - run: ssh-add <(aws kms decrypt --ciphertext-blob "fileb://$PWD/staging-repo-key.kms-ciphertext" --query Plaintext --output text)
+      - run: git push git@github.com:hhvm/hhvm-staging.git ${{github.ref_name}}
