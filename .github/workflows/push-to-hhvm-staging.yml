@@ -22,6 +22,7 @@ jobs:
           aws-region: us-west-2
       - run: |
           set -ex
+          set -o pipefail
           eval "$(ssh-agent)"
-          aws kms decrypt --ciphertext-blob "fileb://$PWD/staging-repo-key.kms-ciphertext" --query Plaintext --output text | ssh-add -
+          aws kms decrypt --ciphertext-blob "fileb://$PWD/staging-repo-key.kms-ciphertext" --query Plaintext --output text | base64 --decode | ssh-add -
           git push git@github.com:hhvm/hhvm-staging.git ${{github.ref_name}}      
