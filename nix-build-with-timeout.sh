@@ -6,7 +6,7 @@ timeout 1800 \
   nix build \
   --print-build-logs \
   --override-input "$GITHUB_WORKSPACE/nixpkgs" github:NixOS/nixpkgs \
-  "git+file://$GITHUB_WORKSPACE/hhvm?submodules=1&shallow=1#${{matrix.package}}"
+  "git+file://$GITHUB_WORKSPACE/hhvm?submodules=1&shallow=1#$1"
 
 TIMEOUT_EXIT_CODE=$?
 
