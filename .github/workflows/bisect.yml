@@ -38,8 +38,4 @@ jobs:
         git bisect start \
           31d567846255e122846548255101980162bbf641 \
           91d1eb9f2a9c4e3c9d68a59f6c0cada8c63d5340
-        git bisect run \
-          nix build \
-          --print-build-logs \
-          --override-input "$GITHUB_WORKSPACE/nixpkgs" github:NixOS/nixpkgs \
-          "git+file://$GITHUB_WORKSPACE/hhvm?submodules=1&shallow=1#${{matrix.package}}"
+        git bisect run $GITHUB_WORKSPACE/hhvm/nix-build-with-timeout.sh
