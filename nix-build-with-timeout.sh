@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+nix store gc
+
 timeout 1800 \
   nix build \
   --print-build-logs \
