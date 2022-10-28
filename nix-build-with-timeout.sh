@@ -2,7 +2,7 @@
 
 nix store gc
 
-timeout 3600 \
+timeout 1800 \
   nix build \
   --no-out-link \
   --print-build-logs \
