@@ -6,7 +6,7 @@ timeout 1800 \
   nix build \
   --no-link \
   --print-build-logs \
-  --override-input nixpkgs "git+file://$GITHUB_WORKSPACE/nixpkgs&shallow=1" \
+  --override-input nixpkgs "git+file://$GITHUB_WORKSPACE/nixpkgs?shallow=1" \
   "git+file://$GITHUB_WORKSPACE/hhvm?submodules=1&shallow=1#$1"
 
 TIMEOUT_EXIT_CODE=$?
