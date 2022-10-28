@@ -6,7 +6,7 @@ timeout 3600 \
   nix build \
   --no-out-link \
   --print-build-logs \
-  --override-input "$GITHUB_WORKSPACE/nixpkgs" github:NixOS/nixpkgs \
+  --override-input nixpkgs "git+file://$GITHUB_WORKSPACE/nixpkgs" \
   "git+file://$GITHUB_WORKSPACE/hhvm?submodules=1&shallow=1#$1"
 
 TIMEOUT_EXIT_CODE=$?
