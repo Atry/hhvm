@@ -4,6 +4,7 @@ nix store gc
 
 timeout 1800 \
   nix build \
+  --no-out-link \
   --print-build-logs \
   --override-input "$GITHUB_WORKSPACE/nixpkgs" github:NixOS/nixpkgs \
   "git+file://$GITHUB_WORKSPACE/hhvm?submodules=1&shallow=1#$1"
