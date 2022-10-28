@@ -11,9 +11,9 @@ timeout 1800 \
 
 TIMEOUT_EXIT_CODE=$?
 
-if [[ "$TIMEOUT_EXIT_CODE" == 124 ]]
+if [[ "$TIMEOUT_EXIT_CODE" == 124 || "$TIMEOUT_EXIT_CODE" == 0 ]]
 then
   exit 0
 else
-  exit "$TIMEOUT_EXIT_CODE"
+  exit 1
 fi
